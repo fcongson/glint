@@ -5,6 +5,7 @@ struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     /// (device point 0...1, point in the preview view's coordinates)
     var onTap: ((CGPoint, CGPoint) -> Void)? = nil
+    var onLayerReady: ((AVCaptureVideoPreviewLayer) -> Void)? = nil
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
@@ -28,10 +29,11 @@ struct CameraPreview: UIViewRepresentable {
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
         v.previewLayer.session = session
-        v.previewLayer.videoGravity = .resizeAspectFill
+        v.previewLayer.videoGravity = .resizeAspect   // show the whole frame when the sensor image is landscape in the portrait box
         context.coordinator.onTap = onTap
         v.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator,
                                                       action: #selector(Coordinator.handleTap(_:))))
+        onLayerReady?(v.previewLayer)
         return v
     }
 

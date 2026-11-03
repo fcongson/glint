@@ -49,6 +49,11 @@ final class CameraController: NSObject, ObservableObject {
     @Published var lastThumbnail: UIImage?
     private var wbTint: Float = 0
 
+    // Orientation: tracks device rotation so preview, photos and video are upright.
+    private weak var previewLayer: AVCaptureVideoPreviewLayer?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservation: NSKeyValueObservation?
+
     override init() {
         super.init()
         NotificationCenter.default.addObserver(forName: AVCaptureDevice.subjectAreaDidChangeNotification,
@@ -69,6 +74,33 @@ final class CameraController: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+        previewLayer = layer
+        updateRotationCoordinator()
+    }
+
+    /// Rebuilt whenever the active device changes, since the coordinator is tied to one device.
+    private func updateRotationCoordinator() {
+        sessionQueue.async {
+            guard let d = self.device else { return }
+            DispatchQueue.main.async {
+                guard let layer = self.previewLayer else { return }
+                let coordinator = AVCaptureDevice.RotationCoordinator(device: d, previewLayer: layer)
+                self.rotationCoordinator = coordinator
+                self.applyPreviewRotation(coordinator)
+                self.rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.new]) { [weak self] c, _ in
+                    DispatchQueue.main.async { self?.applyPreviewRotation(c) }
+                }
+            }
+        }
+    }
+
+    private func applyPreviewRotation(_ c: AVCaptureDevice.RotationCoordinator) {
+        guard let conn = previewLayer?.connection else { return }
+        let angle = c.videoRotationAngleForHorizonLevelPreview
+        if conn.isVideoRotationAngleSupported(angle) { conn.videoRotationAngle = angle }
     }
 
     private func configure(withAudio: Bool) {
@@ -132,6 +164,7 @@ final class CameraController: NSObject, ObservableObject {
             self.lenses = list
             self.currentLensID = wideID
         }
+        updateRotationCoordinator()
     }
 
     /// Per-lens setup: distortion correction off, stabilization off, refresh ranges and aperture.
@@ -178,6 +211,7 @@ final class CameraController: NSObject, ObservableObject {
             guard let current = self.device else { return }
             self.applyDeviceSettings(current)
             let id = current.uniqueID
+            self.updateRotationCoordinator()
             DispatchQueue.main.async {
                 self.currentLensID = id
                 if wasManual { self.setManual(true, keepWhiteBalance: true) }   // re-lock exposure/WB/focus on the new lens
@@ -336,8 +370,12 @@ final class CameraController: NSObject, ObservableObject {
 
     func capturePhoto() {
         let wantRAW = captureRAW
+        let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
         captureStartTime = CFAbsoluteTimeGetCurrent()
         sessionQueue.async {
+            if let angle, let conn = self.photoOutput.connection(with: .video), conn.isVideoRotationAngleSupported(angle) {
+                conn.videoRotationAngle = angle
+            }
             let settings: AVCapturePhotoSettings
             if wantRAW,
                let fmt = self.photoOutput.availableRawPhotoPixelFormatTypes
@@ -355,10 +393,14 @@ final class CameraController: NSObject, ObservableObject {
     // MARK: Video
 
     func toggleRecording() {
+        let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
         sessionQueue.async {
             if self.movieOutput.isRecording {
                 self.movieOutput.stopRecording()
             } else {
+                if let angle, let conn = self.movieOutput.connection(with: .video), conn.isVideoRotationAngleSupported(angle) {
+                    conn.videoRotationAngle = angle
+                }
                 let url = FileManager.default.temporaryDirectory
                     .appendingPathComponent("clip-\(Int(Date().timeIntervalSince1970)).mov")
                 self.movieOutput.startRecording(to: url, recordingDelegate: self)
@@ -429,7 +471,7 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
             f.isDraftModeEnabled = true   // review thumbnail only: favour speed over final-quality decode
             ci = f.outputImage
         } else {
-            ci = CIImage(data: data)
+            ci = CIImage(data: data, options: [.applyOrientationProperty: true])
         }
         guard var img = ci else { return nil }
         let scale = 1400 / max(img.extent.width, img.extent.height)

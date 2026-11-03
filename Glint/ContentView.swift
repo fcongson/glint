@@ -3,6 +3,7 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var cam = CameraController()
+    @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
     @State private var selected: Param = .shutter
     @State private var shutterT: Double = 0.45   // position on log scale
     @State private var flash = false
@@ -20,40 +21,21 @@ struct ContentView: View {
     private func position(from denom: Double) -> Double { log(denom / minDenom) / log(maxDenom / minDenom) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            ZStack {
-                CameraPreview(session: cam.session) { devicePoint, layerPoint in
-                    cam.focus(at: devicePoint)
-                    focusPoint = layerPoint
-                    focusTapCount += 1
-                    let n = focusTapCount
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                        if focusTapCount == n { focusPoint = nil }
-                    }
-                }
-                if let p = focusPoint {
-                    FocusBox().id(focusTapCount).position(p)
-                }
-                Color.white.opacity(flash ? 0.85 : 0).allowsHitTesting(false)
-            }
-            .aspectRatio(3.0 / 4.0, contentMode: .fit)
-            .clipped()
-            .overlay(alignment: .topTrailing) {
-                if showHistogram {
-                    HistogramContainer(model: cam.histogramModel)
-                        .padding(8)
-                        .allowsHitTesting(false)
-                }
-            }
-            Spacer(minLength: 0)
-            controls
+        GeometryReader { geo in
+            content(topPadding: topBarPadding(safeTop: geo.safeAreaInsets.top))
         }
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .onAppear {
             cam.start()
             shutterT = position(from: cam.shutterDenominator)
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            updateAngle(for: UIDevice.current.orientation)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            updateAngle(for: UIDevice.current.orientation)
         }
         .onChange(of: cam.iso) { _, _ in cam.applyExposure() }
         .onChange(of: cam.shutterDenominator) { _, _ in cam.applyExposure() }
@@ -66,40 +48,103 @@ struct ContentView: View {
         }
     }
 
+    /// With the status bar hidden the top bar runs up beside the Dynamic Island; on notched or flat-top
+    /// screens it stays below the safe area instead.
+    private func topBarPadding(safeTop: CGFloat) -> CGFloat {
+        safeTop >= 51 ? 15 : safeTop + 10
+    }
+
+    private func content(topPadding: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            topBar(topPadding: topPadding)
+            ZStack {
+                CameraPreview(session: cam.session, onTap: { devicePoint, layerPoint in
+                    cam.focus(at: devicePoint)
+                    focusPoint = layerPoint
+                    focusTapCount += 1
+                    let n = focusTapCount
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        if focusTapCount == n { focusPoint = nil }
+                    }
+                }, onLayerReady: { cam.attachPreviewLayer($0) })
+                if let p = focusPoint {
+                    FocusBox().id(focusTapCount).position(p)
+                }
+                Color.white.opacity(flash ? 0.85 : 0).allowsHitTesting(false)
+            }
+            .aspectRatio(3.0 / 4.0, contentMode: .fit)
+            .clipped()
+            .overlay(alignment: .topTrailing) {
+                if showHistogram {
+                    HistogramContainer(model: cam.histogramModel)
+                        .rotationEffect(uiAngle)
+                        .padding(8)
+                        .allowsHitTesting(false)
+                }
+            }
+            Spacer(minLength: 0)
+            controls
+        }
+        .ignoresSafeArea(edges: .top)
+    }
+
+    /// The interface is locked to portrait; like the system Camera, only the contents rotate with the device.
+    private func updateAngle(for orientation: UIDeviceOrientation) {
+        let target: Angle
+        switch orientation {
+        case .landscapeLeft: target = .degrees(90)
+        case .landscapeRight: target = .degrees(-90)
+        case .portraitUpsideDown: target = .degrees(180)
+        case .portrait: target = .zero
+        default: return   // face up/down/unknown: keep the current angle
+        }
+        // Take the shortest path, so 90 -> -90 doesn't spin through 180 the long way.
+        var delta = (target - uiAngle).degrees.truncatingRemainder(dividingBy: 360)
+        if delta > 180 { delta -= 360 } else if delta < -180 { delta += 360 }
+        withAnimation(.easeInOut(duration: 0.3)) { uiAngle += .degrees(delta) }
+    }
+
     // MARK: Top bar
 
-    private var topBar: some View {
+    /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear.
+    private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 10) {
             chip("RAW", on: cam.captureRAW) { cam.captureRAW.toggle() }
             chip("M", on: cam.manual) {
                 cam.manual.toggle()
                 cam.setManual(cam.manual)
             }
-            chip("HIST", on: showHistogram) {
-                showHistogram.toggle()
-                cam.setHistogramEnabled(showHistogram)
-            }
-            Spacer()
+            Spacer(minLength: 140)
             if cam.isRecording {
                 HStack(spacing: 6) {
                     Circle().fill(.red).frame(width: 8, height: 8)
                     Text("REC").font(.system(size: 12, weight: .semibold, design: .monospaced))
                 }
                 .foregroundStyle(Color.red)
+                .rotationEffect(uiAngle)
             } else if !cam.status.isEmpty {
                 Text(cam.status)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Color.white.opacity(0.7))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .rotationEffect(uiAngle)
             } else if !cam.timing.isEmpty {
                 Text(cam.timing)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Color.white.opacity(0.5))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .rotationEffect(uiAngle)
+            }
+            chip("HIST", on: showHistogram) {
+                showHistogram.toggle()
+                cam.setHistogramEnabled(showHistogram)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.top, topPadding)
+        .padding(.bottom, 10)
     }
 
     private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
@@ -110,6 +155,7 @@ struct ContentView: View {
                 .padding(.vertical, 5)
                 .foregroundStyle(on ? Color.black : Color.white)
                 .background(on ? Color.yellow : Color.white.opacity(0.15), in: Capsule())
+                .rotationEffect(uiAngle)
         }
     }
 
@@ -163,6 +209,7 @@ struct ContentView: View {
                     .font(.system(size: 19, weight: .semibold, design: .monospaced))
                     .foregroundStyle(selected == p ? Color.yellow : Color.white)
             }
+            .rotationEffect(uiAngle)
         }
     }
 
@@ -175,6 +222,7 @@ struct ContentView: View {
                 .font(.system(size: 19, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color.white)
         }
+        .rotationEffect(uiAngle)
     }
 
     private var lensPicker: some View {
@@ -187,6 +235,7 @@ struct ContentView: View {
                         .frame(width: 44, height: 32)
                         .foregroundStyle(on ? Color.black : Color.white)
                         .background(on ? Color.yellow : Color.white.opacity(0.15), in: Capsule())
+                        .rotationEffect(uiAngle)
                 }
             }
         }
@@ -219,11 +268,13 @@ struct ContentView: View {
                 }
             }
             .frame(width: 48, height: 48)
+            .clipped()
+            .rotationEffect(uiAngle)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }
         .disabled(cam.lastThumbnail == nil)
-        .sheet(isPresented: $showReview) { ReviewView(image: cam.lastThumbnail) }
+        .fullScreenCover(isPresented: $showReview) { ReviewView(image: cam.lastThumbnail, angle: uiAngle) }
     }
 
     private var recordButton: some View {
@@ -296,20 +347,30 @@ struct HistogramView: View {
     }
 }
 
+/// Full-screen photo review; tap anywhere to close.
 struct ReviewView: View {
     let image: UIImage?
+    let angle: Angle   // device rotation; the screen stays portrait, so the image turns instead
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(spacing: 12) {
-                if let image {
-                    Image(uiImage: image).resizable().scaledToFit()
+                .onTapGesture { dismiss() }
+            if let image {
+                GeometryReader { geo in
+                    // At a quarter turn the image's width runs along the screen's height, so swap the box before rotating.
+                    let quarterTurn = Int((angle.degrees / 90).rounded()) % 2 != 0
+                    let box = quarterTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: box.width, height: box.height)
+                        .rotationEffect(angle)
+                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 }
-                Text("Rendered from the saved file with Apple's default RAW render")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.6))
-                    .padding(.bottom, 12)
+                .animation(.easeInOut(duration: 0.3), value: angle)
+                .onTapGesture { dismiss() }
             }
         }
     }
