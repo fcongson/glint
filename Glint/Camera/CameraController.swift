@@ -1,5 +1,4 @@
 import AVFoundation
-import Combine
 import CoreImage
 import ImageIO
 import Photos
@@ -59,72 +58,74 @@ struct Shot: Identifiable {
 }
 
 /// Separate from the controller so histogram updates redraw only the histogram, not the whole screen.
-final class HistogramModel: ObservableObject {
-    @Published var bins: [Float] = []
-    @Published var clipHigh: Float = 0
-    @Published var clipLow: Float = 0
+@Observable
+final class HistogramModel {
+    var bins: [Float] = []
+    var clipHigh: Float = 0
+    var clipLow: Float = 0
 }
 
-final class CameraController: NSObject, ObservableObject {
+/// UI-facing properties are observed by SwiftUI and only written on the main queue.
+/// Everything else is internal capture state touched from the session/analysis queues, so it's excluded from tracking.
+@Observable
+final class CameraController: NSObject {
     let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "glint.session")
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private let videoDataOutput = AVCaptureVideoDataOutput()
     private let analysisQueue = DispatchQueue(label: "glint.analysis")
-    private var lastHistogramTime: Double = 0
+    @ObservationIgnored private var lastHistogramTime: Double = 0
     private let ciContext = CIContext()
-    private var device: AVCaptureDevice?
-    private var videoInput: AVCaptureDeviceInput?
-    private var lensDevices: [String: AVCaptureDevice] = [:]
+    @ObservationIgnored private var device: AVCaptureDevice?
+    @ObservationIgnored private var videoInput: AVCaptureDeviceInput?
+    @ObservationIgnored private var lensDevices: [String: AVCaptureDevice] = [:]
 
     // UI state
-    @Published var captureRAW = true
-    @Published var manual = false
-    @Published var iso: Float = 100
-    @Published var shutterDenominator: Double = 125   // 1/x seconds
-    @Published var minISO: Float = 25
-    @Published var maxISO: Float = 1600
-    @Published var isRecording = false
-    @Published var status = ""
-    @Published var lenses: [Lens] = []
-    @Published var currentLensID = ""
-    @Published var aperture: Float = 0
-    @Published var whiteBalanceKelvin: Float = 5500
+    var captureRAW = true
+    var manual = false
+    var iso: Float = 100
+    var shutterDenominator: Double = 125   // 1/x seconds
+    var minISO: Float = 25
+    var maxISO: Float = 1600
+    var isRecording = false
+    var status = ""
+    var lenses: [Lens] = []
+    var currentLensID = ""
+    var aperture: Float = 0
+    var whiteBalanceKelvin: Float = 5500
     let histogramModel = HistogramModel()
-    @Published var timing = ""
-    @Published var lastThumbnail: UIImage?
-    @Published var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
+    var timing = ""
+    var lastThumbnail: UIImage?
+    var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
     private let maxShots = 30           // review images are ~1400px bitmaps, so keep memory bounded
-    private var wbTint: Float = 0
-    private var hasStarted = false
+    @ObservationIgnored private var wbTint: Float = 0
+    @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var subjectAreaObserver: NSObjectProtocol?
 
     /// Per-capture details keyed by `AVCapturePhotoSettings.uniqueID`: several captures can be in flight at once,
     /// and the delegate runs on its own queue, so this is lock-protected rather than a single shared property.
     private struct PendingCapture { let start: CFAbsoluteTime; let whiteBalance: String }
-    private var pendingCaptures: [Int64: PendingCapture] = [:]
+    @ObservationIgnored private var pendingCaptures: [Int64: PendingCapture] = [:]
     private let pendingLock = NSLock()
 
     // Orientation: tracks device rotation so preview, photos and video are upright.
-    private weak var previewLayer: AVCaptureVideoPreviewLayer?
-    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
-    private var rotationObservation: NSKeyValueObservation?
-
-    override init() {
-        super.init()
-        NotificationCenter.default.addObserver(forName: AVCaptureDevice.subjectAreaDidChangeNotification,
-                                               object: nil, queue: .main) { [weak self] _ in
-            self?.resumeContinuousFocus()
-        }
-    }
+    @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
+    @ObservationIgnored private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    @ObservationIgnored private var rotationObservation: NSKeyValueObservation?
 
     // MARK: Setup
 
     /// Safe to call more than once (e.g. `onAppear` firing again after the review cover closes);
     /// only the first call configures the session, so inputs aren't added twice.
+    /// Side effects live here rather than in `init`, because `@State` may construct throwaway instances.
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        subjectAreaObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.resumeContinuousFocus()
+        }
         AVCaptureDevice.requestAccess(for: .video) { granted in
             guard granted else { self.post("Camera access denied"); return }
             AVCaptureDevice.requestAccess(for: .audio) { micGranted in

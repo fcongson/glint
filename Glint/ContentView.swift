@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
-    @StateObject private var cam = CameraController()
+    @State private var cam = CameraController()
     @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
     @State private var selected: Param = .shutter
     @State private var flash = false
@@ -70,13 +70,15 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-        .onAppear {
-            cam.start()
+        .onAppear { cam.start() }
+        .task {
+            // Cancelled automatically when the view goes away, which balances the begin/end calls.
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            defer { UIDevice.current.endGeneratingDeviceOrientationNotifications() }
             updateAngle(for: UIDevice.current.orientation)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            updateAngle(for: UIDevice.current.orientation)
+            for await _ in NotificationCenter.default.notifications(named: UIDevice.orientationDidChangeNotification) {
+                updateAngle(for: UIDevice.current.orientation)
+            }
         }
         .onChange(of: cam.iso) { _, _ in cam.applyExposure() }
         .onChange(of: cam.shutterDenominator) { _, _ in cam.applyExposure() }
@@ -385,7 +387,7 @@ struct FocusBox: View {
 }
 
 struct HistogramContainer: View {
-    @ObservedObject var model: HistogramModel
+    let model: HistogramModel
 
     var body: some View {
         if !model.bins.isEmpty {
