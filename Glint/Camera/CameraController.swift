@@ -122,6 +122,8 @@ final class CameraController: NSObject, ObservableObject {
                 self.sessionQueue.async {
                     self.configure(withAudio: micGranted)
                     self.session.startRunning()
+                    // The mic input puts the audio session in record mode, which silences the Taptic Engine by default.
+                    try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
                 }
             }
         }

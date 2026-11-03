@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
     @State private var selected: Param = .shutter
     @State private var flash = false
+    @State private var shutterTaps = 0
     @State private var focusPoint: CGPoint?
     @State private var focusTapCount = 0
     @State private var showHistogram = false
@@ -32,16 +33,33 @@ struct ContentView: View {
         stops.indices.min(by: { abs(stops[$0] - value) < abs(stops[$1] - value) }) ?? 0
     }
 
-    private var isoIndex: Binding<Double> {
+    private var isoIndex: Binding<Int> {
         Binding(
-            get: { Double(nearestIndex(of: cam.iso, in: availableISOStops)) },
-            set: { cam.iso = availableISOStops[min(max(Int($0.rounded()), 0), availableISOStops.count - 1)] })
+            get: { nearestIndex(of: cam.iso, in: availableISOStops) },
+            set: { cam.iso = availableISOStops[min(max($0, 0), availableISOStops.count - 1)] })
     }
 
-    private var shutterIndex: Binding<Double> {
+    private var shutterIndex: Binding<Int> {
         Binding(
-            get: { Double(nearestIndex(of: cam.shutterDenominator, in: shutterStops)) },
-            set: { cam.shutterDenominator = shutterStops[min(max(Int($0.rounded()), 0), shutterStops.count - 1)] })
+            get: { nearestIndex(of: cam.shutterDenominator, in: shutterStops) },
+            set: { cam.shutterDenominator = shutterStops[min(max($0, 0), shutterStops.count - 1)] })
+    }
+
+    // White balance runs 2000-10000K in 100K steps.
+    private static let wbStopCount = 81
+
+    private var wbIndex: Binding<Int> {
+        Binding(
+            get: { min(max(Int(((cam.whiteBalanceKelvin - 2000) / 100).rounded()), 0), Self.wbStopCount - 1) },
+            set: { cam.whiteBalanceKelvin = 2000 + 100 * Float(min(max($0, 0), Self.wbStopCount - 1)) })
+    }
+
+    /// Full-stop ISO values (50, 100, 200, 400 ...) get the long ticks.
+    private func isISOFullStop(_ i: Int) -> Bool {
+        let stops = availableISOStops
+        guard stops.indices.contains(i) else { return false }
+        let s = log2(Double(stops[i]) / 100)
+        return abs(s - s.rounded()) < 0.1
     }
 
     var body: some View {
@@ -200,15 +218,20 @@ struct ContentView: View {
                 }
                 Group {
                     if selected == .iso {
-                        Slider(value: isoIndex, in: 0...Double(max(availableISOStops.count - 1, 1)), step: 1)
+                        RulerPicker(count: availableISOStops.count, index: isoIndex, isMajor: isISOFullStop,
+                                    label: "ISO", valueText: "\(Int(cam.iso))")
+                            .id("iso-\(availableISOStops.count)")
                     } else if selected == .wb {
                         wbPresetPicker
-                        Slider(value: $cam.whiteBalanceKelvin, in: 2000...10000, step: 100)
+                        RulerPicker(count: Self.wbStopCount, index: wbIndex, isMajor: { $0 % 10 == 0 },
+                                    label: "White balance", valueText: "\(Int(cam.whiteBalanceKelvin)) kelvin")
+                            .id("wb")
                     } else {
-                        Slider(value: shutterIndex, in: 0...Double(shutterStops.count - 1), step: 1)
+                        RulerPicker(count: shutterStops.count, index: shutterIndex,
+                                    label: "Shutter speed", valueText: "1/\(Int(cam.shutterDenominator))")
+                            .id("shutter")
                     }
                 }
-                .tint(Color.yellow)
                 .padding(.horizontal, 28)
             }
 
@@ -290,7 +313,7 @@ struct ContentView: View {
 
     private var shutterButton: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            shutterTaps += 1
             withAnimation(.easeOut(duration: 0.08)) { flash = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 withAnimation(.easeIn(duration: 0.2)) { flash = false }
@@ -303,6 +326,7 @@ struct ContentView: View {
             }
         }
         .buttonStyle(PressScaleStyle())
+        .sensoryFeedback(.impact(flexibility: .rigid, intensity: 1.0), trigger: shutterTaps)
     }
 
     private var thumbnailButton: some View {
