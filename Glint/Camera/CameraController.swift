@@ -93,12 +93,17 @@ final class CameraController: NSObject, ObservableObject {
     @Published var whiteBalanceKelvin: Float = 5500
     let histogramModel = HistogramModel()
     @Published var timing = ""
-    private var captureStartTime: CFAbsoluteTime = 0
     @Published var lastThumbnail: UIImage?
     @Published var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
     private let maxShots = 30           // review images are ~1400px bitmaps, so keep memory bounded
-    private var captureWhiteBalance = "Auto"
     private var wbTint: Float = 0
+    private var hasStarted = false
+
+    /// Per-capture details keyed by `AVCapturePhotoSettings.uniqueID`: several captures can be in flight at once,
+    /// and the delegate runs on its own queue, so this is lock-protected rather than a single shared property.
+    private struct PendingCapture { let start: CFAbsoluteTime; let whiteBalance: String }
+    private var pendingCaptures: [Int64: PendingCapture] = [:]
+    private let pendingLock = NSLock()
 
     // Orientation: tracks device rotation so preview, photos and video are upright.
     private weak var previewLayer: AVCaptureVideoPreviewLayer?
@@ -115,7 +120,11 @@ final class CameraController: NSObject, ObservableObject {
 
     // MARK: Setup
 
+    /// Safe to call more than once (e.g. `onAppear` firing again after the review cover closes);
+    /// only the first call configures the session, so inputs aren't added twice.
     func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
         AVCaptureDevice.requestAccess(for: .video) { granted in
             guard granted else { self.post("Camera access denied"); return }
             AVCaptureDevice.requestAccess(for: .audio) { micGranted in
@@ -288,7 +297,9 @@ final class CameraController: NSObject, ObservableObject {
             do {
                 try d.lockForConfiguration()
                 if on {
-                    d.setExposureModeCustom(duration: self.clampedDuration(denom, d), iso: self.clampedISO(isoValue, d), completionHandler: nil)
+                    if d.isExposureModeSupported(.custom) {   // setExposureModeCustom raises if unsupported
+                        d.setExposureModeCustom(duration: self.clampedDuration(denom, d), iso: self.clampedISO(isoValue, d), completionHandler: nil)
+                    }
                     if d.isWhiteBalanceModeSupported(.locked) {
                         if keepWhiteBalance {
                             // e.g. after a lens switch: re-apply the temperature the user chose
@@ -318,7 +329,7 @@ final class CameraController: NSObject, ObservableObject {
         guard manual else { return }
         let isoValue = iso, denom = shutterDenominator
         sessionQueue.async {
-            guard let d = self.device else { return }
+            guard let d = self.device, d.isExposureModeSupported(.custom) else { return }
             do {
                 try d.lockForConfiguration()
                 d.setExposureModeCustom(duration: self.clampedDuration(denom, d), iso: self.clampedISO(isoValue, d), completionHandler: nil)
@@ -431,8 +442,8 @@ final class CameraController: NSObject, ObservableObject {
     func capturePhoto() {
         let wantRAW = captureRAW
         let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
-        captureStartTime = CFAbsoluteTimeGetCurrent()
-        captureWhiteBalance = manual ? "\(Int(whiteBalanceKelvin))K" : "Auto"
+        let pending = PendingCapture(start: CFAbsoluteTimeGetCurrent(),
+                                     whiteBalance: manual ? "\(Int(whiteBalanceKelvin))K" : "Auto")
         sessionQueue.async {
             if let angle, let conn = self.photoOutput.connection(with: .video), conn.isVideoRotationAngleSupported(angle) {
                 conn.videoRotationAngle = angle
@@ -447,6 +458,7 @@ final class CameraController: NSObject, ObservableObject {
                 settings.photoQualityPrioritization = .speed
                 if wantRAW { self.post("Bayer RAW unavailable, saving HEIC") }
             }
+            self.pendingLock.withLock { self.pendingCaptures[settings.uniqueID] = pending }
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -472,13 +484,19 @@ final class CameraController: NSObject, ObservableObject {
 
     // MARK: Saving
 
-    private func timestamp() -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"; return f.string(from: Date())
-    }
+    private static let timestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        return f
+    }()
 
-    private func saveToDocuments(_ data: Data, ext: String) {
+    /// The capture ID keeps names unique when several shots land in the same second.
+    private func saveToDocuments(_ data: Data, ext: String, captureID: Int64) {
         guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        try? data.write(to: dir.appendingPathComponent("IMG-\(timestamp()).\(ext)"))
+        let name = "IMG-\(Self.timestampFormatter.string(from: Date()))-\(captureID).\(ext)"
+        do { try data.write(to: dir.appendingPathComponent(name)) }
+        catch { post("Save failed: \(error.localizedDescription)") }
     }
 
     private func saveToPhotos(data: Data, uti: String?) {
@@ -500,14 +518,17 @@ final class CameraController: NSObject, ObservableObject {
 
 extension CameraController: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        let captureID = photo.resolvedSettings.uniqueID
+        let pending = pendingLock.withLock { pendingCaptures.removeValue(forKey: captureID) }
         if let error { post("Capture error: \(error.localizedDescription)"); return }
         guard let data = photo.fileDataRepresentation() else { return }
         let raw = photo.isRawPhoto
-        let shotTime = CFAbsoluteTimeGetCurrent() - captureStartTime
-        let info = PhotoInfo(metadata: photo.metadata, format: raw ? "RAW" : "HEIC", whiteBalance: captureWhiteBalance)
+        let shotTime = pending.map { CFAbsoluteTimeGetCurrent() - $0.start } ?? 0
+        let info = PhotoInfo(metadata: photo.metadata, format: raw ? "RAW" : "HEIC",
+                             whiteBalance: pending?.whiteBalance ?? "Auto")
         // Keep the capture callback queue free: saving and rendering the review image both happen off to the side.
         DispatchQueue.global(qos: .utility).async {
-            self.saveToDocuments(data, ext: raw ? "dng" : "heic")
+            self.saveToDocuments(data, ext: raw ? "dng" : "heic", captureID: captureID)
             self.saveToPhotos(data: data, uti: raw ? "com.adobe.raw-image" : nil)
         }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -528,21 +549,25 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
     }
 
     fileprivate func makePreviewImage(from data: Data, raw: Bool) -> UIImage? {
-        let ci: CIImage?
-        if raw {
-            // Decode at review size instead of the full 12MP.
-            guard let f = CIRAWFilter(imageData: data, identifierHint: "com.adobe.raw-image") else { return nil }
-            let longest = max(f.nativeSize.width, f.nativeSize.height)
-            if longest > 0 { f.scaleFactor = Float(min(1, 1400 / longest)) }
-            f.isDraftModeEnabled = true   // review thumbnail only: favour speed over final-quality decode
-            ci = f.outputImage
-        } else {
-            ci = CIImage(data: data, options: [.applyOrientationProperty: true])
+        let maxSide: CGFloat = 1400
+        guard raw else {
+            // ImageIO decodes straight to review size (and applies orientation) without materialising the full 12MP bitmap.
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxSide
+            ]
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+                  let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+            return UIImage(cgImage: cg)
         }
-        guard var img = ci else { return nil }
-        let scale = 1400 / max(img.extent.width, img.extent.height)
-        img = img.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        guard let cg = ciContext.createCGImage(img, from: img.extent) else { return nil }
+        // Decode at review size instead of the full 12MP.
+        guard let f = CIRAWFilter(imageData: data, identifierHint: "com.adobe.raw-image") else { return nil }
+        let longest = max(f.nativeSize.width, f.nativeSize.height)
+        if longest > 0 { f.scaleFactor = Float(min(1, maxSide / longest)) }
+        f.isDraftModeEnabled = true   // review thumbnail only: favour speed over final-quality decode
+        guard let img = f.outputImage,
+              let cg = ciContext.createCGImage(img, from: img.extent) else { return nil }
         return UIImage(cgImage: cg)
     }
 }
@@ -596,7 +621,11 @@ extension CameraController: AVCaptureFileOutputRecordingDelegate {
             try? FileManager.default.copyItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
         }
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { auth in
-            guard auth == .authorized || auth == .limited else { return }
+            guard auth == .authorized || auth == .limited else {
+                self.post("Photos access denied")
+                try? FileManager.default.removeItem(at: url)   // the Documents copy is kept
+                return
+            }
             PHPhotoLibrary.shared().performChanges({
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
             }) { ok, _ in
