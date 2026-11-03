@@ -5,7 +5,6 @@ struct ContentView: View {
     @StateObject private var cam = CameraController()
     @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
     @State private var selected: Param = .shutter
-    @State private var shutterT: Double = 0.45   // position on log scale
     @State private var flash = false
     @State private var focusPoint: CGPoint?
     @State private var focusTapCount = 0
@@ -14,11 +13,36 @@ struct ContentView: View {
 
     enum Param { case iso, shutter, wb }
 
-    private let minDenom = 15.0
-    private let maxDenom = 4000.0
+    // Conventional 1/3-stop series. The device clamps to what the active format supports.
+    private let shutterStops: [Double] = [8, 10, 13, 15, 20, 25, 30, 40, 50, 60, 80, 100, 125, 160, 200, 250, 320, 400, 500,
+                                          640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000]
+    private let isoStops: [Float] = [50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600,
+                                     2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25000, 32000, 40000, 50000]
+    private let wbPresets: [(name: String, kelvin: Float)] = [
+        ("Tungsten", 3200), ("Fluor.", 4000), ("Daylight", 5500), ("Flash", 5600), ("Cloudy", 6500), ("Shade", 7500)
+    ]
 
-    private func denom(from t: Double) -> Double { minDenom * pow(maxDenom / minDenom, t) }
-    private func position(from denom: Double) -> Double { log(denom / minDenom) / log(maxDenom / minDenom) }
+    /// ISO stops the current lens can actually reach.
+    private var availableISOStops: [Float] {
+        let stops = isoStops.filter { $0 >= cam.minISO && $0 <= cam.maxISO }
+        return stops.isEmpty ? [cam.minISO] : stops
+    }
+
+    private func nearestIndex<T: BinaryFloatingPoint>(of value: T, in stops: [T]) -> Int {
+        stops.indices.min(by: { abs(stops[$0] - value) < abs(stops[$1] - value) }) ?? 0
+    }
+
+    private var isoIndex: Binding<Double> {
+        Binding(
+            get: { Double(nearestIndex(of: cam.iso, in: availableISOStops)) },
+            set: { cam.iso = availableISOStops[min(max(Int($0.rounded()), 0), availableISOStops.count - 1)] })
+    }
+
+    private var shutterIndex: Binding<Double> {
+        Binding(
+            get: { Double(nearestIndex(of: cam.shutterDenominator, in: shutterStops)) },
+            set: { cam.shutterDenominator = shutterStops[min(max(Int($0.rounded()), 0), shutterStops.count - 1)] })
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -30,7 +54,6 @@ struct ContentView: View {
         .persistentSystemOverlays(.hidden)
         .onAppear {
             cam.start()
-            shutterT = position(from: cam.shutterDenominator)
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             updateAngle(for: UIDevice.current.orientation)
         }
@@ -76,8 +99,13 @@ struct ContentView: View {
             .clipped()
             .overlay(alignment: .topTrailing) {
                 if showHistogram {
+                    // rotationEffect doesn't change layout, so reserve the rotated footprint to keep it inside the corner.
+                    let quarterTurn = Int((uiAngle.degrees / 90).rounded()) % 2 != 0
+                    let size = HistogramView.size
                     HistogramContainer(model: cam.histogramModel)
                         .rotationEffect(uiAngle)
+                        .frame(width: quarterTurn ? size.height : size.width,
+                               height: quarterTurn ? size.width : size.height)
                         .padding(8)
                         .allowsHitTesting(false)
                 }
@@ -172,12 +200,12 @@ struct ContentView: View {
                 }
                 Group {
                     if selected == .iso {
-                        Slider(value: $cam.iso, in: cam.minISO...cam.maxISO)
+                        Slider(value: isoIndex, in: 0...Double(max(availableISOStops.count - 1, 1)), step: 1)
                     } else if selected == .wb {
-                        Slider(value: $cam.whiteBalanceKelvin, in: 2500...10000, step: 50)
+                        wbPresetPicker
+                        Slider(value: $cam.whiteBalanceKelvin, in: 2000...10000, step: 100)
                     } else {
-                        Slider(value: $shutterT, in: 0...1)
-                            .onChange(of: shutterT) { _, v in cam.shutterDenominator = denom(from: v) }
+                        Slider(value: shutterIndex, in: 0...Double(shutterStops.count - 1), step: 1)
                     }
                 }
                 .tint(Color.yellow)
@@ -197,6 +225,25 @@ struct ContentView: View {
         }
         .padding(.top, 8)
         .padding(.bottom, 20)
+    }
+
+    private var wbPresetPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(wbPresets, id: \.name) { preset in
+                let on = cam.whiteBalanceKelvin == preset.kelvin
+                Button { cam.whiteBalanceKelvin = preset.kelvin } label: {
+                    Text(preset.name)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .foregroundStyle(on ? Color.black : Color.white)
+                        .background(on ? Color.yellow : Color.white.opacity(0.15), in: Capsule())
+                        .rotationEffect(uiAngle)
+                }
+            }
+        }
     }
 
     private func readout(_ label: String, _ value: String, _ p: Param) -> some View {
@@ -327,6 +374,9 @@ struct HistogramView: View {
     let bins: [Float]
     let clipHigh: Float   // fraction of pixels at/near white
     let clipLow: Float    // fraction of pixels at/near black
+
+    /// Total footprint including padding.
+    static let size = CGSize(width: 132, height: 56)
 
     var body: some View {
         Canvas { ctx, size in

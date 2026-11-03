@@ -34,7 +34,7 @@ final class CameraController: NSObject, ObservableObject {
     @Published var captureRAW = true
     @Published var manual = false
     @Published var iso: Float = 100
-    @Published var shutterDenominator: Double = 120   // 1/x seconds
+    @Published var shutterDenominator: Double = 125   // 1/x seconds
     @Published var minISO: Float = 25
     @Published var maxISO: Float = 1600
     @Published var isRecording = false
@@ -240,7 +240,7 @@ final class CameraController: NSObject, ObservableObject {
                             let gains = d.deviceWhiteBalanceGains
                             let tt = d.temperatureAndTintValues(for: gains)
                             self.wbTint = tt.tint
-                            DispatchQueue.main.async { self.whiteBalanceKelvin = min(max(tt.temperature, 2500), 10000) }
+                            DispatchQueue.main.async { self.whiteBalanceKelvin = min(max((tt.temperature / 100).rounded() * 100, 2000), 10000) }
                             d.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
                         }
                     }
