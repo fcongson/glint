@@ -321,7 +321,7 @@ struct ContentView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }
         .disabled(cam.lastThumbnail == nil)
-        .fullScreenCover(isPresented: $showReview) { ReviewView(image: cam.lastThumbnail, angle: uiAngle) }
+        .fullScreenCover(isPresented: $showReview) { ReviewView(shots: cam.shots, angle: uiAngle) }
     }
 
     private var recordButton: some View {
@@ -399,29 +399,94 @@ struct HistogramView: View {
 
 /// Full-screen photo review; tap anywhere to close.
 struct ReviewView: View {
-    let image: UIImage?
+    let shots: [Shot]
     let angle: Angle   // device rotation; the screen stays portrait, so the image turns instead
+    @State private var selection: UUID?
     @Environment(\.dismiss) private var dismiss
+
+    init(shots: [Shot], angle: Angle) {
+        self.shots = shots
+        self.angle = angle
+        _selection = State(initialValue: shots.last?.id)   // open on the newest photo
+    }
+
+    private var current: Shot? { shots.first { $0.id == selection } }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
                 .onTapGesture { dismiss() }
-            if let image {
-                GeometryReader { geo in
-                    // At a quarter turn the image's width runs along the screen's height, so swap the box before rotating.
-                    let quarterTurn = Int((angle.degrees / 90).rounded()) % 2 != 0
-                    let box = quarterTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: box.width, height: box.height)
-                        .rotationEffect(angle)
-                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            // Swipe sideways to move between photos taken this session.
+            TabView(selection: $selection) {
+                ForEach(shots) { shot in
+                    page(shot.image).tag(Optional(shot.id))
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
+            if let info = current?.info {
+                // The strip stays put at the bottom, like the camera buttons; only its contents turn.
+                VStack {
+                    Spacer()
+                    HStack(spacing: 14) {
+                        ForEach(info.rows, id: \.label) { row in
+                            VStack(spacing: 2) {
+                                Text(row.label)
+                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(Color.white.opacity(0.6))
+                                Text(row.value)
+                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(Color.white)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .rotationEffect(angle)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.bottom, 24)
                 }
                 .animation(.easeInOut(duration: 0.3), value: angle)
-                .onTapGesture { dismiss() }
+                .allowsHitTesting(false)
             }
+            // Explicit way back to the camera; the icon turns with the device like the other controls.
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.white.opacity(0.15), in: Circle())
+                            .rotationEffect(angle)
+                            .animation(.easeInOut(duration: 0.3), value: angle)
+                    }
+                    .accessibilityLabel("Back to camera")
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
         }
+    }
+
+    private func page(_ image: UIImage) -> some View {
+        GeometryReader { geo in
+            // At a quarter turn the image's width runs along the screen's height, so swap the box before rotating.
+            let quarterTurn = Int((angle.degrees / 90).rounded()) % 2 != 0
+            let box = quarterTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: box.width, height: box.height)
+                .rotationEffect(angle)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+        .animation(.easeInOut(duration: 0.3), value: angle)
+        .contentShape(Rectangle())
+        .onTapGesture { dismiss() }
     }
 }

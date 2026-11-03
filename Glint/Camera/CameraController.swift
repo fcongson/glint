@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import CoreImage
+import ImageIO
 import Photos
 import SwiftUI
 
@@ -8,6 +9,53 @@ struct Lens: Identifiable, Hashable {
     let id: String      // AVCaptureDevice.uniqueID
     let label: String   // "0.5×", "1×", "3×"
     let zoom: Double
+}
+
+/// Settings a photo was taken with, shown beside it in review.
+struct PhotoInfo {
+    var format: String
+    var iso: String?
+    var shutter: String?
+    var aperture: String?
+    var focalLength: String?
+    var whiteBalance: String
+
+    /// Label/value pairs, skipping anything the photo's metadata didn't report.
+    var rows: [(label: String, value: String)] {
+        var r: [(String, String)] = []
+        if let iso { r.append(("ISO", iso)) }
+        if let shutter { r.append(("SHUTTER", shutter)) }
+        if let aperture { r.append(("APERTURE", aperture)) }
+        if let focalLength { r.append(("FOCAL", focalLength)) }
+        r.append(("WB", whiteBalance))
+        r.append(("FORMAT", format))
+        return r
+    }
+
+    init(metadata: [String: Any], format: String, whiteBalance: String) {
+        self.format = format
+        self.whiteBalance = whiteBalance
+        let exif = metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+        if let isos = exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber], let v = isos.first {
+            iso = "\(v.intValue)"
+        }
+        if let t = (exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue, t > 0 {
+            shutter = t < 1 ? "1/\(Int((1 / t).rounded()))" : String(format: "%gs", t)
+        }
+        if let f = (exif[kCGImagePropertyExifFNumber as String] as? NSNumber)?.doubleValue {
+            aperture = String(format: "\u{0192}/%.1f", f)
+        }
+        if let mm = (exif[kCGImagePropertyExifFocalLenIn35mmFilm as String] as? NSNumber)?.intValue, mm > 0 {
+            focalLength = "\(mm)mm"
+        }
+    }
+}
+
+/// One reviewed photo: the review-size image plus the settings it was taken with.
+struct Shot: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let info: PhotoInfo
 }
 
 /// Separate from the controller so histogram updates redraw only the histogram, not the whole screen.
@@ -47,6 +95,9 @@ final class CameraController: NSObject, ObservableObject {
     @Published var timing = ""
     private var captureStartTime: CFAbsoluteTime = 0
     @Published var lastThumbnail: UIImage?
+    @Published var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
+    private let maxShots = 30           // review images are ~1400px bitmaps, so keep memory bounded
+    private var captureWhiteBalance = "Auto"
     private var wbTint: Float = 0
 
     // Orientation: tracks device rotation so preview, photos and video are upright.
@@ -372,6 +423,7 @@ final class CameraController: NSObject, ObservableObject {
         let wantRAW = captureRAW
         let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
         captureStartTime = CFAbsoluteTimeGetCurrent()
+        captureWhiteBalance = manual ? "\(Int(whiteBalanceKelvin))K" : "Auto"
         sessionQueue.async {
             if let angle, let conn = self.photoOutput.connection(with: .video), conn.isVideoRotationAngleSupported(angle) {
                 conn.videoRotationAngle = angle
@@ -443,6 +495,7 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
         guard let data = photo.fileDataRepresentation() else { return }
         let raw = photo.isRawPhoto
         let shotTime = CFAbsoluteTimeGetCurrent() - captureStartTime
+        let info = PhotoInfo(metadata: photo.metadata, format: raw ? "RAW" : "HEIC", whiteBalance: captureWhiteBalance)
         // Keep the capture callback queue free: saving and rendering the review image both happen off to the side.
         DispatchQueue.global(qos: .utility).async {
             self.saveToDocuments(data, ext: raw ? "dng" : "heic")
@@ -453,7 +506,11 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
             let img = self.makePreviewImage(from: data, raw: raw)
             let render = CFAbsoluteTimeGetCurrent() - t0
             DispatchQueue.main.async {
-                if let img { self.lastThumbnail = img }
+                if let img {
+                    self.lastThumbnail = img
+                    self.shots.append(Shot(image: img, info: info))
+                    if self.shots.count > self.maxShots { self.shots.removeFirst(self.shots.count - self.maxShots) }
+                }
                 #if DEBUG
                 self.timing = String(format: "shot %.1fs · render %.1fs", shotTime, render)   // dev-only readout
                 #endif
