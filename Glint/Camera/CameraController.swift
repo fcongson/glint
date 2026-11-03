@@ -122,11 +122,16 @@ final class CameraController: NSObject, ObservableObject {
                 self.sessionQueue.async {
                     self.configure(withAudio: micGranted)
                     self.session.startRunning()
-                    // The mic input puts the audio session in record mode, which silences the Taptic Engine by default.
-                    try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+                    self.allowHapticsDuringRecording()
                 }
             }
         }
+    }
+
+    /// The mic input puts the audio session in record mode, which silences the Taptic Engine by default.
+    /// Session reconfiguration can reset this, so call it again after every `commitConfiguration()`.
+    private func allowHapticsDuringRecording() {
+        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
     }
 
     func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
@@ -136,10 +141,10 @@ final class CameraController: NSObject, ObservableObject {
 
     /// Rebuilt whenever the active device changes, since the coordinator is tied to one device.
     private func updateRotationCoordinator() {
-        sessionQueue.async {
-            guard let d = self.device else { return }
-            DispatchQueue.main.async {
-                guard let layer = self.previewLayer else { return }
+        sessionQueue.async { [weak self] in
+            guard let self, let d = self.device else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let layer = self.previewLayer else { return }
                 let coordinator = AVCaptureDevice.RotationCoordinator(device: d, previewLayer: layer)
                 self.rotationCoordinator = coordinator
                 self.applyPreviewRotation(coordinator)
@@ -260,6 +265,7 @@ final class CameraController: NSObject, ObservableObject {
                 self.session.addInput(old)   // roll back
             }
             self.session.commitConfiguration()
+            self.allowHapticsDuringRecording()
 
             guard let current = self.device else { return }
             self.applyDeviceSettings(current)
@@ -368,6 +374,7 @@ final class CameraController: NSObject, ObservableObject {
                 self.session.removeOutput(self.videoDataOutput)
             }
             self.session.commitConfiguration()
+            self.allowHapticsDuringRecording()
         }
         if !on {
             DispatchQueue.main.async { self.histogramModel.bins = [] }
