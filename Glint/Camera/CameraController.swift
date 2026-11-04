@@ -66,6 +66,8 @@ final class HistogramModel {
 }
 
 /// UI-facing properties are observed by SwiftUI and only written on the main queue.
+/// They're read-only from outside: views change them through the `set…` methods, which also push the change
+/// to the device, so published state and camera state can't drift apart.
 /// Everything else is internal capture state touched from the session/analysis queues, so it's excluded from tracking.
 @Observable
 final class CameraController: NSObject {
@@ -82,25 +84,27 @@ final class CameraController: NSObject {
     @ObservationIgnored private var lensDevices: [String: AVCaptureDevice] = [:]
 
     // UI state
-    var captureRAW = true
-    var manual = false
-    var iso: Float = 100
-    var shutterDenominator: Double = 125   // 1/x seconds
-    var minISO: Float = 25
-    var maxISO: Float = 1600
-    var isRecording = false
-    var status = ""
-    var lenses: [Lens] = []
-    var currentLensID = ""
-    var aperture: Float = 0
-    var whiteBalanceKelvin: Float = 5500
+    private(set) var captureRAW = true
+    private(set) var manual = false
+    private(set) var iso: Float = 100
+    private(set) var shutterDenominator: Double = 125   // 1/x seconds
+    private(set) var minISO: Float = 25
+    private(set) var maxISO: Float = 1600
+    private(set) var isRecording = false   // true only once the movie output confirms recording has started
+    private(set) var status = ""           // transient message; cleared automatically by `post`
+    private(set) var lenses: [Lens] = []
+    private(set) var currentLensID = ""
+    private(set) var aperture: Float = 0
+    private(set) var whiteBalanceKelvin: Float = 5500
+    private(set) var isHistogramEnabled = false
     let histogramModel = HistogramModel()
-    var timing = ""
-    var lastThumbnail: UIImage?
-    var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
-    private let maxShots = 30           // review images are ~1400px bitmaps, so keep memory bounded
+    private(set) var timing = ""
+    private(set) var lastThumbnail: UIImage?
+    private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
+    private let maxShots = 30             // review images are ~1400px bitmaps, so keep memory bounded
     @ObservationIgnored private var wbTint: Float = 0
     @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var statusGeneration = 0
     @ObservationIgnored private var subjectAreaObserver: NSObjectProtocol?
 
     /// Per-capture details keyed by `AVCapturePhotoSettings.uniqueID`: several captures can be in flight at once,
@@ -261,7 +265,6 @@ final class CameraController: NSObject {
 
     func switchLens(to lens: Lens) {
         guard lens.id != currentLensID, !isRecording else { return }
-        let wasManual = manual
         sessionQueue.async {
             guard let newDev = self.lensDevices[lens.id],
                   let newInput = try? AVCaptureDeviceInput(device: newDev) else { return }
@@ -283,15 +286,48 @@ final class CameraController: NSObject {
             self.updateRotationCoordinator()
             DispatchQueue.main.async {
                 self.currentLensID = id
-                if wasManual { self.setManual(true, keepWhiteBalance: true) }   // re-lock exposure/WB/focus on the new lens
+                // A new device starts in auto, so re-lock exposure/WB/focus if the user is in manual.
+                if self.manual { self.configureDevice(manual: true, keepWhiteBalance: true) }
             }
         }
     }
 
-    // MARK: Manual controls
+    // MARK: Settings
+
+    func setCaptureRAW(_ on: Bool) {
+        captureRAW = on   // read at capture time; nothing to push to the device
+    }
 
     /// Switch between manual exposure + locked white balance, and continuous auto. Focus stays autofocus either way.
-    func setManual(_ on: Bool, keepWhiteBalance: Bool = false) {
+    /// Entering manual seeds the white balance from whatever auto has currently chosen.
+    func setManual(_ on: Bool) {
+        guard on != manual else { return }
+        manual = on
+        configureDevice(manual: on, keepWhiteBalance: false)
+    }
+
+    func setISO(_ value: Float) {
+        guard value != iso else { return }
+        iso = value
+        applyExposure()
+    }
+
+    func setShutterDenominator(_ value: Double) {
+        guard value != shutterDenominator else { return }
+        shutterDenominator = value
+        applyExposure()
+    }
+
+    func setWhiteBalanceKelvin(_ value: Float) {
+        guard value != whiteBalanceKelvin else { return }
+        whiteBalanceKelvin = value
+        applyWhiteBalance()
+    }
+
+    // MARK: Device configuration
+
+    /// `keepWhiteBalance` re-applies the user's chosen temperature (after a lens switch) instead of seeding from auto.
+    private func configureDevice(manual on: Bool, keepWhiteBalance: Bool) {
         let isoValue = iso, denom = shutterDenominator, kelvin = whiteBalanceKelvin
         sessionQueue.async {
             guard let d = self.device else { return }
@@ -307,7 +343,9 @@ final class CameraController: NSObject {
                             let tt = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: self.wbTint)
                             d.setWhiteBalanceModeLocked(with: self.clampedGains(d.deviceWhiteBalanceGains(for: tt), d), completionHandler: nil)
                         } else {
-                            // seed from the camera's current auto white balance, then lock it
+                            // Seed from the camera's current auto white balance, then lock those exact gains.
+                            // The readout shows the temperature rounded to the ruler's 100K steps; it's display
+                            // only and isn't pushed back to the device until the user changes it.
                             let gains = d.deviceWhiteBalanceGains
                             let tt = d.temperatureAndTintValues(for: gains)
                             self.wbTint = tt.tint
@@ -326,7 +364,7 @@ final class CameraController: NSObject {
         }
     }
 
-    func applyExposure() {
+    private func applyExposure() {
         guard manual else { return }
         let isoValue = iso, denom = shutterDenominator
         sessionQueue.async {
@@ -339,7 +377,7 @@ final class CameraController: NSObject {
         }
     }
 
-    func applyWhiteBalance() {
+    private func applyWhiteBalance() {
         guard manual else { return }
         let kelvin = whiteBalanceKelvin
         sessionQueue.async {
@@ -376,6 +414,9 @@ final class CameraController: NSObject {
 
     /// Attaches or detaches the luma analysis stream, so it costs nothing while the histogram is off.
     func setHistogramEnabled(_ on: Bool) {
+        guard on != isHistogramEnabled else { return }
+        isHistogramEnabled = on
+        if !on { histogramModel.bins = [] }
         sessionQueue.async {
             self.session.beginConfiguration()
             if on {
@@ -387,9 +428,6 @@ final class CameraController: NSObject {
             }
             self.session.commitConfiguration()
             self.allowHapticsDuringRecording()
-        }
-        if !on {
-            DispatchQueue.main.async { self.histogramModel.bins = [] }
         }
     }
 
@@ -477,8 +515,7 @@ final class CameraController: NSObject {
                 }
                 let url = FileManager.default.temporaryDirectory
                     .appendingPathComponent("clip-\(Int(Date().timeIntervalSince1970)).mov")
-                self.movieOutput.startRecording(to: url, recordingDelegate: self)
-                DispatchQueue.main.async { self.isRecording = true }
+                self.movieOutput.startRecording(to: url, recordingDelegate: self)   // isRecording flips in didStartRecordingTo
             }
         }
     }
@@ -514,7 +551,17 @@ final class CameraController: NSObject {
         }
     }
 
-    private func post(_ s: String) { DispatchQueue.main.async { self.status = s } }
+    /// Shows a transient status message, cleared after a moment unless a newer one has replaced it.
+    private func post(_ s: String) {
+        DispatchQueue.main.async {
+            self.status = s
+            self.statusGeneration += 1
+            let generation = self.statusGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                if self.statusGeneration == generation { self.status = "" }
+            }
+        }
+    }
 }
 
 extension CameraController: AVCapturePhotoCaptureDelegate {
@@ -608,6 +655,7 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
         let norm = bins.map { (Float($0) / peak).squareRoot() }   // sqrt so small values stay visible
         let high = Float(hi) / Float(total), low = Float(lo) / Float(total)
         DispatchQueue.main.async {
+            guard self.isHistogramEnabled else { return }   // a frame already in flight when it was switched off
             self.histogramModel.bins = norm
             self.histogramModel.clipHigh = high
             self.histogramModel.clipLow = low
@@ -616,6 +664,10 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
 }
 
 extension CameraController: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo url: URL, from connections: [AVCaptureConnection]) {
+        DispatchQueue.main.async { self.isRecording = true }
+    }
+
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
         DispatchQueue.main.async { self.isRecording = false }
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {

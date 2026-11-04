@@ -9,7 +9,6 @@ struct ContentView: View {
     @State private var shutterTaps = 0
     @State private var focusPoint: CGPoint?
     @State private var focusTapCount = 0
-    @State private var showHistogram = false
     @State private var showReview = false
 
     enum Param { case iso, shutter, wb }
@@ -36,13 +35,13 @@ struct ContentView: View {
     private var isoIndex: Binding<Int> {
         Binding(
             get: { nearestIndex(of: cam.iso, in: availableISOStops) },
-            set: { cam.iso = availableISOStops[min(max($0, 0), availableISOStops.count - 1)] })
+            set: { cam.setISO(availableISOStops[min(max($0, 0), availableISOStops.count - 1)]) })
     }
 
     private var shutterIndex: Binding<Int> {
         Binding(
             get: { nearestIndex(of: cam.shutterDenominator, in: shutterStops) },
-            set: { cam.shutterDenominator = shutterStops[min(max($0, 0), shutterStops.count - 1)] })
+            set: { cam.setShutterDenominator(shutterStops[min(max($0, 0), shutterStops.count - 1)]) })
     }
 
     // White balance runs 2000-10000K in 100K steps.
@@ -51,7 +50,7 @@ struct ContentView: View {
     private var wbIndex: Binding<Int> {
         Binding(
             get: { min(max(Int(((cam.whiteBalanceKelvin - 2000) / 100).rounded()), 0), Self.wbStopCount - 1) },
-            set: { cam.whiteBalanceKelvin = 2000 + 100 * Float(min(max($0, 0), Self.wbStopCount - 1)) })
+            set: { cam.setWhiteBalanceKelvin(2000 + 100 * Float(min(max($0, 0), Self.wbStopCount - 1))) })
     }
 
     /// Full-stop ISO values (50, 100, 200, 400 ...) get the long ticks.
@@ -78,15 +77,6 @@ struct ContentView: View {
             updateAngle(for: UIDevice.current.orientation)
             for await _ in NotificationCenter.default.notifications(named: UIDevice.orientationDidChangeNotification) {
                 updateAngle(for: UIDevice.current.orientation)
-            }
-        }
-        .onChange(of: cam.iso) { _, _ in cam.applyExposure() }
-        .onChange(of: cam.shutterDenominator) { _, _ in cam.applyExposure() }
-        .onChange(of: cam.whiteBalanceKelvin) { _, _ in cam.applyWhiteBalance() }
-        .onChange(of: cam.status) { _, new in
-            guard !new.isEmpty else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                if cam.status == new { cam.status = "" }
             }
         }
     }
@@ -118,7 +108,7 @@ struct ContentView: View {
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipped()
             .overlay(alignment: .topTrailing) {
-                if showHistogram {
+                if cam.isHistogramEnabled {
                     // rotationEffect doesn't change layout, so reserve the rotated footprint to keep it inside the corner.
                     let quarterTurn = Int((uiAngle.degrees / 90).rounded()) % 2 != 0
                     let size = HistogramView.size
@@ -157,11 +147,8 @@ struct ContentView: View {
     /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear.
     private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 10) {
-            chip("RAW", on: cam.captureRAW) { cam.captureRAW.toggle() }
-            chip("M", on: cam.manual) {
-                cam.manual.toggle()
-                cam.setManual(cam.manual)
-            }
+            chip("RAW", on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
+            chip("M", on: cam.manual) { cam.setManual(!cam.manual) }
             Spacer(minLength: 140)
             if cam.isRecording {
                 HStack(spacing: 6) {
@@ -185,10 +172,7 @@ struct ContentView: View {
                     .minimumScaleFactor(0.5)
                     .rotationEffect(uiAngle)
             }
-            chip("HIST", on: showHistogram) {
-                showHistogram.toggle()
-                cam.setHistogramEnabled(showHistogram)
-            }
+            chip("HIST", on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
         }
         .padding(.horizontal, 16)
         .padding(.top, topPadding)
@@ -256,7 +240,7 @@ struct ContentView: View {
         HStack(spacing: 6) {
             ForEach(wbPresets, id: \.name) { preset in
                 let on = cam.whiteBalanceKelvin == preset.kelvin
-                Button { cam.whiteBalanceKelvin = preset.kelvin } label: {
+                Button { cam.setWhiteBalanceKelvin(preset.kelvin) } label: {
                     Text(preset.name)
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .lineLimit(1)
