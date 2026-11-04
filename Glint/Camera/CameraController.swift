@@ -29,10 +29,17 @@ final class CameraController {
     private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
 
     private let capture = CaptureSession()
-    private let reviewRenderer = ReviewImageRenderer()
+    private let reviewRenderer: ReviewImageRenderer
+    private let developer: PhotoDeveloper
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var statusGeneration = 0
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
+
+    init() {
+        let renderer = ReviewImageRenderer()
+        reviewRenderer = renderer
+        developer = PhotoDeveloper(renderer: renderer)   // shares the renderer's CIContext
+    }
 
     /// For the preview layer only; configuration goes through `CaptureSession`.
     var session: AVCaptureSession { capture.session }
@@ -183,21 +190,36 @@ final class CameraController {
     /// Saving and rendering the review image both run off the main actor; the result is added to `shots` here.
     private func photoCaptured(_ photo: CapturedPhoto) {
         let shotTime = CFAbsoluteTimeGetCurrent() - photo.requestedAt
-        let isRAW = photo.info.format == .raw
         let report = statusReporter
-        Task.detached(priority: .utility) {
-            MediaLibrary.savePhoto(photo.data, isRAW: isRAW, captureID: photo.captureID, report: report)
-        }
         let renderer = reviewRenderer
+        let developer = developer
         Task.detached(priority: .userInitiated) { [weak self] in
+            // Non-RAW mode: the DNG is developed into a HEIC, and that HEIC replaces it everywhere.
+            var data = photo.data
+            var isRAW = photo.info.format == .raw || photo.needsDevelopment
+            var developTime = 0.0
+            if photo.needsDevelopment {
+                let t0 = CFAbsoluteTimeGetCurrent()
+                if let heic = await developer.develop(photo.data) {
+                    data = heic
+                    isRAW = false
+                } else {
+                    report("Develop failed, saving DNG")
+                }
+                developTime = CFAbsoluteTimeGetCurrent() - t0
+            }
+            let saved = data, savedIsRAW = isRAW
+            Task.detached(priority: .utility) {
+                MediaLibrary.savePhoto(saved, isRAW: savedIsRAW, captureID: photo.captureID, report: report)
+            }
             let t0 = CFAbsoluteTimeGetCurrent()
-            let image = renderer.render(photo.data, isRAW: isRAW)
+            let image = renderer.render(data, isRAW: isRAW)
             let renderTime = CFAbsoluteTimeGetCurrent() - t0
-            await self?.addShot(image, info: photo.info, shotTime: shotTime, renderTime: renderTime)
+            await self?.addShot(image, info: photo.info, shotTime: shotTime, developTime: developTime, renderTime: renderTime)
         }
     }
 
-    private func addShot(_ image: UIImage?, info: PhotoInfo, shotTime: Double, renderTime: Double) {
+    private func addShot(_ image: UIImage?, info: PhotoInfo, shotTime: Double, developTime: Double, renderTime: Double) {
         if let image {
             lastThumbnail = image
             shots.append(Shot(image: image, info: info))
