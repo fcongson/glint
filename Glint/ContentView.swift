@@ -13,52 +13,15 @@ struct ContentView: View {
 
     enum Param { case iso, shutter, wb }
 
-    // Conventional 1/3-stop series. The device clamps to what the active format supports.
-    private let shutterStops: [Double] = [8, 10, 13, 15, 20, 25, 30, 40, 50, 60, 80, 100, 125, 160, 200, 250, 320, 400, 500,
-                                          640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000]
-    private let isoStops: [Float] = [50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600,
-                                     2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25000, 32000, 40000, 50000]
-    private let wbPresets: [(name: String, kelvin: Float)] = [
-        ("Tungsten", 3200), ("Fluor.", 4000), ("Daylight", 5500), ("Flash", 5600), ("Cloudy", 6500), ("Shade", 7500)
-    ]
-
     /// ISO stops the current lens can actually reach.
-    private var availableISOStops: [Float] {
-        let stops = isoStops.filter { $0 >= cam.minISO && $0 <= cam.maxISO }
-        return stops.isEmpty ? [cam.minISO] : stops
-    }
+    private var availableISOStops: [Float] { ExposureScale.isoStops(min: cam.minISO, max: cam.maxISO) }
 
-    private func nearestIndex<T: BinaryFloatingPoint>(of value: T, in stops: [T]) -> Int {
-        stops.indices.min(by: { abs(stops[$0] - value) < abs(stops[$1] - value) }) ?? 0
-    }
-
-    private var isoIndex: Binding<Int> {
+    /// Binds a ruler's index to a camera value: reads the nearest stop, writes the stop at the new index.
+    private func stopIndex<T: BinaryFloatingPoint>(_ stops: [T], value: @escaping () -> T,
+                                                   set: @escaping (T) -> Void) -> Binding<Int> {
         Binding(
-            get: { nearestIndex(of: cam.iso, in: availableISOStops) },
-            set: { cam.setISO(availableISOStops[min(max($0, 0), availableISOStops.count - 1)]) })
-    }
-
-    private var shutterIndex: Binding<Int> {
-        Binding(
-            get: { nearestIndex(of: cam.shutterDenominator, in: shutterStops) },
-            set: { cam.setShutterDenominator(shutterStops[min(max($0, 0), shutterStops.count - 1)]) })
-    }
-
-    // White balance runs 2000-10000K in 100K steps.
-    private static let wbStopCount = 81
-
-    private var wbIndex: Binding<Int> {
-        Binding(
-            get: { min(max(Int(((cam.whiteBalanceKelvin - 2000) / 100).rounded()), 0), Self.wbStopCount - 1) },
-            set: { cam.setWhiteBalanceKelvin(2000 + 100 * Float(min(max($0, 0), Self.wbStopCount - 1))) })
-    }
-
-    /// Full-stop ISO values (50, 100, 200, 400 ...) get the long ticks.
-    private func isISOFullStop(_ i: Int) -> Bool {
-        let stops = availableISOStops
-        guard stops.indices.contains(i) else { return false }
-        let s = log2(Double(stops[i]) / 100)
-        return abs(s - s.rounded()) < 0.1
+            get: { ExposureScale.nearestIndex(of: value(), in: stops) },
+            set: { set(stops[min(max($0, 0), stops.count - 1)]) })
     }
 
     var body: some View {
@@ -197,24 +160,33 @@ struct ContentView: View {
         VStack(spacing: 16) {
             if cam.manual {
                 HStack(spacing: 20) {
-                    readout("ISO", "\(Int(cam.iso))", .iso)
-                    readout("SHUTTER", "1/\(Int(cam.shutterDenominator))", .shutter)
-                    readout("WB", "\(Int(cam.whiteBalanceKelvin))K", .wb)
-                    staticReadout("APERTURE", String(format: "\u{0192}/%.1f", cam.aperture))
+                    readout("ISO", SettingsText.iso(cam.iso), .iso)
+                    readout("SHUTTER", SettingsText.shutter(denominator: cam.shutterDenominator), .shutter)
+                    readout("WB", SettingsText.kelvin(cam.whiteBalanceKelvin), .wb)
+                    staticReadout("APERTURE", SettingsText.aperture(Double(cam.aperture)))
                 }
                 Group {
                     if selected == .iso {
-                        RulerPicker(count: availableISOStops.count, index: isoIndex, isMajor: isISOFullStop,
-                                    label: "ISO", valueText: "\(Int(cam.iso))")
-                            .id("iso-\(availableISOStops.count)")
+                        let stops = availableISOStops
+                        RulerPicker(count: stops.count,
+                                    index: stopIndex(stops, value: { cam.iso }, set: cam.setISO),
+                                    isMajor: { stops.indices.contains($0) && ExposureScale.isFullStopISO(stops[$0]) },
+                                    label: "ISO", valueText: SettingsText.iso(cam.iso))
+                            .id("iso-\(stops.count)")
                     } else if selected == .wb {
                         wbPresetPicker
-                        RulerPicker(count: Self.wbStopCount, index: wbIndex, isMajor: { $0 % 10 == 0 },
+                        let stops = ExposureScale.whiteBalanceKelvins
+                        RulerPicker(count: stops.count,
+                                    index: stopIndex(stops, value: { cam.whiteBalanceKelvin }, set: cam.setWhiteBalanceKelvin),
+                                    isMajor: { ExposureScale.isMajorWhiteBalance(stops[$0]) },
                                     label: "White balance", valueText: "\(Int(cam.whiteBalanceKelvin)) kelvin")
                             .id("wb")
                     } else {
-                        RulerPicker(count: shutterStops.count, index: shutterIndex,
-                                    label: "Shutter speed", valueText: "1/\(Int(cam.shutterDenominator))")
+                        let stops = ExposureScale.shutterDenominators
+                        RulerPicker(count: stops.count,
+                                    index: stopIndex(stops, value: { cam.shutterDenominator }, set: cam.setShutterDenominator),
+                                    isMajor: ExposureScale.isFullStopShutter(index:),
+                                    label: "Shutter speed", valueText: SettingsText.shutter(denominator: cam.shutterDenominator))
                             .id("shutter")
                     }
                 }
@@ -238,7 +210,7 @@ struct ContentView: View {
 
     private var wbPresetPicker: some View {
         HStack(spacing: 6) {
-            ForEach(wbPresets, id: \.name) { preset in
+            ForEach(ExposureScale.whiteBalancePresets, id: \.name) { preset in
                 let on = cam.whiteBalanceKelvin == preset.kelvin
                 Button { cam.setWhiteBalanceKelvin(preset.kelvin) } label: {
                     Text(preset.name)
@@ -375,15 +347,15 @@ struct HistogramContainer: View {
 
     var body: some View {
         if !model.bins.isEmpty {
-            HistogramView(bins: model.bins, clipHigh: model.clipHigh, clipLow: model.clipLow)
+            HistogramView(bins: model.bins, clipsHighlights: model.clipsHighlights, clipsShadows: model.clipsShadows)
         }
     }
 }
 
 struct HistogramView: View {
     let bins: [Float]
-    let clipHigh: Float   // fraction of pixels at/near white
-    let clipLow: Float    // fraction of pixels at/near black
+    let clipsHighlights: Bool   // decided by Histogram; the view only picks colours
+    let clipsShadows: Bool
 
     /// Total footprint including padding.
     static let size = CGSize(width: 132, height: 56)
@@ -396,8 +368,8 @@ struct HistogramView: View {
                 let h = max(CGFloat(v) * size.height, 0.5)
                 let rect = CGRect(x: CGFloat(i) * w, y: size.height - h, width: max(w - 0.6, 0.5), height: h)
                 var color = Color.white.opacity(0.85)
-                if i >= bins.count - 2 && clipHigh > 0.01 { color = Color.red }
-                if i <= 1 && clipLow > 0.05 { color = Color.cyan }
+                if i >= bins.count - 2 && clipsHighlights { color = Color.red }
+                if i <= 1 && clipsShadows { color = Color.cyan }
                 ctx.fill(Path(rect), with: .color(color))
             }
         }
@@ -439,7 +411,7 @@ struct ReviewView: View {
                 VStack {
                     Spacer()
                     HStack(spacing: 14) {
-                        ForEach(info.rows, id: \.label) { row in
+                        ForEach(rows(for: info), id: \.label) { row in
                             VStack(spacing: 2) {
                                 Text(row.label)
                                     .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -481,6 +453,18 @@ struct ReviewView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
         }
+    }
+
+    /// Label/value pairs, skipping anything the photo's metadata didn't report.
+    private func rows(for info: PhotoInfo) -> [(label: String, value: String)] {
+        var rows: [(label: String, value: String)] = []
+        if let iso = info.iso { rows.append(("ISO", "\(iso)")) }
+        if let seconds = info.exposureSeconds { rows.append(("SHUTTER", SettingsText.shutter(seconds: seconds))) }
+        if let f = info.fNumber { rows.append(("APERTURE", SettingsText.aperture(f))) }
+        if let mm = info.focalLength35mm { rows.append(("FOCAL", "\(mm)mm")) }
+        rows.append(("WB", SettingsText.whiteBalance(info.whiteBalance)))
+        rows.append(("FORMAT", SettingsText.format(info.format)))
+        return rows
     }
 
     private func page(_ image: UIImage) -> some View {

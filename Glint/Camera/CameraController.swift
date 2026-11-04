@@ -43,7 +43,7 @@ final class CameraController: NSObject {
 
     /// Per-capture details keyed by `AVCapturePhotoSettings.uniqueID`: several captures can be in flight at once,
     /// and the delegate runs on its own queue, so this is lock-protected rather than a single shared property.
-    private struct PendingCapture { let start: CFAbsoluteTime; let whiteBalance: String }
+    private struct PendingCapture { let start: CFAbsoluteTime; let whiteBalance: WhiteBalanceSetting }
     @ObservationIgnored private var pendingCaptures: [Int64: PendingCapture] = [:]
     private let pendingLock = NSLock()
 
@@ -261,12 +261,13 @@ final class CameraController: NSObject {
                             d.setWhiteBalanceModeLocked(with: self.clampedGains(d.deviceWhiteBalanceGains(for: tt), d), completionHandler: nil)
                         } else {
                             // Seed from the camera's current auto white balance, then lock those exact gains.
-                            // The readout shows the temperature rounded to the ruler's 100K steps; it's display
-                            // only and isn't pushed back to the device until the user changes it.
+                            // The readout shows the nearest ruler stop; it's display only and isn't pushed
+                            // back to the device until the user changes it.
                             let gains = d.deviceWhiteBalanceGains
                             let tt = d.temperatureAndTintValues(for: gains)
                             self.wbTint = tt.tint
-                            DispatchQueue.main.async { self.whiteBalanceKelvin = min(max((tt.temperature / 100).rounded() * 100, 2000), 10000) }
+                            let shown = ExposureScale.nearest(tt.temperature, in: ExposureScale.whiteBalanceKelvins)
+                            DispatchQueue.main.async { self.whiteBalanceKelvin = shown }
                             d.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
                         }
                     }
@@ -404,7 +405,7 @@ final class CameraController: NSObject {
         let wantRAW = captureRAW
         let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
         let pending = PendingCapture(start: CFAbsoluteTimeGetCurrent(),
-                                     whiteBalance: manual ? "\(Int(whiteBalanceKelvin))K" : "Auto")
+                                     whiteBalance: manual ? .kelvin(Int(whiteBalanceKelvin)) : .auto)
         sessionQueue.async {
             if let angle, let conn = self.photoOutput.connection(with: .video), conn.isVideoRotationAngleSupported(angle) {
                 conn.videoRotationAngle = angle
@@ -465,8 +466,8 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
         guard let data = photo.fileDataRepresentation() else { return }
         let raw = photo.isRawPhoto
         let shotTime = pending.map { CFAbsoluteTimeGetCurrent() - $0.start } ?? 0
-        let info = PhotoInfo(metadata: photo.metadata, format: raw ? "RAW" : "HEIC",
-                             whiteBalance: pending?.whiteBalance ?? "Auto")
+        let info = PhotoInfo(metadata: photo.metadata, format: raw ? .raw : .heic,
+                             whiteBalance: pending?.whiteBalance ?? .auto)
         // Keep the capture callback queue free: saving and rendering the review image both happen off to the side.
         DispatchQueue.global(qos: .utility).async {
             MediaLibrary.savePhoto(data, isRAW: raw, captureID: captureID, report: self.post)

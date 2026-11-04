@@ -5,19 +5,21 @@ import Observation
 @Observable
 final class HistogramModel {
     var bins: [Float] = []
-    var clipHigh: Float = 0
-    var clipLow: Float = 0
+    var clipsHighlights = false
+    var clipsShadows = false
 }
 
 /// Luma histogram of one frame. A pure value, computed from the Y plane of a 420YpCbCr8 pixel buffer.
 struct Histogram {
     static let binCount = 64
-    static let highlightThreshold = 250   // luma at or above this counts towards clipHigh
-    static let shadowThreshold = 5        // luma at or below this counts towards clipLow
+    static let highlightLuma = 250          // at or above: near white
+    static let shadowLuma = 5               // at or below: near black
+    static let highlightClipFraction: Float = 0.01   // warn when more than 1% of pixels are near white
+    static let shadowClipFraction: Float = 0.05      // shadows are allowed more, since deep blacks are often intended
 
-    let bins: [Float]      // 0...1, sqrt-scaled so small counts stay visible
-    let clipHigh: Float    // fraction of sampled pixels at/near white
-    let clipLow: Float     // fraction of sampled pixels at/near black
+    let bins: [Float]          // 0...1, sqrt-scaled so small counts stay visible
+    let clipsHighlights: Bool
+    let clipsShadows: Bool
 
     /// Samples every `step`th pixel in each direction. Returns nil if the buffer has no readable luma plane.
     init?(lumaOf pixelBuffer: CVPixelBuffer, step: Int = 8) {
@@ -39,15 +41,15 @@ struct Histogram {
                 let v = Int(row[x])
                 counts[v * Self.binCount / 256] += 1
                 total += 1
-                if v >= Self.highlightThreshold { hi += 1 }
-                if v <= Self.shadowThreshold { lo += 1 }
+                if v >= Self.highlightLuma { hi += 1 }
+                if v <= Self.shadowLuma { lo += 1 }
             }
         }
         guard total > 0 else { return nil }
         let peak = Float(max(counts.max() ?? 1, 1))
         bins = counts.map { (Float($0) / peak).squareRoot() }
-        clipHigh = Float(hi) / Float(total)
-        clipLow = Float(lo) / Float(total)
+        clipsHighlights = Float(hi) / Float(total) > Self.highlightClipFraction
+        clipsShadows = Float(lo) / Float(total) > Self.shadowClipFraction
     }
 }
 
@@ -86,8 +88,8 @@ final class HistogramAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         DispatchQueue.main.async {
             guard self.isPublishing else { return }
             self.model.bins = histogram.bins
-            self.model.clipHigh = histogram.clipHigh
-            self.model.clipLow = histogram.clipLow
+            self.model.clipsHighlights = histogram.clipsHighlights
+            self.model.clipsShadows = histogram.clipsShadows
         }
     }
 }
