@@ -241,13 +241,11 @@ final class CameraController: NSObject {
 
     /// Per-lens setup: distortion correction off, stabilization off, refresh ranges and aperture.
     private func applyDeviceSettings(_ d: AVCaptureDevice) {
-        do {
-            try d.lockForConfiguration()
+        withLockedDevice(d, failure: "Config") { d in
             if d.isGeometricDistortionCorrectionSupported {
                 d.isGeometricDistortionCorrectionEnabled = false
             }
-            d.unlockForConfiguration()
-        } catch { post("Config error: \(error.localizedDescription)") }
+        }
 
         movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
 
@@ -331,8 +329,7 @@ final class CameraController: NSObject {
         let isoValue = iso, denom = shutterDenominator, kelvin = whiteBalanceKelvin
         sessionQueue.async {
             guard let d = self.device else { return }
-            do {
-                try d.lockForConfiguration()
+            self.withLockedDevice(d, failure: "Config") { d in
                 if on {
                     if d.isExposureModeSupported(.custom) {   // setExposureModeCustom raises if unsupported
                         d.setExposureModeCustom(duration: self.clampedDuration(denom, d), iso: self.clampedISO(isoValue, d), completionHandler: nil)
@@ -359,8 +356,7 @@ final class CameraController: NSObject {
                     if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
                     if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
                 }
-                d.unlockForConfiguration()
-            } catch { self.post("Config error: \(error.localizedDescription)") }
+            }
         }
     }
 
@@ -369,11 +365,9 @@ final class CameraController: NSObject {
         let isoValue = iso, denom = shutterDenominator
         sessionQueue.async {
             guard let d = self.device, d.isExposureModeSupported(.custom) else { return }
-            do {
-                try d.lockForConfiguration()
+            self.withLockedDevice(d, failure: "Config") { d in
                 d.setExposureModeCustom(duration: self.clampedDuration(denom, d), iso: self.clampedISO(isoValue, d), completionHandler: nil)
-                d.unlockForConfiguration()
-            } catch { self.post("Config error: \(error.localizedDescription)") }
+            }
         }
     }
 
@@ -384,12 +378,23 @@ final class CameraController: NSObject {
             guard let d = self.device, d.isWhiteBalanceModeSupported(.locked) else { return }
             let tt = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: self.wbTint)
             let gains = self.clampedGains(d.deviceWhiteBalanceGains(for: tt), d)
-            do {
-                try d.lockForConfiguration()
+            self.withLockedDevice(d, failure: "Config") { d in
                 d.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
-                d.unlockForConfiguration()
-            } catch { self.post("Config error: \(error.localizedDescription)") }
+            }
         }
+    }
+
+    /// Runs `changes` with the device locked for configuration and always unlocks afterwards.
+    /// Call on `sessionQueue`. If the lock can't be taken, `changes` is skipped and "<failure> error: …" is posted.
+    private func withLockedDevice(_ d: AVCaptureDevice, failure: String, _ changes: (AVCaptureDevice) -> Void) {
+        do {
+            try d.lockForConfiguration()
+        } catch {
+            post("\(failure) error: \(error.localizedDescription)")
+            return
+        }
+        defer { d.unlockForConfiguration() }
+        changes(d)
     }
 
     private func clampedGains(_ g: AVCaptureDevice.WhiteBalanceGains, _ d: AVCaptureDevice) -> AVCaptureDevice.WhiteBalanceGains {
@@ -439,8 +444,7 @@ final class CameraController: NSObject {
         let isManual = manual
         sessionQueue.async {
             guard let d = self.device else { return }
-            do {
-                try d.lockForConfiguration()
+            self.withLockedDevice(d, failure: "Focus") { d in
                 if d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.autoFocus) {
                     d.focusPointOfInterest = point
                     d.focusMode = .autoFocus
@@ -450,8 +454,7 @@ final class CameraController: NSObject {
                     d.exposureMode = .autoExpose
                 }
                 d.isSubjectAreaChangeMonitoringEnabled = true
-                d.unlockForConfiguration()
-            } catch { self.post("Focus error: \(error.localizedDescription)") }
+            }
         }
     }
 
@@ -459,8 +462,7 @@ final class CameraController: NSObject {
         let isManual = manual
         sessionQueue.async {
             guard let d = self.device else { return }
-            do {
-                try d.lockForConfiguration()
+            self.withLockedDevice(d, failure: "Focus") { d in
                 let center = CGPoint(x: 0.5, y: 0.5)
                 if d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.continuousAutoFocus) {
                     d.focusPointOfInterest = center
@@ -471,8 +473,7 @@ final class CameraController: NSObject {
                     d.exposureMode = .continuousAutoExposure
                 }
                 d.isSubjectAreaChangeMonitoringEnabled = false
-                d.unlockForConfiguration()
-            } catch { self.post("Focus error: \(error.localizedDescription)") }
+            }
         }
     }
 
