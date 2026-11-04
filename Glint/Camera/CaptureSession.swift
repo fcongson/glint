@@ -403,7 +403,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error { emit.yield(.status("Capture error: \(error.localizedDescription)")); return }
         guard let data = photo.fileDataRepresentation() else { return }
-        let info = PhotoInfo(metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto), whiteBalance: whiteBalance)
+        let info = PhotoInfo(metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto), whiteBalance: whiteBalance, fileBytes: data.count)
         emit.yield(.photoCaptured(CapturedPhoto(data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
                                                 needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto))))
     }

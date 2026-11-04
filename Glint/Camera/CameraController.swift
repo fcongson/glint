@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreLocation
 import SwiftUI
 
 /// The camera screen's state, on the main actor.
@@ -29,6 +30,7 @@ final class CameraController {
     private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
 
     private let capture = CaptureSession()
+    private let locationProvider = LocationProvider()
     private let reviewRenderer: ReviewImageRenderer
     private let developer: PhotoDeveloper
     @ObservationIgnored private var hasStarted = false
@@ -52,6 +54,7 @@ final class CameraController {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        locationProvider.start()
         Task {
             for await event in capture.events { handle(event) }
         }
@@ -190,6 +193,7 @@ final class CameraController {
     /// Saving and rendering the review image both run off the main actor; the result is added to `shots` here.
     private func photoCaptured(_ photo: CapturedPhoto) {
         let shotTime = CFAbsoluteTimeGetCurrent() - photo.requestedAt
+        let location = locationProvider.current   // the fix at the moment the photo arrives
         let report = statusReporter
         let renderer = reviewRenderer
         let developer = developer
@@ -210,20 +214,22 @@ final class CameraController {
             }
             let saved = data, savedIsRAW = isRAW
             Task.detached(priority: .utility) {
-                MediaLibrary.savePhoto(saved, isRAW: savedIsRAW, captureID: photo.captureID, report: report)
+                MediaLibrary.savePhoto(saved, isRAW: savedIsRAW, captureID: photo.captureID, location: location, report: report)
             }
             let t0 = CFAbsoluteTimeGetCurrent()
             let image = renderer.render(data, isRAW: isRAW)
             let renderTime = CFAbsoluteTimeGetCurrent() - t0
-            await self?.addShot(image, info: photo.info, shotTime: shotTime, developTime: developTime, renderTime: renderTime)
+            await self?.addShot(image, info: photo.info, location: location, shotTime: shotTime, developTime: developTime, renderTime: renderTime)
         }
     }
 
-    private func addShot(_ image: UIImage?, info: PhotoInfo, shotTime: Double, developTime: Double, renderTime: Double) {
+    private func addShot(_ image: UIImage?, info: PhotoInfo, location: CLLocation?, shotTime: Double, developTime: Double, renderTime: Double) {
         if let image {
             lastThumbnail = image
-            shots.append(Shot(image: image, info: info))
+            let shot = Shot(image: image, info: info, location: location)
+            shots.append(shot)
             if shots.count > maxShots { shots.removeFirst(shots.count - maxShots) }
+            if let location { resolvePlace(for: shot.id, at: location) }
         }
         #if DEBUG
         var lines = [String(format: "shot    %.1fs", shotTime)]
@@ -231,6 +237,15 @@ final class CameraController {
         lines.append(String(format: "render  %.1fs", renderTime))
         timing = lines.joined(separator: "\n")   // dev-only readout
         #endif
+    }
+
+    /// Looks up a place name off the main actor, then attaches it to the shot if review hasn't dropped it meanwhile.
+    private func resolvePlace(for id: UUID, at location: CLLocation) {
+        Task {
+            guard let place = await LocationProvider.placeName(for: location),
+                  let index = shots.firstIndex(where: { $0.id == id }) else { return }
+            shots[index].place = place
+        }
     }
 
     // MARK: Video

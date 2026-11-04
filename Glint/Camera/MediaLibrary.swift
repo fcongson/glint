@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import Photos
 
@@ -16,7 +17,8 @@ enum MediaLibrary {
     }
 
     /// The capture ID keeps file names unique when several shots land in the same second.
-    static func savePhoto(_ data: Data, isRAW: Bool, captureID: Int64, report: @escaping @Sendable (String) -> Void) {
+    /// `location` tags the Photos copy only; the Documents copy is saved as captured.
+    static func savePhoto(_ data: Data, isRAW: Bool, captureID: Int64, location: CLLocation?, report: @escaping @Sendable (String) -> Void) {
         if let dir = documentsDirectory {
             let name = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID).\(isRAW ? "dng" : "heic")"
             do { try data.write(to: dir.appendingPathComponent(name)) }
@@ -27,7 +29,9 @@ enum MediaLibrary {
             PHPhotoLibrary.shared().performChanges({
                 let options = PHAssetResourceCreationOptions()
                 if isRAW { options.uniformTypeIdentifier = "com.adobe.raw-image" }
-                PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: options)
+                let request = PHAssetCreationRequest.forAsset()
+                request.location = location
+                request.addResource(with: .photo, data: data, options: options)
             }) { ok, error in
                 report(ok ? "Saved" : "Save failed: \(error?.localizedDescription ?? "?")")
             }
