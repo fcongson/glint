@@ -28,6 +28,11 @@ struct CameraPreview: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
+        // Like the system Camera: VoiceOver users can touch the viewfinder directly to set the focus point.
+        v.isAccessibilityElement = true
+        v.accessibilityLabel = "Camera viewfinder"
+        v.accessibilityHint = "Touch the viewfinder to set the focus point"
+        v.accessibilityTraits = .allowsDirectInteraction
         v.previewLayer.session = session
         v.previewLayer.videoGravity = .resizeAspect   // show the whole frame when the sensor image is landscape in the portrait box
         context.coordinator.onTap = onTap

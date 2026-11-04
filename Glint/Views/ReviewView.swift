@@ -19,6 +19,7 @@ struct ReviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
                 .onTapGesture { dismiss() }
+                .accessibilityHidden(true)   // the "Back to camera" button is the accessible way out
             // Swipe sideways to move between photos taken this session.
             TabView(selection: $selection) {
                 ForEach(shots) { shot in
@@ -32,6 +33,7 @@ struct ReviewView: View {
                 VStack {
                     Spacer()
                     infoCard(for: shot)
+                        .accessibilityElement(children: .combine)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 24)
                 }
@@ -58,6 +60,7 @@ struct ReviewView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
         }
+        .accessibilityAction(.escape) { dismiss() }   // two-finger scrub closes the review
     }
 
     /// Capture details above, the settings the photo was taken with below; each part is skipped when the metadata lacks it.
@@ -151,6 +154,7 @@ struct ReviewView: View {
                 .frame(width: box.width, height: box.height)
                 .rotationEffect(angle)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                .accessibilityLabel("Photo")
         }
         .animation(.easeInOut(duration: 0.3), value: angle)
         .contentShape(Rectangle())

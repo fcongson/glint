@@ -64,7 +64,7 @@ struct ContentView: View {
                     }
                 }, onLayerReady: { cam.attachPreviewLayer($0) })
                 if let p = focusPoint {
-                    FocusBox().id(focusTapCount).position(p)
+                    FocusBox().id(focusTapCount).position(p).accessibilityHidden(true)
                 }
                 Color.white.opacity(flash ? 0.85 : 0).allowsHitTesting(false)
             }
@@ -120,8 +120,10 @@ struct ContentView: View {
     /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear.
     private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 10) {
-            chip(cam.captureRAW ? "RAW" : "HEIC", on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
-            chip(cam.manual ? "M" : "A", on: cam.manual) { cam.setManual(!cam.manual) }
+            chip(cam.captureRAW ? "RAW" : "HEIC", label: "Photo format", value: cam.captureRAW ? "RAW" : "HEIC",
+                 on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
+            chip(cam.manual ? "M" : "A", label: "Exposure mode", value: cam.manual ? "Manual" : "Auto",
+                 on: cam.manual) { cam.setManual(!cam.manual) }
             Spacer(minLength: 140)
             if cam.isRecording {
                 HStack(spacing: 6) {
@@ -130,8 +132,11 @@ struct ContentView: View {
                 }
                 .foregroundStyle(Color.red)
                 .rotationEffect(uiAngle)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Recording")
             }
-            chip("HIST", on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+            chip("HIST", label: "Histogram", value: cam.isHistogramEnabled ? "On" : "Off",
+                 on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
         }
         .padding(.horizontal, 16)
         .padding(.top, topPadding)
@@ -147,7 +152,10 @@ struct ContentView: View {
             .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+    /// The visible title can be terse or change with the state (e.g. "M"/"A"), so VoiceOver gets a fixed
+    /// label plus the current value instead.
+    private func chip(_ title: String, label: String, value: String, on: Bool,
+                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -155,6 +163,8 @@ struct ContentView: View {
                 .padding(.vertical, 5)
         }
         .buttonStyle(ChipStyle(isOn: on, angle: uiAngle))
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
     }
 
     // MARK: Bottom controls
@@ -223,6 +233,7 @@ struct ContentView: View {
                         .padding(.vertical, 5)
                 }
                 .buttonStyle(ChipStyle(isOn: cam.whiteBalanceKelvin == preset.kelvin, angle: uiAngle))
+                .accessibilityAddTraits(cam.whiteBalanceKelvin == preset.kelvin ? .isSelected : [])
             }
         }
     }
@@ -232,6 +243,8 @@ struct ContentView: View {
         Button { selected = p } label: {
             SettingReadout(label: label, value: value, highlighted: selected == p, angle: uiAngle)
         }
+        .accessibilityAddTraits(selected == p ? .isSelected : [])
+        .accessibilityHint("Adjusts this setting with the ruler")
     }
 
     private var lensPicker: some View {
@@ -243,6 +256,7 @@ struct ContentView: View {
                         .frame(width: 44, height: 32)
                 }
                 .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: uiAngle))
+                .accessibilityAddTraits(cam.currentLensID == lens.id ? .isSelected : [])
             }
         }
     }
@@ -262,6 +276,7 @@ struct ContentView: View {
             }
         }
         .buttonStyle(PressScaleStyle())
+        .accessibilityLabel("Take photo")
         .sensoryFeedback(.impact(flexibility: .rigid, intensity: 1.0), trigger: shutterTaps)
     }
 
@@ -280,6 +295,7 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }
+        .accessibilityLabel("Review photos")
         .disabled(cam.lastThumbnail == nil)
         .fullScreenCover(isPresented: $showReview) { ReviewView(shots: cam.shots, angle: uiAngle) }
     }
@@ -295,5 +311,6 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.2), value: cam.isRecording)
         }
         .buttonStyle(PressScaleStyle())
+        .accessibilityLabel(cam.isRecording ? "Stop recording" : "Record video")
     }
 }
