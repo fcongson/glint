@@ -120,8 +120,8 @@ struct ContentView: View {
     /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear.
     private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 10) {
-            chip("RAW", on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
-            chip("M", on: cam.manual) { cam.setManual(!cam.manual) }
+            chip(cam.captureRAW ? "RAW" : "HEIC", on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
+            chip(cam.manual ? "M" : "A", on: cam.manual) { cam.setManual(!cam.manual) }
             Spacer(minLength: 140)
             if cam.isRecording {
                 HStack(spacing: 6) {
