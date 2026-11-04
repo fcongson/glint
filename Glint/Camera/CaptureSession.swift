@@ -349,19 +349,19 @@ actor CaptureSession {
     func capturePhoto(raw wantRAW: Bool, whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime) {
         applyCaptureRotation(to: photoOutput)
         let settings: AVCapturePhotoSettings
-        var developToHEIC = false
         // Non-RAW mode also shoots Bayer RAW, then develops it into a HEIC with no processing, so it matches the DNG.
-        if let fmt = photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) {
-            settings = AVCapturePhotoSettings(rawPixelFormatType: fmt)   // Bayer DNG only
-            developToHEIC = !wantRAW
+        let bayerFormat = photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) })
+        let plan = CapturePlan(wantRAW: wantRAW, bayerRAWAvailable: bayerFormat != nil)
+        if let bayerFormat {
+            settings = AVCapturePhotoSettings(rawPixelFormatType: bayerFormat)   // Bayer DNG only
         } else {
             settings = AVCapturePhotoSettings()
             settings.photoQualityPrioritization = .speed
-            if wantRAW { emit.yield(.status("Bayer RAW unavailable, saving HEIC")) }
         }
+        if plan.fellBackFromRAW(wantRAW: wantRAW) { emit.yield(.status("Bayer RAW unavailable, saving HEIC")) }
         let id = settings.uniqueID
         let delegate = PhotoCaptureDelegate(
-            whiteBalance: whiteBalance, requestedAt: requestedAt, developToHEIC: developToHEIC, emit: emit,
+            whiteBalance: whiteBalance, requestedAt: requestedAt, plan: plan, emit: emit,
             finished: { [weak self] in self?.enqueue { $0.photoDelegates[id] = nil } })
         photoDelegates[id] = delegate
         photoOutput.capturePhoto(with: settings, delegate: delegate)
@@ -387,15 +387,15 @@ actor CaptureSession {
 private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     private let whiteBalance: WhiteBalanceSetting
     private let requestedAt: CFAbsoluteTime
-    private let developToHEIC: Bool
+    private let plan: CapturePlan
     private let emit: AsyncStream<CaptureEvent>.Continuation
     private let finished: @Sendable () -> Void
 
-    init(whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime, developToHEIC: Bool,
+    init(whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime, plan: CapturePlan,
          emit: AsyncStream<CaptureEvent>.Continuation, finished: @escaping @Sendable () -> Void) {
         self.whiteBalance = whiteBalance
         self.requestedAt = requestedAt
-        self.developToHEIC = developToHEIC
+        self.plan = plan
         self.emit = emit
         self.finished = finished
     }
@@ -403,10 +403,9 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error { emit.yield(.status("Capture error: \(error.localizedDescription)")); return }
         guard let data = photo.fileDataRepresentation() else { return }
-        let needsDevelopment = photo.isRawPhoto && developToHEIC
-        let info = PhotoInfo(metadata: photo.metadata, format: photo.isRawPhoto && !developToHEIC ? .raw : .heic, whiteBalance: whiteBalance)
-        emit.yield(.photoCaptured(CapturedPhoto(data: data, captureID: photo.resolvedSettings.uniqueID,
-                                                info: info, requestedAt: requestedAt, needsDevelopment: needsDevelopment)))
+        let info = PhotoInfo(metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto), whiteBalance: whiteBalance)
+        emit.yield(.photoCaptured(CapturedPhoto(data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
+                                                needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto))))
     }
 
     /// The last callback for a capture, so the session can release this delegate.
