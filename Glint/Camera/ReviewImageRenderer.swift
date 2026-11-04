@@ -45,7 +45,7 @@ struct ReviewImageRenderer: @unchecked Sendable {
         filter.boostShadowAmount = 0
         guard let image = filter.outputImage,
               let colorSpace = CGColorSpace(name: CGColorSpace.displayP3) else { return nil }
-        return try? ciContext.heifRepresentation(of: image, format: .RGBA8, colorSpace: colorSpace, options: [:])
+        return ciContext.heifRepresentation(of: image, format: .RGBA8, colorSpace: colorSpace, options: [:])
     }
 
     func render(_ data: Data, isRAW: Bool) -> UIImage? {
