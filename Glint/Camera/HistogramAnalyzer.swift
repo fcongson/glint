@@ -2,15 +2,24 @@ import AVFoundation
 import Observation
 
 /// Separate from the controller so histogram updates redraw only the histogram, not the whole screen.
+@MainActor
 @Observable
 final class HistogramModel {
-    var bins: [Float] = []
-    var clipsHighlights = false
-    var clipsShadows = false
+    private(set) var bins: [Float] = []
+    private(set) var clipsHighlights = false
+    private(set) var clipsShadows = false
+
+    func show(_ histogram: Histogram) {
+        bins = histogram.bins
+        clipsHighlights = histogram.clipsHighlights
+        clipsShadows = histogram.clipsShadows
+    }
+
+    func clear() { bins = [] }
 }
 
 /// Luma histogram of one frame. A pure value, computed from the Y plane of a 420YpCbCr8 pixel buffer.
-struct Histogram {
+struct Histogram: Sendable {
     static let binCount = 64
     static let highlightLuma = 250          // at or above: near white
     static let shadowLuma = 5               // at or below: near black
@@ -53,29 +62,26 @@ struct Histogram {
     }
 }
 
-/// Drives the live histogram: receives preview frames from `output` on its own queue, analyses about five a second,
-/// and publishes the results to `model` on the main queue. Frames only arrive while `output` is attached to the session.
+/// Receives preview frames from `output` on its own queue, analyses about five a second and passes each result to
+/// `publish`. Frames only arrive while `output` is attached to the session.
+///
+/// Owned by `CaptureSession` and never shared, so it isn't Sendable. `lastFrameTime` is only touched by the
+/// delegate callback, which AVFoundation always calls on `queue`.
 final class HistogramAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-    let model = HistogramModel()
     let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "glint.analysis")
     private let updateInterval: Double = 0.2   // seconds
-    private var lastFrameTime: Double = 0      // analysis queue only
-    private var isPublishing = false           // main queue only
+    private var lastFrameTime: Double = 0
+    private let publish: @Sendable (Histogram) -> Void
 
-    override init() {
+    init(publish: @escaping @Sendable (Histogram) -> Void) {
+        self.publish = publish
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [   // only the luma plane is read
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
         output.setSampleBufferDelegate(self, queue: queue)
-    }
-
-    /// Call on the main queue. Turning off clears the histogram and drops any frame already in flight.
-    func setPublishing(_ on: Bool) {
-        isPublishing = on
-        if !on { model.bins = [] }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
@@ -85,11 +91,6 @@ final class HistogramAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDel
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
               let histogram = Histogram(lumaOf: pixelBuffer) else { return }
-        DispatchQueue.main.async {
-            guard self.isPublishing else { return }
-            self.model.bins = histogram.bins
-            self.model.clipsHighlights = histogram.clipsHighlights
-            self.model.clipsShadows = histogram.clipsShadows
-        }
+        publish(histogram)
     }
 }

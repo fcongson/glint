@@ -1,7 +1,7 @@
 import Foundation
 
 /// One of the back cameras, described by its zoom relative to the main (1×) camera.
-struct Lens: Identifiable, Hashable {
+struct Lens: Identifiable, Hashable, Sendable {
     let id: String      // AVCaptureDevice.uniqueID
     let zoom: Double
 

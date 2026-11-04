@@ -1,19 +1,19 @@
 import ImageIO
 import UIKit
 
-enum PhotoFormat {
+enum PhotoFormat: Sendable {
     case raw    // Bayer DNG
     case heic
 }
 
-enum WhiteBalanceSetting: Equatable {
+enum WhiteBalanceSetting: Equatable, Sendable {
     case auto
     case kelvin(Int)
 }
 
 /// Settings a photo was taken with, shown beside it in review. Values only; `SettingsText` formats them.
 /// Optional fields are ones the photo's metadata may not report.
-struct PhotoInfo {
+struct PhotoInfo: Sendable {
     let format: PhotoFormat
     let whiteBalance: WhiteBalanceSetting
     let iso: Int?

@@ -3,8 +3,11 @@ import ImageIO
 import UIKit
 
 /// Turns captured photo data into the small image shown in review.
-/// Safe to call from any queue (CIContext is thread-safe); slow enough that it shouldn't run on main.
-struct ReviewImageRenderer {
+/// Slow enough that it shouldn't run on main.
+///
+/// `@unchecked Sendable`: the only stored state is a `CIContext`, which Apple documents as thread-safe
+/// but which isn't annotated as Sendable.
+struct ReviewImageRenderer: @unchecked Sendable {
     /// Longest side of the review image, in pixels.
     static let maxPixelSize: CGFloat = 1400
 
