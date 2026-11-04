@@ -38,16 +38,6 @@ struct HistogramView: View {
         .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Histogram")
-        .accessibilityValue(clippingDescription)
-    }
-
-    /// The red/cyan clipping colours aren't visible to VoiceOver, so say it in words.
-    private var clippingDescription: String {
-        switch (clipsHighlights, clipsShadows) {
-        case (true, true): "Highlights and shadows clipping"
-        case (true, false): "Highlights clipping"
-        case (false, true): "Shadows clipping"
-        case (false, false): "No clipping"
-        }
+        .accessibilityValue(SettingsText.clipping(highlights: clipsHighlights, shadows: clipsShadows))
     }
 }

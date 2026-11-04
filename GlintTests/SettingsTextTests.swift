@@ -48,4 +48,21 @@ struct SettingsTextTests {
         #expect(SettingsText.format(.raw) == "RAW")
         #expect(SettingsText.format(.heic) == "HEIC")
     }
+
+    @Test func spokenToggleValues() {
+        #expect(SettingsText.exposureMode(manual: true) == "Manual")
+        #expect(SettingsText.exposureMode(manual: false) == "Auto")
+        #expect(SettingsText.onOff(true) == "On")
+        #expect(SettingsText.onOff(false) == "Off")
+    }
+
+    @Test(arguments: [
+        (true, true, "Highlights and shadows clipping"),
+        (true, false, "Highlights clipping"),
+        (false, true, "Shadows clipping"),
+        (false, false, "No clipping"),
+    ])
+    func clipping(highlights: Bool, shadows: Bool, text: String) {
+        #expect(SettingsText.clipping(highlights: highlights, shadows: shadows) == text)
+    }
 }

@@ -120,9 +120,10 @@ struct ContentView: View {
     /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear.
     private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 10) {
-            chip(cam.captureRAW ? "RAW" : "HEIC", label: "Photo format", value: cam.captureRAW ? "RAW" : "HEIC",
+            let format = SettingsText.format(cam.captureRAW ? .raw : .heic)
+            chip(format, label: "Photo format", value: format,
                  on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
-            chip(cam.manual ? "M" : "A", label: "Exposure mode", value: cam.manual ? "Manual" : "Auto",
+            chip(cam.manual ? "M" : "A", label: "Exposure mode", value: SettingsText.exposureMode(manual: cam.manual),
                  on: cam.manual) { cam.setManual(!cam.manual) }
             Spacer(minLength: 140)
             if cam.isRecording {
@@ -135,7 +136,7 @@ struct ContentView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Recording")
             }
-            chip("HIST", label: "Histogram", value: cam.isHistogramEnabled ? "On" : "Off",
+            chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
                  on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
         }
         .padding(.horizontal, 16)

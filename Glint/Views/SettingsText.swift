@@ -46,4 +46,20 @@ enum SettingsText {
         case .heic: "HEIC"
         }
     }
+
+    /// Spoken value for the exposure mode chip, whose visible label is just "M" or "A".
+    static func exposureMode(manual: Bool) -> String { manual ? "Manual" : "Auto" }
+
+    /// Spoken value for a toggle that is shown only by colour.
+    static func onOff(_ isOn: Bool) -> String { isOn ? "On" : "Off" }
+
+    /// Histogram clipping in words, since it's otherwise shown only as red and cyan bars.
+    static func clipping(highlights: Bool, shadows: Bool) -> String {
+        switch (highlights, shadows) {
+        case (true, true): "Highlights and shadows clipping"
+        case (true, false): "Highlights clipping"
+        case (false, true): "Shadows clipping"
+        case (false, false): "No clipping"
+        }
+    }
 }
