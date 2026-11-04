@@ -1,69 +1,5 @@
 import AVFoundation
-import CoreImage
-import ImageIO
-import Photos
 import SwiftUI
-
-struct Lens: Identifiable, Hashable {
-    let id: String      // AVCaptureDevice.uniqueID
-    let label: String   // "0.5×", "1×", "3×"
-    let zoom: Double
-}
-
-/// Settings a photo was taken with, shown beside it in review.
-struct PhotoInfo {
-    var format: String
-    var iso: String?
-    var shutter: String?
-    var aperture: String?
-    var focalLength: String?
-    var whiteBalance: String
-
-    /// Label/value pairs, skipping anything the photo's metadata didn't report.
-    var rows: [(label: String, value: String)] {
-        var r: [(String, String)] = []
-        if let iso { r.append(("ISO", iso)) }
-        if let shutter { r.append(("SHUTTER", shutter)) }
-        if let aperture { r.append(("APERTURE", aperture)) }
-        if let focalLength { r.append(("FOCAL", focalLength)) }
-        r.append(("WB", whiteBalance))
-        r.append(("FORMAT", format))
-        return r
-    }
-
-    init(metadata: [String: Any], format: String, whiteBalance: String) {
-        self.format = format
-        self.whiteBalance = whiteBalance
-        let exif = metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
-        if let isos = exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber], let v = isos.first {
-            iso = "\(v.intValue)"
-        }
-        if let t = (exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue, t > 0 {
-            shutter = t < 1 ? "1/\(Int((1 / t).rounded()))" : String(format: "%gs", t)
-        }
-        if let f = (exif[kCGImagePropertyExifFNumber as String] as? NSNumber)?.doubleValue {
-            aperture = String(format: "\u{0192}/%.1f", f)
-        }
-        if let mm = (exif[kCGImagePropertyExifFocalLenIn35mmFilm as String] as? NSNumber)?.intValue, mm > 0 {
-            focalLength = "\(mm)mm"
-        }
-    }
-}
-
-/// One reviewed photo: the review-size image plus the settings it was taken with.
-struct Shot: Identifiable {
-    let id = UUID()
-    let image: UIImage
-    let info: PhotoInfo
-}
-
-/// Separate from the controller so histogram updates redraw only the histogram, not the whole screen.
-@Observable
-final class HistogramModel {
-    var bins: [Float] = []
-    var clipHigh: Float = 0
-    var clipLow: Float = 0
-}
 
 /// UI-facing properties are observed by SwiftUI and only written on the main queue.
 /// They're read-only from outside: views change them through the `set…` methods, which also push the change
@@ -75,10 +11,8 @@ final class CameraController: NSObject {
     private let sessionQueue = DispatchQueue(label: "glint.session")
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
-    private let videoDataOutput = AVCaptureVideoDataOutput()
-    private let analysisQueue = DispatchQueue(label: "glint.analysis")
-    @ObservationIgnored private var lastHistogramTime: Double = 0
-    private let ciContext = CIContext()
+    private let histogram = HistogramAnalyzer()
+    private let reviewRenderer = ReviewImageRenderer()
     @ObservationIgnored private var device: AVCaptureDevice?
     @ObservationIgnored private var videoInput: AVCaptureDeviceInput?
     @ObservationIgnored private var lensDevices: [String: AVCaptureDevice] = [:]
@@ -97,11 +31,11 @@ final class CameraController: NSObject {
     private(set) var aperture: Float = 0
     private(set) var whiteBalanceKelvin: Float = 5500
     private(set) var isHistogramEnabled = false
-    let histogramModel = HistogramModel()
+    var histogramModel: HistogramModel { histogram.model }
     private(set) var timing = ""
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
-    private let maxShots = 30             // review images are ~1400px bitmaps, so keep memory bounded
+    private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
     @ObservationIgnored private var wbTint: Float = 0
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var statusGeneration = 0
@@ -195,20 +129,11 @@ final class CameraController: NSObject {
         videoInput = input
         device = wide
 
-        // Work out each lens's zoom factor relative to the main camera from its field of view.
-        let wideTan = tan(Double(wide.activeFormat.videoFieldOfView) * .pi / 360)
-        var list: [Lens] = []
-        for d in found {
-            let t = tan(Double(d.activeFormat.videoFieldOfView) * .pi / 360)
-            let raw = wideTan / t
-            // Snap to the zoom factors iPhones actually ship with; FOV-derived estimates run slightly off.
-            let known: [Double] = [0.5, 1, 2, 2.5, 3, 5]
-            let zoom = known.min(by: { abs($0 - raw) < abs($1 - raw) }) ?? raw
-            let label = zoom < 1 ? String(format: "%.1f×", zoom) : String(format: "%g×", zoom)
-            lensDevices[d.uniqueID] = d
-            list.append(Lens(id: d.uniqueID, label: label, zoom: zoom))
-        }
-        list.sort { $0.zoom < $1.zoom }
+        for d in found { lensDevices[d.uniqueID] = d }
+        let list = found
+            .map { Lens(id: $0.uniqueID, fieldOfView: $0.activeFormat.videoFieldOfView,
+                        mainFieldOfView: wide.activeFormat.videoFieldOfView) }
+            .sorted { $0.zoom < $1.zoom }
 
         if withAudio, let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic), session.canAddInput(micInput) {
@@ -222,12 +147,7 @@ final class CameraController: NSObject {
         if session.canAddOutput(movieOutput) {
             session.addOutput(movieOutput)
         }
-        // Luma-only frames for the live histogram.
-        videoDataOutput.alwaysDiscardsLateVideoFrames = true
-        videoDataOutput.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-        ]
-        videoDataOutput.setSampleBufferDelegate(self, queue: analysisQueue)
+        // The histogram's output is attached separately, only while it's switched on.
         session.commitConfiguration()
 
         applyDeviceSettings(wide)
@@ -421,15 +341,16 @@ final class CameraController: NSObject {
     func setHistogramEnabled(_ on: Bool) {
         guard on != isHistogramEnabled else { return }
         isHistogramEnabled = on
-        if !on { histogramModel.bins = [] }
+        histogram.setPublishing(on)
+        let output = histogram.output
         sessionQueue.async {
             self.session.beginConfiguration()
             if on {
-                if !self.session.outputs.contains(self.videoDataOutput), self.session.canAddOutput(self.videoDataOutput) {
-                    self.session.addOutput(self.videoDataOutput)
+                if !self.session.outputs.contains(output), self.session.canAddOutput(output) {
+                    self.session.addOutput(output)
                 }
-            } else if self.session.outputs.contains(self.videoDataOutput) {
-                self.session.removeOutput(self.videoDataOutput)
+            } else if self.session.outputs.contains(output) {
+                self.session.removeOutput(output)
             }
             self.session.commitConfiguration()
             self.allowHapticsDuringRecording()
@@ -521,36 +442,7 @@ final class CameraController: NSObject {
         }
     }
 
-    // MARK: Saving
-
-    private static let timestampFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f
-    }()
-
-    /// The capture ID keeps names unique when several shots land in the same second.
-    private func saveToDocuments(_ data: Data, ext: String, captureID: Int64) {
-        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        let name = "IMG-\(Self.timestampFormatter.string(from: Date()))-\(captureID).\(ext)"
-        do { try data.write(to: dir.appendingPathComponent(name)) }
-        catch { post("Save failed: \(error.localizedDescription)") }
-    }
-
-    private func saveToPhotos(data: Data, uti: String?) {
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { auth in
-            guard auth == .authorized || auth == .limited else { self.post("Photos access denied"); return }
-            PHPhotoLibrary.shared().performChanges({
-                let req = PHAssetCreationRequest.forAsset()
-                let opts = PHAssetResourceCreationOptions()
-                if let uti { opts.uniformTypeIdentifier = uti }
-                req.addResource(with: .photo, data: data, options: opts)
-            }) { ok, err in
-                self.post(ok ? "Saved" : "Save failed: \(err?.localizedDescription ?? "?")")
-            }
-        }
-    }
+    // MARK: Status
 
     /// Shows a transient status message, cleared after a moment unless a newer one has replaced it.
     private func post(_ s: String) {
@@ -577,12 +469,11 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
                              whiteBalance: pending?.whiteBalance ?? "Auto")
         // Keep the capture callback queue free: saving and rendering the review image both happen off to the side.
         DispatchQueue.global(qos: .utility).async {
-            self.saveToDocuments(data, ext: raw ? "dng" : "heic", captureID: captureID)
-            self.saveToPhotos(data: data, uti: raw ? "com.adobe.raw-image" : nil)
+            MediaLibrary.savePhoto(data, isRAW: raw, captureID: captureID, report: self.post)
         }
         DispatchQueue.global(qos: .userInitiated).async {
             let t0 = CFAbsoluteTimeGetCurrent()
-            let img = self.makePreviewImage(from: data, raw: raw)
+            let img = self.reviewRenderer.render(data, isRAW: raw)
             let render = CFAbsoluteTimeGetCurrent() - t0
             DispatchQueue.main.async {
                 if let img {
@@ -596,72 +487,6 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
             }
         }
     }
-
-    fileprivate func makePreviewImage(from data: Data, raw: Bool) -> UIImage? {
-        let maxSide: CGFloat = 1400
-        guard raw else {
-            // ImageIO decodes straight to review size (and applies orientation) without materialising the full 12MP bitmap.
-            let opts: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxSide
-            ]
-            guard let src = CGImageSourceCreateWithData(data as CFData, nil),
-                  let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-            return UIImage(cgImage: cg)
-        }
-        // Decode at review size instead of the full 12MP.
-        guard let f = CIRAWFilter(imageData: data, identifierHint: "com.adobe.raw-image") else { return nil }
-        let longest = max(f.nativeSize.width, f.nativeSize.height)
-        if longest > 0 { f.scaleFactor = Float(min(1, maxSide / longest)) }
-        f.isDraftModeEnabled = true   // review thumbnail only: favour speed over final-quality decode
-        guard let img = f.outputImage,
-              let cg = ciContext.createCGImage(img, from: img.extent) else { return nil }
-        return UIImage(cgImage: cg)
-    }
-}
-
-extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-        guard t - lastHistogramTime > 0.2 else { return }   // ~5 updates per second
-        lastHistogramTime = t
-
-        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer),
-              CVPixelBufferGetPlaneCount(pb) > 0 else { return }
-        CVPixelBufferLockBaseAddress(pb, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddressOfPlane(pb, 0) else { return }
-
-        let w = CVPixelBufferGetWidthOfPlane(pb, 0)
-        let h = CVPixelBufferGetHeightOfPlane(pb, 0)
-        let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pb, 0)
-        let ptr = base.assumingMemoryBound(to: UInt8.self)
-
-        var bins = [Int](repeating: 0, count: 64)
-        var total = 0, hi = 0, lo = 0
-        let step = 8
-        for y in stride(from: 0, to: h, by: step) {
-            let row = ptr + y * bytesPerRow
-            for x in stride(from: 0, to: w, by: step) {
-                let v = Int(row[x])
-                bins[v >> 2] += 1
-                total += 1
-                if v >= 250 { hi += 1 }
-                if v <= 5 { lo += 1 }
-            }
-        }
-        guard total > 0 else { return }
-        let peak = Float(max(bins.max() ?? 1, 1))
-        let norm = bins.map { (Float($0) / peak).squareRoot() }   // sqrt so small values stay visible
-        let high = Float(hi) / Float(total), low = Float(lo) / Float(total)
-        DispatchQueue.main.async {
-            guard self.isHistogramEnabled else { return }   // a frame already in flight when it was switched off
-            self.histogramModel.bins = norm
-            self.histogramModel.clipHigh = high
-            self.histogramModel.clipLow = low
-        }
-    }
 }
 
 extension CameraController: AVCaptureFileOutputRecordingDelegate {
@@ -671,21 +496,6 @@ extension CameraController: AVCaptureFileOutputRecordingDelegate {
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
         DispatchQueue.main.async { self.isRecording = false }
-        if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            try? FileManager.default.copyItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
-        }
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { auth in
-            guard auth == .authorized || auth == .limited else {
-                self.post("Photos access denied")
-                try? FileManager.default.removeItem(at: url)   // the Documents copy is kept
-                return
-            }
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-            }) { ok, _ in
-                self.post(ok ? "Video saved" : "Video save failed")
-                try? FileManager.default.removeItem(at: url)
-            }
-        }
+        MediaLibrary.saveVideo(at: url, report: post)
     }
 }
