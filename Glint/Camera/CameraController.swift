@@ -226,7 +226,10 @@ final class CameraController {
             if shots.count > maxShots { shots.removeFirst(shots.count - maxShots) }
         }
         #if DEBUG
-        timing = String(format: "shot %.1fs · render %.1fs", shotTime, renderTime)   // dev-only readout
+        var lines = [String(format: "shot    %.1fs", shotTime)]
+        if developTime > 0 { lines.append(String(format: "develop %.1fs", developTime)) }
+        lines.append(String(format: "render  %.1fs", renderTime))
+        timing = lines.joined(separator: "\n")   // dev-only readout
         #endif
     }
 

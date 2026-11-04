@@ -82,6 +82,17 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
+                // there's room to read them; the top bar has no space to spare beside the Dynamic Island.
+                VStack(alignment: .leading, spacing: 6) {
+                    if !cam.status.isEmpty { overlayLabel(cam.status) }
+                    if !cam.timing.isEmpty { overlayLabel(cam.timing) }
+                }
+                .rotationEffect(uiAngle)
+                .padding(8)
+                .allowsHitTesting(false)
+            }
             Spacer(minLength: 0)
             controls
         }
@@ -119,26 +130,21 @@ struct ContentView: View {
                 }
                 .foregroundStyle(Color.red)
                 .rotationEffect(uiAngle)
-            } else if !cam.status.isEmpty {
-                Text(cam.status)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.7))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .rotationEffect(uiAngle)
-            } else if !cam.timing.isEmpty {
-                Text(cam.timing)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.5))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                    .rotationEffect(uiAngle)
             }
             chip("HIST", on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
         }
         .padding(.horizontal, 16)
         .padding(.top, topPadding)
         .padding(.bottom, 10)
+    }
+
+    private func overlayLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 15, weight: .medium, design: .monospaced))
+            .foregroundStyle(Color.white)
+            .multilineTextAlignment(.leading)
+            .padding(8)
+            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
