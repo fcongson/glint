@@ -72,13 +72,12 @@ struct ContentView: View {
             .clipped()
             .overlay(alignment: .topTrailing) {
                 if cam.isHistogramEnabled {
-                    // rotationEffect doesn't change layout, so reserve the rotated footprint to keep it inside the corner.
-                    let quarterTurn = Int((uiAngle.degrees / 90).rounded()) % 2 != 0
+                    // Reserve the rotated footprint so it stays inside the corner.
                     let size = HistogramView.size
                     HistogramContainer(model: cam.histogramModel)
                         .rotationEffect(uiAngle)
-                        .frame(width: quarterTurn ? size.height : size.width,
-                               height: quarterTurn ? size.width : size.height)
+                        .frame(width: uiAngle.isQuarterTurn ? size.height : size.width,
+                               height: uiAngle.isQuarterTurn ? size.width : size.height)
                         .padding(8)
                         .allowsHitTesting(false)
                 }
@@ -148,10 +147,8 @@ struct ContentView: View {
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .foregroundStyle(on ? Color.black : Color.white)
-                .background(on ? Color.yellow : Color.white.opacity(0.15), in: Capsule())
-                .rotationEffect(uiAngle)
         }
+        .buttonStyle(ChipStyle(isOn: on, angle: uiAngle))
     }
 
     // MARK: Bottom controls
@@ -163,7 +160,7 @@ struct ContentView: View {
                     readout("ISO", SettingsText.iso(cam.iso), .iso)
                     readout("SHUTTER", SettingsText.shutter(denominator: cam.shutterDenominator), .shutter)
                     readout("WB", SettingsText.kelvin(cam.whiteBalanceKelvin), .wb)
-                    staticReadout("APERTURE", SettingsText.aperture(Double(cam.aperture)))
+                    SettingReadout(label: "APERTURE", value: SettingsText.aperture(Double(cam.aperture)), angle: uiAngle)   // fixed lens: display only
                 }
                 Group {
                     if selected == .iso {
@@ -211,7 +208,6 @@ struct ContentView: View {
     private var wbPresetPicker: some View {
         HStack(spacing: 6) {
             ForEach(ExposureScale.whiteBalancePresets, id: \.name) { preset in
-                let on = cam.whiteBalanceKelvin == preset.kelvin
                 Button { cam.setWhiteBalanceKelvin(preset.kelvin) } label: {
                     Text(preset.name)
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -219,52 +215,28 @@ struct ContentView: View {
                         .minimumScaleFactor(0.7)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
-                        .foregroundStyle(on ? Color.black : Color.white)
-                        .background(on ? Color.yellow : Color.white.opacity(0.15), in: Capsule())
-                        .rotationEffect(uiAngle)
                 }
+                .buttonStyle(ChipStyle(isOn: cam.whiteBalanceKelvin == preset.kelvin, angle: uiAngle))
             }
         }
     }
 
+    /// Tapping a readout chooses which setting the ruler below adjusts.
     private func readout(_ label: String, _ value: String, _ p: Param) -> some View {
         Button { selected = p } label: {
-            VStack(spacing: 2) {
-                Text(label)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.6))
-                Text(value)
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(selected == p ? Color.yellow : Color.white)
-            }
-            .rotationEffect(uiAngle)
+            SettingReadout(label: label, value: value, highlighted: selected == p, angle: uiAngle)
         }
-    }
-
-    private func staticReadout(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.6))
-            Text(value)
-                .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.white)
-        }
-        .rotationEffect(uiAngle)
     }
 
     private var lensPicker: some View {
         HStack(spacing: 8) {
             ForEach(cam.lenses) { lens in
-                let on = cam.currentLensID == lens.id
                 Button { cam.switchLens(to: lens) } label: {
                     Text(lens.label)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .frame(width: 44, height: 32)
-                        .foregroundStyle(on ? Color.black : Color.white)
-                        .background(on ? Color.yellow : Color.white.opacity(0.15), in: Capsule())
-                        .rotationEffect(uiAngle)
                 }
+                .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: uiAngle))
             }
         }
     }
@@ -317,170 +289,5 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.2), value: cam.isRecording)
         }
         .buttonStyle(PressScaleStyle())
-    }
-}
-
-struct PressScaleStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
-
-struct FocusBox: View {
-    @State private var settled = false
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 4)
-            .stroke(Color.yellow, lineWidth: 1.5)
-            .frame(width: 72, height: 72)
-            .scaleEffect(settled ? 1 : 1.35)
-            .opacity(settled ? 1 : 0.4)
-            .allowsHitTesting(false)
-            .onAppear { withAnimation(.easeOut(duration: 0.25)) { settled = true } }
-    }
-}
-
-struct HistogramContainer: View {
-    let model: HistogramModel
-
-    var body: some View {
-        if !model.bins.isEmpty {
-            HistogramView(bins: model.bins, clipsHighlights: model.clipsHighlights, clipsShadows: model.clipsShadows)
-        }
-    }
-}
-
-struct HistogramView: View {
-    let bins: [Float]
-    let clipsHighlights: Bool   // decided by Histogram; the view only picks colours
-    let clipsShadows: Bool
-
-    /// Total footprint including padding.
-    static let size = CGSize(width: 132, height: 56)
-
-    var body: some View {
-        Canvas { ctx, size in
-            guard !bins.isEmpty else { return }
-            let w = size.width / CGFloat(bins.count)
-            for (i, v) in bins.enumerated() {
-                let h = max(CGFloat(v) * size.height, 0.5)
-                let rect = CGRect(x: CGFloat(i) * w, y: size.height - h, width: max(w - 0.6, 0.5), height: h)
-                var color = Color.white.opacity(0.85)
-                if i >= bins.count - 2 && clipsHighlights { color = Color.red }
-                if i <= 1 && clipsShadows { color = Color.cyan }
-                ctx.fill(Path(rect), with: .color(color))
-            }
-        }
-        .frame(width: 120, height: 44)
-        .padding(6)
-        .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-/// Full-screen photo review; tap anywhere to close.
-struct ReviewView: View {
-    let shots: [Shot]
-    let angle: Angle   // device rotation; the screen stays portrait, so the image turns instead
-    @State private var selection: UUID?
-    @Environment(\.dismiss) private var dismiss
-
-    init(shots: [Shot], angle: Angle) {
-        self.shots = shots
-        self.angle = angle
-        _selection = State(initialValue: shots.last?.id)   // open on the newest photo
-    }
-
-    private var current: Shot? { shots.first { $0.id == selection } }
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-                .onTapGesture { dismiss() }
-            // Swipe sideways to move between photos taken this session.
-            TabView(selection: $selection) {
-                ForEach(shots) { shot in
-                    page(shot.image).tag(Optional(shot.id))
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
-            if let info = current?.info {
-                // The strip stays put at the bottom, like the camera buttons; only its contents turn.
-                VStack {
-                    Spacer()
-                    HStack(spacing: 14) {
-                        ForEach(rows(for: info), id: \.label) { row in
-                            VStack(spacing: 2) {
-                                Text(row.label)
-                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(Color.white.opacity(0.6))
-                                Text(row.value)
-                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(Color.white)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.7)
-                            }
-                            .rotationEffect(angle)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
-                    .padding(.bottom, 24)
-                }
-                .animation(.easeInOut(duration: 0.3), value: angle)
-                .allowsHitTesting(false)
-            }
-            // Explicit way back to the camera; the icon turns with the device like the other controls.
-            VStack {
-                HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.15), in: Circle())
-                            .rotationEffect(angle)
-                            .animation(.easeInOut(duration: 0.3), value: angle)
-                    }
-                    .accessibilityLabel("Back to camera")
-                    Spacer()
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-        }
-    }
-
-    /// Label/value pairs, skipping anything the photo's metadata didn't report.
-    private func rows(for info: PhotoInfo) -> [(label: String, value: String)] {
-        var rows: [(label: String, value: String)] = []
-        if let iso = info.iso { rows.append(("ISO", "\(iso)")) }
-        if let seconds = info.exposureSeconds { rows.append(("SHUTTER", SettingsText.shutter(seconds: seconds))) }
-        if let f = info.fNumber { rows.append(("APERTURE", SettingsText.aperture(f))) }
-        if let mm = info.focalLength35mm { rows.append(("FOCAL", "\(mm)mm")) }
-        rows.append(("WB", SettingsText.whiteBalance(info.whiteBalance)))
-        rows.append(("FORMAT", SettingsText.format(info.format)))
-        return rows
-    }
-
-    private func page(_ image: UIImage) -> some View {
-        GeometryReader { geo in
-            // At a quarter turn the image's width runs along the screen's height, so swap the box before rotating.
-            let quarterTurn = Int((angle.degrees / 90).rounded()) % 2 != 0
-            let box = quarterTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(width: box.width, height: box.height)
-                .rotationEffect(angle)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2)
-        }
-        .animation(.easeInOut(duration: 0.3), value: angle)
-        .contentShape(Rectangle())
-        .onTapGesture { dismiss() }
     }
 }
