@@ -90,6 +90,11 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         publishPeaking = peaking
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
+        // Roughly screen-sized frames rather than full sensor or 4K ones: plenty for a histogram and peaking, and
+        // much less memory traffic on every frame. If peaking starts marking slightly soft detail at this size,
+        // raise `PeakingMask.threshold`.
+        output.automaticallyConfiguresOutputBufferDimensions = false
+        output.deliversPreviewSizedOutputBuffers = true
         output.videoSettings = [   // only the luma plane is read
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
