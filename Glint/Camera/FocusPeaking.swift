@@ -10,17 +10,23 @@ import UIKit
 /// the bend falls away much faster than the steepness does. That matters because the iPhone sharpens its frames,
 /// which puts a steep, bright rim on blurry edges too: steepness can't tell them apart, the bend can.
 ///
+/// Sensor noise bends hardest of all (one pixel up, the next down), so two checks keep it out. The bend has to
+/// clear a multiple of the frame's own noise, measured each frame as the median bend; and it has to continue
+/// along the edge, into the pixel before and after (straight or diagonal), since noise and lone specks don't.
+///
 /// Each cell keeps its best score. A cell is marked when its score clears an absolute floor (so nothing blurry is
 /// ever marked) and is close to the sharpest cells in the frame (so only the plane of focus lights up, not every
 /// edge near it).
 ///
 /// It needs full-size frames: shrinking a frame shrinks its blur too, so soft edges would look crisp.
 struct PeakingMask: Sendable {
-    /// Smallest brightness range (0…255 luma) around a pixel worth scoring, so sensor noise in flat areas isn't.
+    /// Smallest brightness range (0…255 luma) around a pixel worth scoring.
     static let minimumContrast = 24
-    /// Lowest score, in hundredths of the range, that can ever be marked. Crisp edges score 50–100+; an edge
+    /// Lowest score, in hundredths of the range, that can ever be marked. Crisp edges score 50–100; an edge
     /// blurred by a pixel or more scores under 30 even after the camera sharpens it.
     static let minimumSharpness = 35
+    /// How far above the frame's noise (its median bend) a bend has to be to count.
+    static let noiseMultiple = 4
     /// How close to the frame's sharpest cells a cell has to be, in percent of their score.
     static let relativeSharpness = 60
     /// Which cell counts as "the sharpest", as a percentile of scored cells, so one glint can't set the bar.
@@ -57,12 +63,49 @@ struct PeakingMask: Sendable {
         func at(_ x: Int, _ y: Int) -> Int { Int(luma[y * bytesPerRow + x]) }
         func clampX(_ x: Int) -> Int { min(max(x, reach), width - 1 - reach) }
         func clampY(_ y: Int) -> Int { min(max(y, reach), height - 1 - reach) }
-        /// The bend at (x, y) along a direction (dx, dy), in hundredths of the local range; 0 if not worth scoring.
+        /// Signed bend at (x, y) across a direction (dx, dy).
+        func bend(_ x: Int, _ y: Int, _ dx: Int, _ dy: Int) -> Int {
+            2 * at(x, y) - at(x - dx, y - dy) - at(x + dx, y + dy)
+        }
+
+        // The frame's noise: the median bend along each cell row's middle line. Most of any frame is smooth, so
+        // this is what flat areas look like at this ISO and light.
+        var counts = [Int](repeating: 0, count: 256)
+        var sampled = 0
+        for r in 0..<rows {
+            let y = clampY(r * cell + cell / 2)
+            for x in reach..<(width - reach) {
+                counts[min(255, abs(bend(x, y, 1, 0)))] += 1
+                sampled += 1
+            }
+        }
+        var median = 0, seen = 0
+        while median < 255 {
+            seen += counts[median]
+            if seen * 2 >= sampled { break }
+            median += 1
+        }
+        let floorBend = (Self.minimumContrast * Self.minimumSharpness + 99) / 100
+        let minimumBend = max(floorBend, Self.noiseMultiple * median)
+
+        /// The bend at (x, y) across (dx, dy), in hundredths of the local range; 0 if it isn't an edge worth scoring.
         func score(_ x: Int, _ y: Int, _ dx: Int, _ dy: Int) -> Int {
+            let signed = bend(x, y, dx, dy)
+            var strength = abs(signed)
+            guard strength >= minimumBend else { return 0 }   // cheap reject: most pixels are flat
+            // The edge has to carry on into the next pixel along it, either side (straight on or one step
+            // diagonal), bending the same way. Its weakest continuation is what counts.
+            let alongX = dy, alongY = dx
+            for side in stride(from: -1, through: 1, by: 2) {
+                var best = 0
+                for offset in -1...1 {
+                    let next = bend(x + side * alongX + offset * dx, y + side * alongY + offset * dy, dx, dy)
+                    if next.signum() == signed.signum() { best = max(best, abs(next)) }
+                }
+                strength = min(strength, best)
+            }
+            guard strength >= minimumBend else { return 0 }
             let centre = at(x, y)
-            let bend = abs(2 * centre - at(x - dx, y - dy) - at(x + dx, y + dy))
-            // Cheap reject first: most pixels are flat, and a bend this small can't clear the floor.
-            guard bend * 100 >= Self.minimumContrast * Self.minimumSharpness else { return 0 }
             var low = centre, high = centre
             for step in 1...reach {
                 let a = at(x - step * dx, y - step * dy), b = at(x + step * dx, y + step * dy)
@@ -71,7 +114,7 @@ struct PeakingMask: Sendable {
             }
             let range = high - low
             guard range >= Self.minimumContrast else { return 0 }
-            return bend * 100 / range
+            return min(100, strength * 100 / range)
         }
         // Each cell is scanned along its middle row (for vertical edges) and middle column (for horizontal ones),
         // every pixel, since an edge's corner is a single pixel. An edge crossing the cell almost always crosses

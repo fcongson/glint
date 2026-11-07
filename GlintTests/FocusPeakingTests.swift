@@ -59,8 +59,40 @@ struct FocusPeakingTests {
         #expect(mask { x, _ in UInt8(min(max((x - 31) * 85, 0), 255)) }.isEmpty)
     }
 
+    /// Repeatable sensor-like noise, roughly ±10 luma standard deviation, with no pattern to line up along.
+    private static func noise(_ x: Int, _ y: Int) -> Int {
+        func hash(_ seed: UInt32) -> Int {
+            var v = UInt32(x) &* 374_761_393 &+ UInt32(y) &* 668_265_263 &+ seed &* 2_246_822_519
+            v = (v ^ (v >> 13)) &* 1_274_126_177
+            return Int((v ^ (v >> 16)) & 0xFF)
+        }
+        return (hash(1) + hash(2)) / 10 - 25
+    }
+
+    private static func clamped(_ v: Int) -> UInt8 { UInt8(min(max(v, 0), 255)) }
+
     @Test func sensorNoiseIsNot() {
-        #expect(mask { x, y in UInt8(128 + (x * 37 + y * 91) % 13 - 6) }.isEmpty)
+        // Single pixels flicking up and down bend harder than any edge, but don't line up into one.
+        #expect(mask { x, y in Self.clamped(128 + Self.noise(x, y)) }.isEmpty)
+    }
+
+    @Test func anInFocusEdgeIsMarkedThroughNoise() {
+        let crisp = Self.edge(Self.crisp, at: 32)
+        let m = mask { x, y in Self.clamped(Int(crisp(x)) + Self.noise(x, y)) }
+        let columns = Set(m.values.indices.filter { m.values[$0] == 255 }.map { $0 % m.width })
+        #expect(columns == [7, 8])
+    }
+
+    @Test func onlyTheSharpestEdgeIsMarkedThroughNoise() {
+        let crisp = Self.edge(Self.crisp, at: 16), soft = Self.edge(Self.soft, at: 48, falling: true)
+        let m = mask { x, y in Self.clamped(Int(x < 32 ? crisp(x) : soft(x)) + Self.noise(x, y)) }
+        let columns = Set(m.values.indices.filter { m.values[$0] == 255 }.map { $0 % m.width })
+        #expect(columns == [3, 4])
+    }
+
+    @Test func loneSpecksAreNot() {
+        // Dark single-pixel dots on a light ground, like out-of-focus granite or dust: no edge runs through them.
+        #expect(mask { x, y in x % 7 == 3 && y % 5 == 2 ? 90 : 180 }.isEmpty)
     }
 
     @Test func aBlurryRampIsNot() {
@@ -80,7 +112,10 @@ struct FocusPeakingTests {
 
     @Test func fineTextureIsMarked() {
         // Alternating 2-pixel stripes: every stripe edge is a hard corner.
-        #expect(!mask { x, _ in (x / 2) % 2 == 0 ? 40 : 140 }.isEmpty)
+        // Only in the left quarter: a frame that is all fine detail would read as all noise.
+        let m = mask { x, _ in x < 16 ? ((x / 2) % 2 == 0 ? 40 : 140) : 90 }
+        let columns = Set(m.values.indices.filter { m.values[$0] == 255 }.map { $0 % m.width })
+        #expect(columns == [0, 1, 2, 3])
     }
 
     @Test func flatGreyIsNot() {
