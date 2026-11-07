@@ -30,6 +30,12 @@ struct PeakingMask: Sendable {
 
     init(luma: UnsafePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int,
          columns: Int = PeakingMask.columns, threshold: Int = PeakingMask.threshold) {
+        guard width >= 3, height >= 3 else {   // too small to have neighbours on both sides
+            self.width = 0
+            self.height = 0
+            self.values = []
+            return
+        }
         let cell = max(2, max(width, height) / max(columns, 1))
         let cols = width / cell, rows = height / cell
         var values = [UInt8](repeating: 0, count: cols * rows)
@@ -40,8 +46,10 @@ struct PeakingMask: Sendable {
             for c in 0..<cols {
                 var strongest = 0
                 for (ox, oy) in offsets {
-                    let x = c * cell + ox, y = r * cell + oy
-                    guard x > 0, x < width - 1, y > 0, y < height - 1 else { continue }
+                    // Kept one pixel in from the edges, so every sample has a neighbour on each side; a sample
+                    // that fell on the border would otherwise be skipped and miss an edge there.
+                    let x = min(max(c * cell + ox, 1), width - 2)
+                    let y = min(max(r * cell + oy, 1), height - 2)
                     let dx = abs(Int(luma[y * bytesPerRow + x + 1]) - Int(luma[y * bytesPerRow + x - 1]))
                     let dy = abs(Int(luma[(y + 1) * bytesPerRow + x]) - Int(luma[(y - 1) * bytesPerRow + x]))
                     strongest = max(strongest, dx + dy)
