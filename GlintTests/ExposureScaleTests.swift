@@ -31,12 +31,6 @@ struct ExposureScaleTests {
         #expect(kelvins.filter(ExposureScale.isMajorWhiteBalance) == stride(from: 2000, through: 10000, by: 1000).map { Float($0) })
     }
 
-    @Test func presetsAreOnTheRuler() {
-        for preset in ExposureScale.whiteBalancePresets {
-            #expect(ExposureScale.whiteBalanceKelvins.contains(preset.kelvin), "\(preset.name)")
-        }
-    }
-
     @Test(arguments: [
         (Float(5520), Float(5500)),
         (5560, 5600),

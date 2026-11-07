@@ -25,6 +25,14 @@ enum CaptureEvent: Sendable {
     /// Entering manual locked the auto white balance; this is the nearest ruler stop to show for it.
     case whiteBalanceSeeded(kelvin: Float)
     case previewRotation(angle: CGFloat)
+    /// The meter: how far the current exposure is from what the camera's metering wants, in stops.
+    case exposureOffset(Float)
+    /// Where the lens is (0 nearest … 1 farthest), reported as it moves.
+    case lensPosition(Float)
+    /// Manual focus took over from autofocus; this is where the lens was locked, so the rail starts there.
+    case manualFocusSeeded(Float)
+    /// This lens can't be focused by hand, so autofocus stays on.
+    case manualFocusUnavailable
     case histogram(Histogram)
     case photoCaptured(CapturedPhoto)
     case recordingStarted
@@ -65,6 +73,8 @@ actor CaptureSession {
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var rotationObservation: NSKeyValueObservation?
     private var subjectAreaObserver: (any NSObjectProtocol)?
+    private var deviceObservations: [NSKeyValueObservation] = []   // meter and lens position, for the active device
+    private var manualFocusPosition: Float?   // nil while autofocus is in charge
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
@@ -159,8 +169,20 @@ actor CaptureSession {
             }
         }
         movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
+        observeMeterAndLens(d)
         return DeviceInfo(lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
                           aperture: d.lensAperture)
+    }
+
+    /// Reports the exposure offset (for the meter) and the lens position (for the focus rail) as they change,
+    /// throttled so a moving scene doesn't flood the main actor. Replaces the previous lens's observers.
+    private func observeMeterAndLens(_ d: AVCaptureDevice) {
+        let meter = Throttled(interval: 0.1, minChange: 0.05) { [emit] offset in emit.yield(.exposureOffset(offset)) }
+        let lens = Throttled(interval: 0.1, minChange: 0.005) { [emit] position in emit.yield(.lensPosition(position)) }
+        deviceObservations = [
+            d.observe(\.exposureTargetOffset, options: [.initial, .new]) { d, _ in meter.send(d.exposureTargetOffset) },
+            d.observe(\.lensPosition, options: [.initial, .new]) { d, _ in lens.send(d.lensPosition) },
+        ]
     }
 
     // MARK: Rotation
@@ -210,16 +232,17 @@ actor CaptureSession {
 
     // MARK: Exposure and white balance
 
-    /// Manual: custom exposure plus locked white balance. Otherwise everything returns to continuous auto.
-    /// Focus stays continuous autofocus either way. `keepWhiteBalance` re-applies `kelvin` (after a lens switch)
-    /// instead of locking whatever auto has currently chosen.
-    func setExposureMode(manual: Bool, iso: Float, shutterDenominator: Double, kelvin: Float, keepWhiteBalance: Bool) {
+    /// Manual: custom exposure plus locked white balance, and the lens locked at `manualFocus` if there is one
+    /// (otherwise continuous autofocus). Auto: everything returns to continuous auto, including focus.
+    /// `keepWhiteBalance` re-applies `kelvin` (after a lens switch) instead of locking whatever auto has currently chosen.
+    func setExposureMode(manual: Bool, iso: Float, shutterDenominator: Double, kelvin: Float, keepWhiteBalance: Bool,
+                         manualFocus: Float?) {
         guard let d = device else { return }
         withLockedDevice(d, failure: "Config") { d in
             guard manual else {
                 if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
                 if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
-                if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
+                applyFocus(d, lockedAt: nil)
                 return
             }
             if d.isExposureModeSupported(.custom) {   // setExposureModeCustom raises if unsupported
@@ -239,7 +262,7 @@ actor CaptureSession {
                     emit.yield(.whiteBalanceSeeded(kelvin: ExposureScale.nearest(tt.temperature, in: ExposureScale.whiteBalanceKelvins)))
                 }
             }
-            if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
+            applyFocus(d, lockedAt: manualFocus)
         }
     }
 
@@ -310,11 +333,46 @@ actor CaptureSession {
     /// Whether the user has exposure locked; read from the device itself so there's no second copy of the flag.
     private func isManualExposure(_ d: AVCaptureDevice) -> Bool { d.exposureMode == .custom }
 
-    /// Tap to focus: one autofocus pass at the tapped point (exposure follows in auto mode).
-    /// When the scene changes, `resumeContinuousFocus` hands control back to continuous autofocus.
+    /// Manual focus: locks the lens at `position` (0 nearest … 1 farthest). With no position it locks wherever
+    /// autofocus has the lens right now and reports that as `.manualFocusSeeded`, so taking over doesn't jump.
+    func setManualFocus(_ position: Float?) {
+        guard let d = device else { return }
+        guard d.isLockingFocusWithCustomLensPositionSupported else {
+            emit.yield(.manualFocusUnavailable)
+            emit.yield(.status("Manual focus isn't available on this lens"))
+            return
+        }
+        withLockedDevice(d, failure: "Focus") { d in
+            let target = position ?? d.lensPosition
+            applyFocus(d, lockedAt: target)
+            if position == nil { emit.yield(.manualFocusSeeded(target)) }
+        }
+    }
+
+    /// Hands focus back to continuous autofocus.
+    func setAutofocus() {
+        guard let d = device else { return }
+        withLockedDevice(d, failure: "Focus") { d in applyFocus(d, lockedAt: nil) }
+    }
+
+    /// Locks the lens at `position`, or with nil returns to continuous autofocus. The device must already be locked.
+    private func applyFocus(_ d: AVCaptureDevice, lockedAt position: Float?) {
+        if let position, d.isLockingFocusWithCustomLensPositionSupported {
+            manualFocusPosition = position
+            d.isSubjectAreaChangeMonitoringEnabled = false
+            d.setFocusModeLocked(lensPosition: FocusScale.clamp(position), completionHandler: nil)
+        } else {
+            manualFocusPosition = nil
+            if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
+        }
+    }
+
+    /// Tap to focus: one autofocus pass at the tapped point (exposure follows in auto mode). Tapping also ends
+    /// manual focus. When the scene changes, `resumeContinuousFocus` hands control back to continuous autofocus.
     func focus(at point: CGPoint) {
         guard let d = device else { return }
         withLockedDevice(d, failure: "Focus") { d in
+            manualFocusPosition = nil
             if d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.autoFocus) {
                 d.focusPointOfInterest = point
                 d.focusMode = .autoFocus
@@ -331,7 +389,8 @@ actor CaptureSession {
         guard let d = device else { return }
         withLockedDevice(d, failure: "Focus") { d in
             let center = CGPoint(x: 0.5, y: 0.5)
-            if d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.continuousAutoFocus) {
+            // A notification still in flight must not undo manual focus set since the tap.
+            if manualFocusPosition == nil, d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.continuousAutoFocus) {
                 d.focusPointOfInterest = center
                 d.focusMode = .continuousAutoFocus
             }

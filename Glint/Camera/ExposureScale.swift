@@ -14,10 +14,6 @@ enum ExposureScale {
     /// White balance runs 2000–10000K in 100K steps.
     static let whiteBalanceKelvins: [Float] = stride(from: 2000, through: 10000, by: 100).map { Float($0) }
 
-    static let whiteBalancePresets: [(name: String, kelvin: Float)] = [
-        ("Tungsten", 3200), ("Fluor.", 4000), ("Daylight", 5500), ("Flash", 5600), ("Cloudy", 6500), ("Shade", 7500)
-    ]
-
     /// The ISO stops within a lens's range. Never empty: falls back to the minimum if no conventional stop fits.
     static func isoStops(min: Float, max: Float) -> [Float] {
         let stops = allISOStops.filter { $0 >= min && $0 <= max }

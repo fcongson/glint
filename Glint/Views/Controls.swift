@@ -9,7 +9,7 @@ struct PressScaleStyle: ButtonStyle {
     }
 }
 
-/// The yellow-when-on capsule shared by toggles and option pickers. Callers set the font and size;
+/// The amber-when-on capsule shared by toggles and option pickers. Callers set the font and size;
 /// this owns the on/off colours, the press feedback and turning the label with the device.
 struct ChipStyle: ButtonStyle {
     let isOn: Bool
@@ -18,7 +18,7 @@ struct ChipStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(isOn ? Color.black : Color.white)
-            .background(isOn ? Color.yellow : Color.white.opacity(0.15), in: Capsule())
+            .background(isOn ? Color.amber : Color.white.opacity(0.15), in: Capsule())
             .rotationEffect(angle)
             .opacity(configuration.isPressed ? 0.6 : 1)
     }
@@ -38,10 +38,111 @@ struct SettingReadout: View {
                 .foregroundStyle(Color.white.opacity(0.6))
             Text(value)
                 .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                .foregroundStyle(highlighted ? Color.yellow : Color.white)
+                .foregroundStyle(highlighted ? Color.amber : Color.white)
         }
         .rotationEffect(angle)
     }
+}
+
+/// Leica-style meter: ▶ lights when under, ● on target, ◀ when over, with the offset in stops beside it.
+struct ExposureMeterView: View {
+    let meter: ExposureMeter
+    let angle: Angle
+
+    var body: some View {
+        HStack(spacing: 4) {
+            led("▶", lit: meter.reading == .under)
+            led("●", lit: meter.reading == .onTarget)
+            led("◀", lit: meter.reading == .over)
+            Text(SettingsText.meterOffset(meter.offset))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.white)
+                .frame(width: 36, alignment: .trailing)
+        }
+        .fixedSize()
+        .rotationEffect(angle)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Exposure meter")
+        .accessibilityValue(SettingsText.meterSpoken(meter))
+    }
+
+    private func led(_ symbol: String, lit: Bool) -> some View {
+        Text(symbol)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(lit ? Color.red : Color.red.opacity(0.25))
+    }
+}
+
+/// One choice in a `SegmentedSwitch` or `ModeStrip`.
+struct SwitchOption<Value: Hashable> {
+    let title: String
+    let value: Value
+}
+
+/// Two options side by side in one capsule, like AUTO | MANUAL. Labels stay horizontal when the phone turns,
+/// like the system Camera's mode labels.
+struct SegmentedSwitch<Value: Hashable>: View {
+    let label: String
+    let options: [SwitchOption<Value>]
+    let selection: Value
+    let onSelect: (Value) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options, id: \.value) { option in
+                let selected = option.value == selection
+                Button { onSelect(option.value) } label: {
+                    Text(option.title)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(selected ? Color.black : Color.white)
+                        .frame(width: 62, height: 44)
+                        .background(selected ? Color.amber : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .background(Color.white.opacity(0.12), in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+    }
+}
+
+/// PHOTO · VIDEO under the shutter: the current mode is white with a dot under it, the other is dimmed.
+struct ModeStrip<Value: Hashable>: View {
+    let label: String
+    let options: [SwitchOption<Value>]
+    let selection: Value
+    let onSelect: (Value) -> Void
+
+    var body: some View {
+        HStack(spacing: 24) {
+            ForEach(options, id: \.value) { option in
+                let selected = option.value == selection
+                Button { onSelect(option.value) } label: {
+                    VStack(spacing: 4) {
+                        Text(option.title)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(selected ? Color.white : Color.white.opacity(0.55))
+                        Circle()
+                            .fill(selected ? Color.amber : Color.clear)
+                            .frame(width: 4, height: 4)
+                    }
+                    .frame(minWidth: 64, minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+    }
+}
+
+extension Color {
+    /// Glint's accent, the amber from the app icon (#F5A524). Black text on it is about 10:1.
+    static let amber = Color(red: 0xF5 / 255, green: 0xA5 / 255, blue: 0x24 / 255)
 }
 
 extension Angle {

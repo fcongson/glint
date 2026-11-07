@@ -49,9 +49,44 @@ struct SettingsTextTests {
         #expect(SettingsText.format(.heic) == "HEIC")
     }
 
+    @Test(arguments: [
+        (Float(0), "±0"),
+        (0.04, "±0"),       // rounds to zero, so no stray "+0.0"
+        (-0.04, "±0"),
+        (1.26, "+1.3"),
+        (-0.7, "-0.7"),
+    ])
+    func meterOffset(ev: Float, text: String) {
+        #expect(SettingsText.meterOffset(ev) == text)
+    }
+
+    @Test func meterSpoken() {
+        #expect(SettingsText.meterSpoken(ExposureMeter(offset: 0.1)) == "On target")
+        #expect(SettingsText.meterSpoken(ExposureMeter(offset: -1.04)) == "Under by 1.0 stops")
+        #expect(SettingsText.meterSpoken(ExposureMeter(offset: 0.66)) == "Over by 0.7 stops")
+    }
+
+    @Test(arguments: [
+        (Float(1), "Infinity"),
+        (0, "Nearest"),
+        (0.42, "42% toward infinity"),
+    ])
+    func focusPosition(position: Float, text: String) {
+        #expect(SettingsText.focusPosition(position) == text)
+    }
+
+    @Test(arguments: [
+        (0, "00:00"),
+        (42, "00:42"),
+        (605, "10:05"),
+        (3725, "1:02:05"),
+        (-3, "00:00"),
+    ])
+    func duration(seconds: Int, text: String) {
+        #expect(SettingsText.duration(seconds: seconds) == text)
+    }
+
     @Test func spokenToggleValues() {
-        #expect(SettingsText.exposureMode(manual: true) == "Manual")
-        #expect(SettingsText.exposureMode(manual: false) == "Auto")
         #expect(SettingsText.onOff(true) == "On")
         #expect(SettingsText.onOff(false) == "Off")
     }

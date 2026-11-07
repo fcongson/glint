@@ -56,7 +56,7 @@ struct RulerPicker: View {
         )
         .overlay {
             Capsule()
-                .fill(Color.yellow)
+                .fill(Color.amber)
                 .frame(width: 2.5, height: 36)
                 .allowsHitTesting(false)
         }
