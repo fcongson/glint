@@ -50,6 +50,8 @@ enum CaptureEvent: Sendable {
     /// Microphone level while recording, 0 (silence) … 1 (full scale).
     case audioLevel(Float)
     case histogram(Histogram)
+    /// Where the preview frame is in focus.
+    case peaking(PeakingMask)
     case photoCaptured(CapturedPhoto)
     case recordingStarted
     case recordingFinished(URL)
@@ -81,7 +83,7 @@ actor CaptureSession {
 
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
-    private let histogram: HistogramAnalyzer
+    private let analyzer: FrameAnalyzer   // histogram and focus peaking, from one video data output
     private var device: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
     private var lensDevices: [String: AVCaptureDevice] = [:]
@@ -104,7 +106,7 @@ actor CaptureSession {
         let (events, emit) = AsyncStream.makeStream(of: CaptureEvent.self)
         self.events = events
         self.emit = emit
-        histogram = HistogramAnalyzer { emit.yield(.histogram($0)) }
+        analyzer = FrameAnalyzer(histogram: { emit.yield(.histogram($0)) }, peaking: { emit.yield(.peaking($0)) })
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
         self.commands = commands
@@ -167,7 +169,7 @@ actor CaptureSession {
                 movieOutput.isDeferredStartEnabled = false
             }
         }
-        // The histogram's output is attached separately, only while it's switched on.
+        // The analysis output (histogram, peaking) is attached separately, only while one of them is on.
         session.commitConfiguration()
 
         let info = applyDeviceSettings(wide)
@@ -424,9 +426,14 @@ actor CaptureSession {
 
     // MARK: Histogram
 
-    /// Attaches or detaches the luma analysis stream, so it costs nothing while the histogram is off.
-    func setHistogramAttached(_ on: Bool) {
-        let output = histogram.output
+    /// Chooses what the luma analysis stream is for, and attaches it only while something wants it, so it costs
+    /// nothing while the histogram and peaking are both off.
+    func setAnalysis(histogram: Bool, peaking: Bool) {
+        let wants = FrameAnalyzer.Wants(histogram: histogram, peaking: peaking)
+        analyzer.set(wants)
+        let output = analyzer.output
+        let on = wants.any
+        guard on != session.outputs.contains(output) else { return }
         session.beginConfiguration()
         if on {
             if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }

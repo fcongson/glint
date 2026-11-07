@@ -43,6 +43,10 @@ final class CameraController {
     private(set) var whiteBalanceKelvin: Float = 5500
     private(set) var isHistogramEnabled = false
     let histogramModel = HistogramModel()
+    let peakingModel = PeakingModel()
+    /// Focus peaking is shown with manual focus (in MANUAL), where the focus rail is. On by default.
+    private(set) var isPeakingEnabled = true
+    var isPeakingShown: Bool { isPeakingEnabled && manual }
     private(set) var timing = ""
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
@@ -136,6 +140,8 @@ final class CameraController {
             }
         case .histogram(let histogram):
             if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
+        case .peaking(let mask):
+            if isPeakingShown { peakingModel.show(mask) }
         case .photoCaptured(let photo):
             photoCaptured(photo)
         case .recordingStarted:
@@ -213,6 +219,7 @@ final class CameraController {
         guard on != manual else { return }
         manual = on
         sendExposureMode(keepWhiteBalance: hasManualWhiteBalance)
+        sendAnalysis()   // peaking comes and goes with manual
     }
 
     /// Hands one manual setting to the camera (A on) or takes it back (A off). Taking it back starts from what the
@@ -274,7 +281,20 @@ final class CameraController {
         guard on != isHistogramEnabled else { return }
         isHistogramEnabled = on
         if !on { histogramModel.clear() }
-        capture.enqueue { $0.setHistogramAttached(on) }
+        sendAnalysis()
+    }
+
+    func setPeakingEnabled(_ on: Bool) {
+        guard on != isPeakingEnabled else { return }
+        isPeakingEnabled = on
+        sendAnalysis()
+    }
+
+    /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
+    private func sendAnalysis() {
+        let histogram = isHistogramEnabled, peaking = isPeakingShown
+        if !peaking { peakingModel.clear() }
+        capture.enqueue { $0.setAnalysis(histogram: histogram, peaking: peaking) }
     }
 
     // MARK: Focus

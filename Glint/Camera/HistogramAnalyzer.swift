@@ -1,5 +1,6 @@
 import AVFoundation
 import Observation
+import os
 
 /// Separate from the controller so histogram updates redraw only the histogram, not the whole screen.
 @MainActor
@@ -62,20 +63,31 @@ struct Histogram: Sendable {
     }
 }
 
-/// Receives preview frames from `output` on its own queue, analyses about five a second and passes each result to
-/// `publish`. Frames only arrive while `output` is attached to the session.
+/// Receives preview frames from `output` on its own queue and analyses them for whichever of the histogram and
+/// focus peaking is wanted: the histogram about five times a second, peaking about ten (it follows focus as you
+/// turn it). Frames only arrive while `output` is attached to the session, which is only while one is wanted.
 ///
-/// Owned by `CaptureSession` and never shared, so it isn't Sendable. `lastFrameTime` is only touched by the
-/// delegate callback, which AVFoundation always calls on `queue`.
-final class HistogramAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+/// Owned by `CaptureSession` and never shared. `wants` is set from the session's actor and read on `queue`, so
+/// it sits behind a lock; `lastHistogram` and `lastPeaking` are only touched by the delegate callback, which
+/// AVFoundation always calls on `queue`.
+final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    struct Wants: Sendable, Equatable {
+        var histogram = false
+        var peaking = false
+        var any: Bool { histogram || peaking }
+    }
+
     let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "glint.analysis")
-    private let updateInterval: Double = 0.2   // seconds
-    private var lastFrameTime: Double = 0
-    private let publish: @Sendable (Histogram) -> Void
+    private let wants = OSAllocatedUnfairLock(initialState: Wants())
+    private var lastHistogram: Double = 0
+    private var lastPeaking: Double = 0
+    private let publishHistogram: @Sendable (Histogram) -> Void
+    private let publishPeaking: @Sendable (PeakingMask) -> Void
 
-    init(publish: @escaping @Sendable (Histogram) -> Void) {
-        self.publish = publish
+    init(histogram: @escaping @Sendable (Histogram) -> Void, peaking: @escaping @Sendable (PeakingMask) -> Void) {
+        publishHistogram = histogram
+        publishPeaking = peaking
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [   // only the luma plane is read
@@ -84,13 +96,23 @@ final class HistogramAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         output.setSampleBufferDelegate(self, queue: queue)
     }
 
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-        guard t - lastFrameTime > updateInterval else { return }
-        lastFrameTime = t
+    func set(_ new: Wants) {
+        wants.withLock { $0 = new }
+    }
 
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let histogram = Histogram(lumaOf: pixelBuffer) else { return }
-        publish(histogram)
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let current = wants.withLock { $0 }
+        let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        let doHistogram = current.histogram && t - lastHistogram > 0.2
+        let doPeaking = current.peaking && t - lastPeaking > 0.1
+        guard doHistogram || doPeaking, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
+            lastHistogram = t
+            publishHistogram(histogram)
+        }
+        if doPeaking, let mask = PeakingMask(lumaOf: pixelBuffer) {
+            lastPeaking = t
+            publishPeaking(mask)
+        }
     }
 }

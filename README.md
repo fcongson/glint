@@ -13,6 +13,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **AUTO | MANUAL:** a switch beside the shutter. In MANUAL, tap ISO, SHUTTER or WB to set it on one camera-style ruler (1/3-stop steps; shutter 1/8 to 1/8000; white balance in Kelvin). Exposure and white balance are locked. AUTO hides the manual controls; switching back restores your manual settings, including white balance and which settings are on A.
 - **Per-setting A:** in MANUAL, the A at the end of the ruler hands the selected setting to the camera, like the A on a Leica dial; its readout gets a red A and shows what the camera chose. ISO on auto gives shutter priority, shutter on auto gives ISO priority, both give program. AVFoundation has no priority modes, so Glint corrects the auto setting from the meter. While ISO or shutter is on auto, the ruler sets exposure compensation (−3 to +3 EV in 1/3 stops). Turning an A off picks up from the camera's choice, so the picture doesn't jump.
 - **Manual focus:** in MANUAL, a rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail or turning AF off takes over from wherever autofocus left the lens, so the picture doesn't jump; tapping the viewfinder hands focus back to autofocus. The rail fades when idle (it stays visible with VoiceOver, where it's adjustable by swiping up and down).
+- **Focus peaking:** in MANUAL, a PK switch under the focus rail (on by default) outlines whatever is in focus in amber, about ten times a second, from the preview frame's fine luma detail. It runs only while shown.
 - **Exposure meter:** Leica-style LEDs in the top bar (▶ under, ● on target, ◀ over) with the offset in stops, from the camera's own metering.
 - **PHOTO · VIDEO:** under the shutter; in VIDEO the shutter becomes the record button and the top bar shows the recording time and a microphone level meter. Neither switch can change mid-recording.
 - **Video format panel:** in VIDEO, tap the format chip ("4K 24 HEVC"). RESOLUTION (4K, 1080p), FRAME RATE (24, 25, 30, 60), FORMAT (HEVC, ProRes, ProRes RAW), ENCODING (Standard, Apple Log with ProRes) and EXPOSURE WHILE RECORDING (Adjustable, Locked). Choices the lens can't record are greyed out; ProRes needs a Pro iPhone and ProRes RAW an iPhone 17 Pro on iOS 26 (Apple recommends an external drive for it). The viewfinder shows the 16:9 frame. In MANUAL, shutter on A follows the 180° rule (1/48 at 24 fps), and no shutter is slower than a frame. White balance holds still while recording.
@@ -39,7 +40,8 @@ Glint/
     AutoExposure.swift         per-setting auto, and the shutter/ISO priority correction
     VideoFormat.swift          video resolutions, frame rates, codecs, the 180° shutter and settling choices to what a lens supports
     Throttled.swift            rate-limits KVO updates (meter, lens position)
-    HistogramAnalyzer.swift    histogram and clipping
+    HistogramAnalyzer.swift    histogram and clipping, and the shared preview analysis for it and peaking
+    FocusPeaking.swift         focus-peaking mask from the preview's luma
     ReviewImageRenderer.swift  DNG development and review thumbnails
     LocationProvider.swift     location fixes for photo tagging, place names
     MediaLibrary.swift         saves to Documents and Photos
@@ -58,7 +60,7 @@ GlintTests/                    Swift Testing coverage of the pure logic
 For performance testing, run from the Home Screen or use a Release build. Debug builds from Xcode (debugger plus Metal validation) make image work much slower.
 
 ## Tests
-Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, histogram, lenses, photo info, settings text, location freshness rules) and need no camera.
+Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, focus peaking, histogram, lenses, photo info, settings text, location freshness rules) and need no camera.
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.
@@ -68,4 +70,4 @@ Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture pl
 
 ## Ideas
 - 48MP RAW option and a 2x sensor-crop button
-- Focus peaking and zebras
+- Zebras

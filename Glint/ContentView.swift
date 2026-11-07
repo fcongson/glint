@@ -100,6 +100,10 @@ struct ContentView: View {
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipped()
             .overlay {
+                // Focus peaking, under the crop mask so it's dimmed outside the frame too.
+                if cam.isPeakingShown { PeakingOverlay(model: cam.peakingModel) }
+            }
+            .overlay {
                 // The crop for 3:2, 1:1 and 16:9, dimmed outside, so what's just out of frame stays visible.
                 if cam.captureMode == .video {
                     CropMask(aspect: .sixteenNine)   // video is 16:9 from the 4:3 sensor
@@ -223,6 +227,9 @@ struct ContentView: View {
                  on: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
             FocusRail(position: cam.lensPosition, isAutofocus: cam.isAutofocus, angle: uiAngle,
                       onChange: { cam.setLensPosition($0) })
+            chip("PK", label: "Focus peaking", value: SettingsText.onOff(cam.isPeakingEnabled),
+                 on: cam.isPeakingEnabled) { cam.setPeakingEnabled(!cam.isPeakingEnabled) }
+                .accessibilityHint("Outlines what's in focus in amber")
         }
         .padding(.trailing, 8)
     }
