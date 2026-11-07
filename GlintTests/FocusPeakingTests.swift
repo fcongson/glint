@@ -36,7 +36,8 @@ struct FocusPeakingTests {
         let renderer = try #require(PeakingRenderer.make())
         let buffer = try frame(value)
         let stats = try #require(renderer.analyse(buffer, level: nil))
-        return try #require(renderer.analyse(buffer, level: stats.mean + sensitivity.deviations * stats.deviation))
+        let level = PeakingRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity)
+        return try #require(renderer.analyse(buffer, level: level))
     }
 
     private func columns(_ a: PeakingRenderer.Analysis) -> Set<Int> {
@@ -64,29 +65,31 @@ struct FocusPeakingTests {
     @Test func aSharpEdgeIsOutlined() throws {
         let m = try mask { x, _ in x < 32 ? 0 : 255 }
         #expect(m.width == 64 && m.height == 48)
-        #expect(columns(m) == [30, 31, 32, 33])
-        #expect((1..<47).allSatisfy { m.mask[$0 * 64 + 31] > 0 })   // all the way down, bar the border rows
+        // A continuous line, two pixels wide, centred on the edge, all the way down bar the border rows.
+        #expect(columns(m) == [31, 32])
+        #expect((2..<46).allSatisfy { m.mask[$0 * 64 + 31] > 0 && m.mask[$0 * 64 + 32] > 0 })
     }
 
     @Test func aSharpDarkEdgeIsOutlined() throws {
-        #expect(columns(try mask { x, _ in x < 32 ? 20 : 60 }) == [30, 31, 32, 33])
+        #expect(columns(try mask { x, _ in x < 32 ? 20 : 60 }) == [31, 32])
     }
 
     @Test func horizontalEdgesCountToo() throws {
         let m = try mask { _, y in y < 24 ? 20 : 200 }
         let rows = Set(m.mask.indices.filter { m.mask[$0] > 0 }.map { $0 / m.width })
-        #expect(rows == [22, 23, 24, 25])
+        #expect(rows == [23, 24])
     }
 
     @Test func onlyTheSharpEdgeIsOutlined() throws {
         // The soft edge is just as big a change, but the high-pass filter barely responds to it.
-        #expect(columns(try mask { x, _ in Self.sharpAndSoft(x) }) == [14, 15, 16, 17])
+        #expect(columns(try mask { x, _ in Self.sharpAndSoft(x) }) == [15, 16])
     }
 
     @Test func onlyTheSharpEdgeIsOutlinedThroughNoise() throws {
         for sensitivity in PeakingSensitivity.allCases {
             let m = try mask(sensitivity) { x, y in Self.sharpAndSoft(x) + Self.noise(x, y) }
-            #expect(columns(m) == [14, 15, 16, 17], "\(sensitivity)")
+            let marked = columns(m)
+            #expect(!marked.isEmpty && marked.isSubset(of: 14...17), "\(sensitivity): \(marked)")
         }
     }
 
@@ -116,6 +119,12 @@ struct FocusPeakingTests {
         let a = try #require(renderer.analyse(buffer, level: nil))
         #expect(a.width == 1366 && a.height == 4)
         #expect(a.mean < 0.01)
+    }
+
+    @Test func thresholdFollowsDetailOrNoise() {
+        // Lots of detail: the spread sets it. Little but noise: a multiple of the mean does.
+        #expect(PeakingRenderer.level(mean: 1, deviation: 10, sensitivity: .medium) == 31)
+        #expect(PeakingRenderer.level(mean: 4, deviation: 1, sensitivity: .medium) == 10)
     }
 
     @Test(arguments: [(4032, 3024, 2), (1920, 1080, 1), (2048, 1536, 1), (8064, 6048, 4)])

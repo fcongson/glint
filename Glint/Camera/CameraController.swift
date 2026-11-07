@@ -48,6 +48,7 @@ final class CameraController {
     /// Focus peaking is shown while focusing by hand (AF off), as on a camera in MF. On by default.
     private(set) var isPeakingEnabled = true
     private(set) var peakingSensitivity = PeakingSensitivity.medium
+    private(set) var peakingAppearance = PeakingAppearance()
     /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
     private var pausedForLowPower = (histogram: false, peaking: false)
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
@@ -304,6 +305,18 @@ final class CameraController {
         sendAnalysis()
     }
 
+    func setPeakingColor(_ color: PeakingColor) {
+        guard color != peakingAppearance.color else { return }
+        peakingAppearance.color = color
+        sendAnalysis()
+    }
+
+    func setPeakingLines(_ lines: PeakingLines) {
+        guard lines != peakingAppearance.lines else { return }
+        peakingAppearance.lines = lines
+        sendAnalysis()
+    }
+
     func setPeakingSensitivity(_ sensitivity: PeakingSensitivity) {
         guard sensitivity != peakingSensitivity else { return }
         peakingSensitivity = sensitivity
@@ -339,7 +352,10 @@ final class CameraController {
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
         let histogram = isHistogramEnabled, peaking = isPeakingShown, sensitivity = peakingSensitivity
-        capture.enqueue { $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity) }
+        let appearance = peakingAppearance
+        capture.enqueue {
+            $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity, appearance: appearance)
+        }
     }
 
     // MARK: Focus

@@ -18,19 +18,30 @@ import UIKit
 ///    their monitor feed. Averaging also takes the edge off sensor noise.
 /// 2. Blur lightly (3×3 binomial) and high-pass with a Laplacian, which responds to the finest detail and falls
 ///    away fast as an edge blurs, where a gradient filter like Sobel keeps responding to big, soft edges.
-/// 3. Mark pixels above the frame's mean plus 4, 3 or 2 standard deviations (the sensitivity), with at least two
+/// 3. Average that response over 3×3, so outlines run as lines rather than breaking into dots, and noise spikes
+///    are diluted.
+/// 4. Mark pixels above the frame's mean plus 4, 3 or 2 standard deviations (the sensitivity), and above
+///    `relativeFloor` times the mean (in a frame with little detail, the mean is mostly noise), with at least two
 ///    marked neighbours. The statistics come back from the GPU after each frame and set the next frame's
 ///    threshold, eased over frames (`PeakingThreshold`) so outlines don't flicker.
-/// 4. Draw the frame upright and fitted like the preview, with the outlines in amber.
+/// 5. Draw the frame upright and fitted like the preview, with the outlines in the chosen colour and weight.
 ///
 /// `render` is called on the analysis queue, one frame at a time. The target layer is set from the main thread
 /// and the threshold from Metal's completion handlers, so both sit behind `lock`.
 final class PeakingRenderer: @unchecked Sendable {
-    /// Lowest high-pass response (in luma steps) ever marked, so a featureless frame isn't outlined at all.
-    static let minimumStrength: Float = 8
+    /// Lowest smoothed response (in luma steps) ever marked, so a featureless frame isn't outlined at all.
+    static let minimumStrength: Float = 4
+    /// Nothing is marked below this multiple of the frame's mean response, which keeps noise out of frames that
+    /// have little else in them.
+    static let relativeFloor = 2.5
     /// Frames are shrunk until their long side is at most this.
     static let targetSize = 2048
     private static let framesInFlight = 3
+
+    /// The threshold a frame's statistics call for, before easing.
+    static func level(mean: Double, deviation: Double, sensitivity: PeakingSensitivity) -> Double {
+        max(relativeFloor * mean, mean + sensitivity.deviations * deviation)
+    }
 
     /// The whole factor a frame is shrunk by.
     static func scale(width: Int, height: Int) -> Int {
@@ -41,6 +52,7 @@ final class PeakingRenderer: @unchecked Sendable {
     private let commandQueue: any MTLCommandQueue
     private let textureCache: CVMetalTextureCache
     private let downscalePipeline: any MTLComputePipelineState
+    private let responsePipeline: any MTLComputePipelineState
     private let edgesPipeline: any MTLComputePipelineState
     private let maskPipeline: any MTLComputePipelineState
     private let drawPipeline: any MTLRenderPipelineState
@@ -61,7 +73,7 @@ final class PeakingRenderer: @unchecked Sendable {
     private struct Work {
         let frameWidth: Int, frameHeight: Int
         let factor: Int
-        let small: any MTLTexture, edges: any MTLTexture, mask: any MTLTexture
+        let small: any MTLTexture, response: any MTLTexture, edges: any MTLTexture, mask: any MTLTexture
         let groups: MTLSize
         let partials: [any MTLBuffer]
     }
@@ -108,6 +120,7 @@ final class PeakingRenderer: @unchecked Sendable {
         commandQueue = queue
         textureCache = cache
         downscalePipeline = try device.makeComputePipelineState(function: try function("peakingDownscale"))
+        responsePipeline = try device.makeComputePipelineState(function: try function("peakingResponse"))
         edgesPipeline = try device.makeComputePipelineState(function: try function("peakingEdges"))
         maskPipeline = try device.makeComputePipelineState(function: try function("peakingMask"))
         drawPipeline = try device.makeRenderPipelineState(descriptor: draw)
@@ -139,7 +152,7 @@ final class PeakingRenderer: @unchecked Sendable {
 
     /// Draws one camera frame (420YpCbCr8 full range) with its peaking outlines. Does nothing while no view is
     /// attached.
-    func render(_ pixelBuffer: CVPixelBuffer, sensitivity: PeakingSensitivity) {
+    func render(_ pixelBuffer: CVPixelBuffer, sensitivity: PeakingSensitivity, appearance: PeakingAppearance) {
         guard let target = lock.withLock({ self.target }), target.size.width > 0, target.size.height > 0 else { return }
         let level = prepare(sensitivity)
         inFlight.wait()
@@ -168,7 +181,8 @@ final class PeakingRenderer: @unchecked Sendable {
                     scale: Self.fitScale(frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
                                          viewSize: target.size),
                     matrix: Self.matrix(for: pixelBuffer),
-                    amber: SIMD4<Float>(245.0 / 255, 165.0 / 255, 36.0 / 255, 1))   // Color.amber
+                    color: SIMD4(appearance.color.rgb, 1),
+                    lines: SIMD4(1 / Float(work.mask.width), 1 / Float(work.mask.height), appearance.lines.reach, 0))
                 encoder.setRenderPipelineState(drawPipeline)
                 encoder.setFragmentTexture(lumaTexture, index: 0)
                 encoder.setFragmentTexture(chromaTexture, index: 1)
@@ -183,13 +197,14 @@ final class PeakingRenderer: @unchecked Sendable {
         let frame = InFlight(textures: [luma, chroma], partials: partials,
                              groupCount: work.groups.width * work.groups.height,
                              pixelCount: work.small.width * work.small.height)
-        let deviations = sensitivity.deviations
         let generation = lock.withLock { thresholdGeneration }
         commandBuffer.addCompletedHandler { [self] _ in
             let stats = Self.statistics(frame)
             lock.withLock {
                 // A frame from before a sensitivity change mustn't pull the new threshold back.
-                if thresholdGeneration == generation { _ = threshold.update(stats.mean + deviations * stats.deviation) }
+                if thresholdGeneration == generation {
+                    _ = threshold.update(Self.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity))
+                }
             }
             inFlight.signal()
         }
@@ -209,7 +224,7 @@ final class PeakingRenderer: @unchecked Sendable {
         return lock.withLock { threshold.level }
     }
 
-    /// Steps 1–3: shrink, high-pass (with statistics into `partials`), and mark against `level`. With no level
+    /// Steps 1–4: shrink, high-pass, smooth (with statistics into `partials`), and mark against `level`. With no level
     /// yet (the first frame), nothing is marked.
     private func encodeAnalysis(_ commandBuffer: any MTLCommandBuffer, luma: any MTLTexture, work: Work,
                                 partials: any MTLBuffer, level: Double?) {
@@ -224,8 +239,13 @@ final class PeakingRenderer: @unchecked Sendable {
         encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
-        encoder.setComputePipelineState(edgesPipeline)
+        encoder.setComputePipelineState(responsePipeline)
         encoder.setTexture(work.small, index: 0)
+        encoder.setTexture(work.response, index: 1)
+        encoder.dispatchThreads(size, threadsPerThreadgroup: group)
+
+        encoder.setComputePipelineState(edgesPipeline)
+        encoder.setTexture(work.response, index: 0)
         encoder.setTexture(work.edges, index: 1)
         encoder.setBuffer(partials, offset: 0, index: 0)
         encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)   // whole groups, for the sums
@@ -265,10 +285,11 @@ final class PeakingRenderer: @unchecked Sendable {
         let partials = (0..<Self.framesInFlight).compactMap { _ in
             device.makeBuffer(length: partialsLength, options: .storageModeShared)
         }
-        guard let small = make(.r16Float), let edges = make(.r16Float), let mask = make(.r8Unorm),
+        guard let small = make(.r16Float), let response = make(.r16Float), let edges = make(.r16Float),
+              let mask = make(.r8Unorm),
               partials.count == Self.framesInFlight else { return nil }
-        let new = Work(frameWidth: width, frameHeight: height, factor: factor, small: small, edges: edges,
-                       mask: mask, groups: groups, partials: partials)
+        let new = Work(frameWidth: width, frameHeight: height, factor: factor, small: small, response: response,
+                       edges: edges, mask: mask, groups: groups, partials: partials)
         work = new
         slot = 0
         return new
@@ -291,7 +312,8 @@ final class PeakingRenderer: @unchecked Sendable {
     private struct Uniforms {
         var scale: SIMD2<Float>
         var matrix: SIMD4<Float>
-        var amber: SIMD4<Float>
+        var color: SIMD4<Float>
+        var lines: SIMD4<Float>
     }
 
     /// The upright picture's size as a fraction of the view when fitted inside it (like `.resizeAspect`).
@@ -331,7 +353,7 @@ final class PeakingRenderer: @unchecked Sendable {
         let mask: [UInt8]   // 255 where outlined, row by row
     }
 
-    /// Runs steps 1–3 on a frame and waits for the result: with no `level`, only the statistics are meaningful.
+    /// Runs steps 1–4 on a frame and waits for the result: with no `level`, only the statistics are meaningful.
     func analyse(_ pixelBuffer: CVPixelBuffer, level: Double?) -> Analysis? {
         guard let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
               let lumaTexture = CVMetalTextureGetTexture(luma),

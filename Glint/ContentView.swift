@@ -239,13 +239,26 @@ struct ContentView: View {
     /// PK: tap to turn peaking on and off, touch and hold to choose its sensitivity.
     private var peakingChip: some View {
         let sensitivity = Binding(get: { cam.peakingSensitivity }, set: { cam.setPeakingSensitivity($0) })
+        let color = Binding(get: { cam.peakingAppearance.color }, set: { cam.setPeakingColor($0) })
+        let lines = Binding(get: { cam.peakingAppearance.lines }, set: { cam.setPeakingLines($0) })
+        let look = cam.peakingAppearance
         let value = cam.isPeakingEnabled
-            ? "\(SettingsText.onOff(true)), \(cam.peakingSensitivity.title) sensitivity"
+            ? "\(SettingsText.onOff(true)), \(cam.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
             : SettingsText.onOff(false)
         return Menu {
+            // Submenus, each showing its current choice.
             Picker("Sensitivity", selection: sensitivity) {
                 ForEach(PeakingSensitivity.allCases, id: \.self) { Text($0.title).tag($0) }
             }
+            .pickerStyle(.menu)
+            Picker("Colour", selection: color) {
+                ForEach(PeakingColor.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
+            Picker("Lines", selection: lines) {
+                ForEach(PeakingLines.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
         } label: {
             chipLabel("PK")
         } primaryAction: {
@@ -255,7 +268,14 @@ struct ContentView: View {
         .buttonStyle(ChipStyle(isOn: cam.isPeakingEnabled, angle: uiAngle))
         .accessibilityLabel("Focus peaking")
         .accessibilityValue(value)
-        .accessibilityHint("Outlines what's in focus in amber. Touch and hold, or swipe up or down, for sensitivity.")
+        .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; touch and hold for colour and lines.")
+        .accessibilityAction(named: "Next colour") {
+            let all = PeakingColor.allCases
+            cam.setPeakingColor(all[(look.color.rawValue + 1) % all.count])
+        }
+        .accessibilityAction(named: look.lines == .bold ? "Fine lines" : "Bold lines") {
+            cam.setPeakingLines(look.lines == .bold ? .fine : .bold)
+        }
         .accessibilityAdjustableAction { direction in
             let all = PeakingSensitivity.allCases, i = cam.peakingSensitivity.rawValue
             switch direction {
