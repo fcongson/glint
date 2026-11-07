@@ -98,7 +98,7 @@ struct FocusRail: View {
                     .offset(y: y(for: t))
             }
             Capsule()
-                .fill(isAutofocus ? Color.white.opacity(0.55) : Color.yellow)
+                .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
                 .frame(width: 32, height: 20)
                 .offset(y: y(for: position) - 10)
                 .animation(dragStart == nil ? .easeOut(duration: 0.2) : nil, value: position)
