@@ -57,13 +57,28 @@ enum MediaLibrary {
                 let request = PHAssetCreationRequest.forAsset()
                 request.location = location
                 request.addResource(with: .photo, data: heic, options: nil)
-                let rawOptions = PHAssetResourceCreationOptions()
-                rawOptions.uniformTypeIdentifier = "com.adobe.raw-image"
                 request.addResource(with: .alternatePhoto, data: dng, options: rawOptions)
-            }) { ok, error in
-                report(ok ? "Saved" : "Save failed: \(error?.localizedDescription ?? "?")")
+            }) { ok, _ in
+                if ok { report("Saved"); return }
+                // Photos can refuse a pair it can't match up. Keep both as separate photos rather than lose either.
+                PHPhotoLibrary.shared().performChanges({
+                    for (data, options) in [(heic, nil), (dng, rawOptions)] as [(Data, PHAssetResourceCreationOptions?)] {
+                        let request = PHAssetCreationRequest.forAsset()
+                        request.location = location
+                        request.addResource(with: .photo, data: data, options: options)
+                    }
+                }) { ok, error in
+                    report(ok ? "Saved RAW and HEIC as separate photos"
+                              : "Save failed: \(error?.localizedDescription ?? "?")")
+                }
             }
         }
+    }
+
+    private static var rawOptions: PHAssetResourceCreationOptions {
+        let options = PHAssetResourceCreationOptions()
+        options.uniformTypeIdentifier = "com.adobe.raw-image"
+        return options
     }
 
     /// Copies a finished recording into Documents, adds it to Photos, then deletes the temporary file.

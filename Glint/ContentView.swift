@@ -225,6 +225,8 @@ struct ContentView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)   // shrink rather than wrap beside the Dynamic Island
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
         }

@@ -51,7 +51,41 @@ struct ReviewImageRenderer: @unchecked Sendable {
             let crop = aspect.cropRect(in: extent.size).offsetBy(dx: extent.minX, dy: extent.minY).integral
             image = image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
         }
-        return ciContext.heifRepresentation(of: image, format: .RGBA8, colorSpace: colorSpace, options: [:])
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: colorSpace)
+        else { return nil }
+        // Written with ImageIO rather than CIContext's HEIF export so the HEIC carries the DNG's metadata (capture
+        // time, exposure, lens). Photos needs that to pair the two files in RAW+HEIC, and the HEIC needs it anyway.
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output as CFMutableData, "public.heic" as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(destination, cgImage,
+                                   Self.developedProperties(from: dng, width: cgImage.width, height: cgImage.height) as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    /// The DNG's metadata, adjusted for a developed image: the pixels are already upright (orientation 1) and may be
+    /// cropped (new dimensions), and the DNG-only fields don't apply.
+    static func developedProperties(from dng: Data, width: Int, height: Int) -> [CFString: Any] {
+        var properties: [CFString: Any] = [:]
+        if let source = CGImageSourceCreateWithData(dng as CFData, nil),
+           let copied = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            properties = copied
+        }
+        properties[kCGImagePropertyDNGDictionary] = nil
+        properties[kCGImagePropertyOrientation] = 1
+        properties[kCGImagePropertyPixelWidth] = width
+        properties[kCGImagePropertyPixelHeight] = height
+        if var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+            tiff[kCGImagePropertyTIFFOrientation] = 1
+            properties[kCGImagePropertyTIFFDictionary] = tiff
+        }
+        if var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            exif[kCGImagePropertyExifPixelXDimension] = width
+            exif[kCGImagePropertyExifPixelYDimension] = height
+            properties[kCGImagePropertyExifDictionary] = exif
+        }
+        return properties
     }
 
     func render(_ data: Data, isRAW: Bool) -> UIImage? {

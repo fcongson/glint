@@ -1,4 +1,6 @@
 import CoreGraphics
+import Foundation
+import ImageIO
 import Testing
 @testable import Glint
 
@@ -73,5 +75,16 @@ struct AspectRatioTests {
 
     @Test func emptySizeIsLeftAlone() {
         #expect(AspectRatio.threeTwo.cropRect(in: .zero) == .zero)
+    }
+}
+
+struct DevelopedPropertiesTests {
+    @Test func developedHEICIsUprightWithItsOwnSize() {
+        // No readable DNG: the properties still describe the developed pixels.
+        let properties = ReviewImageRenderer.developedProperties(from: Data(), width: 2688, height: 4032)
+        #expect(properties[kCGImagePropertyOrientation] as? Int == 1)
+        #expect(properties[kCGImagePropertyPixelWidth] as? Int == 2688)
+        #expect(properties[kCGImagePropertyPixelHeight] as? Int == 4032)
+        #expect(properties[kCGImagePropertyDNGDictionary] == nil)
     }
 }
