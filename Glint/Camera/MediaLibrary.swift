@@ -38,6 +38,67 @@ enum MediaLibrary {
         }
     }
 
+    /// RAW+HEIC: both files in Documents under one name, and one Photos asset, the HEIC with the DNG as its
+    /// RAW alternate (as a camera's RAW+JPEG pair imports).
+    static func savePhotoPair(heic: Data, dng: Data, captureID: Int64, location: CLLocation?,
+                              report: @escaping @Sendable (String) -> Void) {
+        let base = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID)"
+        if let dir = documentsDirectory {
+            do {
+                try heic.write(to: dir.appendingPathComponent(base + ".heic"))
+                try dng.write(to: dir.appendingPathComponent(base + ".dng"))
+            } catch {
+                report("Save failed: \(error.localizedDescription)")
+            }
+        }
+        // Photos refuses (error 3300) a RAW alternate given as data; it accepts one given as a file. So the DNG goes
+        // through a temporary file, which Photos moves into the library.
+        let tempDNG = FileManager.default.temporaryDirectory.appendingPathComponent(base + ".dng")
+        let removeTemp: @Sendable () -> Void = { try? FileManager.default.removeItem(at: tempDNG) }
+        requestAddAccess { granted in
+            guard granted else { report("Photos access denied"); return }
+            do {
+                try dng.write(to: tempDNG)
+            } catch {
+                saveSeparately(heic: heic, dng: dng, location: location, report: report)
+                return
+            }
+            PHPhotoLibrary.shared().performChanges({
+                let request = PHAssetCreationRequest.forAsset()
+                request.location = location
+                request.addResource(with: .photo, data: heic, options: nil)
+                let options = rawOptions
+                options.shouldMoveFile = true
+                request.addResource(with: .alternatePhoto, fileURL: tempDNG, options: options)
+            }) { ok, _ in
+                removeTemp()   // already gone if Photos moved it
+                if ok { report("Saved"); return }
+                saveSeparately(heic: heic, dng: dng, location: location, report: report)
+            }
+        }
+    }
+
+    /// If Photos still won't take the pair, keep both as separate photos rather than lose either.
+    private static func saveSeparately(heic: Data, dng: Data, location: CLLocation?,
+                                       report: @escaping @Sendable (String) -> Void) {
+        PHPhotoLibrary.shared().performChanges({
+            for (data, options) in [(heic, nil), (dng, rawOptions)] as [(Data, PHAssetResourceCreationOptions?)] {
+                let request = PHAssetCreationRequest.forAsset()
+                request.location = location
+                request.addResource(with: .photo, data: data, options: options)
+            }
+        }) { ok, error in
+            report(ok ? "Saved RAW and HEIC as separate photos"
+                      : "Save failed: \(error?.localizedDescription ?? "?")")
+        }
+    }
+
+    private static var rawOptions: PHAssetResourceCreationOptions {
+        let options = PHAssetResourceCreationOptions()
+        options.uniformTypeIdentifier = "com.adobe.raw-image"
+        return options
+    }
+
     /// Copies a finished recording into Documents, adds it to Photos, then deletes the temporary file.
     static func saveVideo(at tempURL: URL, report: @escaping @Sendable (String) -> Void) {
         if let dir = documentsDirectory {

@@ -47,6 +47,11 @@ struct SettingsTextTests {
         #expect(SettingsText.whiteBalance(.kelvin(3200)) == "3200K")
         #expect(SettingsText.format(.raw) == "RAW")
         #expect(SettingsText.format(.heic) == "HEIC")
+        #expect(SettingsText.format(.rawAndHEIC) == "RAW+HEIC")
+        #expect(SettingsText.fileType(.rawAndHEIC) == "RAW+HEIC")
+        #expect(SettingsText.aspect(.threeTwo) == "3:2")
+        #expect(SettingsText.aspectSpoken(.threeTwo) == "3 by 2")
+        #expect(SettingsText.aspectSpoken(.fourThree) == "4 by 3, full sensor")
     }
 
     @Test(arguments: [

@@ -14,7 +14,8 @@ enum CaptureMode: Sendable { case photo, video }
 @Observable
 final class CameraController {
     private(set) var captureMode: CaptureMode = .photo
-    private(set) var captureRAW = true
+    private(set) var fileType: PhotoFileType = .raw   // RAW by default: the point of Glint
+    private(set) var aspect: AspectRatio = .fourThree    // the full sensor
     private(set) var manual = false
     private(set) var iso: Float = 100
     private(set) var shutterDenominator: Double = 125   // 1/x seconds
@@ -165,9 +166,11 @@ final class CameraController {
         captureMode = mode
     }
 
-    func setCaptureRAW(_ on: Bool) {
-        captureRAW = on   // read at capture time; nothing to send to the device
-    }
+    // The photo format is read at capture time; nothing to send to the device.
+
+    func setFileType(_ type: PhotoFileType) { fileType = type }
+
+    func setAspect(_ aspect: AspectRatio) { self.aspect = aspect }
 
     /// Switch between manual exposure + locked white balance, and continuous auto.
     /// The first time into manual, white balance starts from whatever auto has chosen; after that, returning to
@@ -271,10 +274,12 @@ final class CameraController {
     // MARK: Stills
 
     func capturePhoto() {
-        let wantRAW = captureRAW
-        let whiteBalance: WhiteBalanceSetting = manual ? .kelvin(Int(whiteBalanceKelvin)) : .auto
+        let fileType = fileType, aspect = aspect
+        let whiteBalance: WhiteBalanceSetting = manual && !auto.whiteBalance ? .kelvin(Int(whiteBalanceKelvin)) : .auto
         let requestedAt = CFAbsoluteTimeGetCurrent()
-        capture.enqueue { $0.capturePhoto(raw: wantRAW, whiteBalance: whiteBalance, requestedAt: requestedAt) }
+        capture.enqueue {
+            $0.capturePhoto(fileType: fileType, aspect: aspect, whiteBalance: whiteBalance, requestedAt: requestedAt)
+        }
     }
 
     /// Saving and rendering the review image both run off the main actor; the result is added to `shots` here.
@@ -285,29 +290,47 @@ final class CameraController {
         let renderer = reviewRenderer
         let developer = developer
         Task.detached(priority: .userInitiated) { [weak self] in
-            // Non-RAW mode: the DNG is developed into a HEIC, and that HEIC replaces it everywhere.
-            var data = photo.data
-            var isRAW = photo.info.format == .raw || photo.needsDevelopment
+            // HEIC: the DNG is developed (and cropped) into a HEIC, which replaces it everywhere.
+            // RAW+HEIC: the same, but the DNG is saved alongside it. Review shows the HEIC, which has the crop.
+            var heic: Data?
+            var info = photo.info
             var developTime = 0.0
             if photo.needsDevelopment {
                 let t0 = CFAbsoluteTimeGetCurrent()
-                if let heic = await developer.develop(photo.data) {
-                    data = heic
-                    isRAW = false
+                heic = await developer.develop(photo.data, aspect: photo.aspect)
+                if let heic {
+                    let size = Self.savedSize(width: info.pixelWidth, height: info.pixelHeight, aspect: photo.aspect)
+                    info = info.saved(pixelWidth: size?.width, pixelHeight: size?.height,
+                                      fileBytes: photo.keepsDNG ? info.fileBytes + heic.count : heic.count)
                 } else {
-                    report("Develop failed, saving DNG")
+                    report(photo.keepsDNG ? "Develop failed, saving DNG only" : "Develop failed, saving DNG")
                 }
                 developTime = CFAbsoluteTimeGetCurrent() - t0
             }
-            let saved = data, savedIsRAW = isRAW
+            let dng = photo.data, developed = heic
             Task.detached(priority: .utility) {
-                MediaLibrary.savePhoto(saved, isRAW: savedIsRAW, captureID: photo.captureID, location: location, report: report)
+                if let developed, photo.keepsDNG {
+                    MediaLibrary.savePhotoPair(heic: developed, dng: dng, captureID: photo.captureID, location: location, report: report)
+                } else if let developed {
+                    MediaLibrary.savePhoto(developed, isRAW: false, captureID: photo.captureID, location: location, report: report)
+                } else {
+                    let isRAW = photo.keepsDNG || photo.needsDevelopment   // a failed develop still saves the DNG
+                    MediaLibrary.savePhoto(dng, isRAW: isRAW, captureID: photo.captureID, location: location, report: report)
+                }
             }
             let t0 = CFAbsoluteTimeGetCurrent()
-            let image = renderer.render(data, isRAW: isRAW)
+            let image = heic.map { renderer.render($0, isRAW: false) }
+                ?? renderer.render(photo.data, isRAW: photo.keepsDNG || photo.needsDevelopment)
             let renderTime = CFAbsoluteTimeGetCurrent() - t0
-            await self?.addShot(image, info: photo.info, location: location, shotTime: shotTime, developTime: developTime, renderTime: renderTime)
+            await self?.addShot(image, info: info, location: location, shotTime: shotTime, developTime: developTime, renderTime: renderTime)
         }
+    }
+
+    /// The pixel size after cropping to `aspect`, from the capture's size.
+    nonisolated private static func savedSize(width: Int?, height: Int?, aspect: AspectRatio) -> (width: Int, height: Int)? {
+        guard let width, let height else { return nil }
+        let crop = aspect.cropRect(in: CGSize(width: width, height: height)).integral
+        return (Int(crop.width), Int(crop.height))
     }
 
     private func addShot(_ image: UIImage?, info: PhotoInfo, location: CLLocation?, shotTime: Double, developTime: Double, renderTime: Double) {

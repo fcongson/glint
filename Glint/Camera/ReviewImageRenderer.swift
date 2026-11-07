@@ -15,8 +15,8 @@ actor PhotoDeveloper {
         self.renderer = renderer
     }
 
-    func develop(_ dng: Data) -> Data? {
-        renderer.developHEIC(from: dng)
+    func develop(_ dng: Data, aspect: AspectRatio) -> Data? {
+        renderer.developHEIC(from: dng, aspect: aspect)
     }
 }
 
@@ -32,8 +32,8 @@ struct ReviewImageRenderer: @unchecked Sendable {
     private let ciContext = CIContext()
 
     /// Develops a Bayer DNG at full resolution into HEIC data, with the optional enhancements switched off so the
-    /// result looks like the RAW itself. Slow; run off the main actor.
-    func developHEIC(from dng: Data) -> Data? {
+    /// result looks like the RAW itself, cropped to `aspect`. Slow; run off the main actor.
+    func developHEIC(from dng: Data, aspect: AspectRatio) -> Data? {
         guard let filter = CIRAWFilter(imageData: dng, identifierHint: "com.adobe.raw-image") else { return nil }
         filter.luminanceNoiseReductionAmount = 0
         filter.colorNoiseReductionAmount = 0
@@ -43,9 +43,49 @@ struct ReviewImageRenderer: @unchecked Sendable {
         filter.moireReductionAmount = 0
         filter.boostAmount = 0
         filter.boostShadowAmount = 0
-        guard let image = filter.outputImage,
+        guard var image = filter.outputImage,
               let colorSpace = CGColorSpace(name: CGColorSpace.displayP3) else { return nil }
-        return ciContext.heifRepresentation(of: image, format: .RGBA8, colorSpace: colorSpace, options: [:])
+        if !aspect.isFullSensor {
+            // The developed image is already upright, so the crop's long side is the image's long side.
+            let extent = image.extent
+            let crop = aspect.cropRect(in: extent.size).offsetBy(dx: extent.minX, dy: extent.minY).integral
+            image = image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+        }
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: colorSpace)
+        else { return nil }
+        // Written with ImageIO rather than CIContext's HEIF export so the HEIC carries the DNG's metadata (capture
+        // time, exposure, lens). Photos needs that to pair the two files in RAW+HEIC, and the HEIC needs it anyway.
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output as CFMutableData, "public.heic" as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(destination, cgImage,
+                                   Self.developedProperties(from: dng, width: cgImage.width, height: cgImage.height) as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    /// The DNG's metadata, adjusted for a developed image: the pixels are already upright (orientation 1) and may be
+    /// cropped (new dimensions), and the DNG-only fields don't apply.
+    static func developedProperties(from dng: Data, width: Int, height: Int) -> [CFString: Any] {
+        var properties: [CFString: Any] = [:]
+        if let source = CGImageSourceCreateWithData(dng as CFData, nil),
+           let copied = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            properties = copied
+        }
+        properties[kCGImagePropertyDNGDictionary] = nil
+        properties[kCGImagePropertyOrientation] = 1
+        properties[kCGImagePropertyPixelWidth] = width
+        properties[kCGImagePropertyPixelHeight] = height
+        if var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+            tiff[kCGImagePropertyTIFFOrientation] = 1
+            properties[kCGImagePropertyTIFFDictionary] = tiff
+        }
+        if var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            exif[kCGImagePropertyExifPixelXDimension] = width
+            exif[kCGImagePropertyExifPixelYDimension] = height
+            properties[kCGImagePropertyExifDictionary] = exif
+        }
+        return properties
     }
 
     func render(_ data: Data, isRAW: Bool) -> UIImage? {

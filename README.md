@@ -8,7 +8,8 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 
 ## Features
 - **RAW (DNG) stills:** Bayer RAW, not Apple ProRAW.
-- **Neutral HEIC (RAW off):** still shoots Bayer RAW, then develops it into a full-resolution HEIC with noise reduction, sharpening, contrast, detail, moire and boost turned off, so the result matches the DNG. The HEIC replaces the DNG. If developing fails the DNG is kept; if Bayer RAW isn't available the camera's own HEIC is saved (fusion off).
+- **Photo format panel:** tap the format chip in the top bar. FILE is RAW (the default), HEIC or RAW+HEIC; ASPECT is 4:3 (the full sensor), 3:2, 1:1 or 16:9. Other ratios dim the viewfinder outside the crop, with bright-line corners. The crop is applied to the HEIC when it's developed; a DNG always keeps the full sensor. RAW+HEIC saves both files to Documents and one Photos asset (the HEIC, with the DNG as its RAW alternate).
+- **Neutral HEIC:** still shoots Bayer RAW, then develops it into a full-resolution HEIC with noise reduction, sharpening, contrast, detail, moire and boost turned off, so the result matches the DNG. In HEIC the developed file replaces the DNG; in RAW+HEIC both are kept. If developing fails the DNG is kept; if Bayer RAW isn't available the camera's own HEIC is saved (fusion off).
 - **AUTO | MANUAL:** a switch beside the shutter. In MANUAL, tap ISO, SHUTTER or WB to set it on one camera-style ruler (1/3-stop steps; shutter 1/8 to 1/8000; white balance in Kelvin). Exposure and white balance are locked. AUTO hides the manual controls; switching back restores your manual settings, including white balance and which settings are on A.
 - **Per-setting A:** in MANUAL, the A at the end of the ruler hands the selected setting to the camera, like the A on a Leica dial; its readout gets a red A and shows what the camera chose. ISO on auto gives shutter priority, shutter on auto gives ISO priority, both give program. AVFoundation has no priority modes, so Glint corrects the auto setting from the meter. While ISO or shutter is on auto, the ruler sets exposure compensation (−3 to +3 EV in 1/3 stops). Turning an A off picks up from the camera's choice, so the picture doesn't jump.
 - **Manual focus:** in MANUAL, a rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail or turning AF off takes over from wherever autofocus left the lens, so the picture doesn't jump; tapping the viewfinder hands focus back to autofocus. The rail fades when idle (it stays visible with VoiceOver, where it's adjustable by swiping up and down).
@@ -41,7 +42,7 @@ Glint/
     LocationProvider.swift     location fixes for photo tagging, place names
     MediaLibrary.swift         saves to Documents and Photos
     PhotoInfo.swift            settings and capture details of a photo
-  Views/                       controls and switches, ruler picker, focus rail, histogram, focus box, review screen with info card
+  Views/                       controls and switches, ruler picker, focus rail, photo format panel and crop mask, histogram, focus box, review screen with info card
   Assets.xcassets              app icon (light, dark, tinted) and accent color
 GlintTests/                    Swift Testing coverage of the pure logic
 ```

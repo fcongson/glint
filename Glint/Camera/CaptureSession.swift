@@ -14,8 +14,12 @@ struct CapturedPhoto: Sendable {
     let captureID: Int64
     let info: PhotoInfo
     let requestedAt: CFAbsoluteTime   // when the shutter was pressed, for the debug timing readout
-    /// `data` is a Bayer DNG that was only captured so it can be developed into a HEIC (non-RAW mode).
+    /// `data` is a Bayer DNG that a HEIC has to be developed from (HEIC and RAW+HEIC).
     let needsDevelopment: Bool
+    /// The DNG itself is saved too (RAW and RAW+HEIC).
+    let keepsDNG: Bool
+    /// The crop for the developed HEIC. The DNG keeps the full sensor.
+    let aspect: AspectRatio
 }
 
 /// Everything the capture session reports back, delivered in order on `CaptureSession.events`.
@@ -483,22 +487,23 @@ actor CaptureSession {
     // MARK: Stills
 
     /// Emits `.photoCaptured` (or a status on failure). `whiteBalance` is recorded with the photo for review.
-    func capturePhoto(raw wantRAW: Bool, whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime) {
+    func capturePhoto(fileType: PhotoFileType, aspect: AspectRatio, whiteBalance: WhiteBalanceSetting,
+                      requestedAt: CFAbsoluteTime) {
         applyCaptureRotation(to: photoOutput)
         let settings: AVCapturePhotoSettings
-        // Non-RAW mode also shoots Bayer RAW, then develops it into a HEIC with no processing, so it matches the DNG.
+        // HEIC also shoots Bayer RAW, then develops it into a HEIC with no processing, so it matches the DNG.
         let bayerFormat = photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) })
-        let plan = CapturePlan(wantRAW: wantRAW, bayerRAWAvailable: bayerFormat != nil)
+        let plan = CapturePlan(fileType: fileType, bayerRAWAvailable: bayerFormat != nil)
         if let bayerFormat {
             settings = AVCapturePhotoSettings(rawPixelFormatType: bayerFormat)   // Bayer DNG only
         } else {
             settings = AVCapturePhotoSettings()
             settings.photoQualityPrioritization = .speed
         }
-        if plan.fellBackFromRAW(wantRAW: wantRAW) { emit.yield(.status("Bayer RAW unavailable, saving HEIC")) }
+        if plan.fellBackFromRAW(fileType: fileType) { emit.yield(.status("Bayer RAW unavailable, saving HEIC")) }
         let id = settings.uniqueID
         let delegate = PhotoCaptureDelegate(
-            whiteBalance: whiteBalance, requestedAt: requestedAt, plan: plan, emit: emit,
+            whiteBalance: whiteBalance, requestedAt: requestedAt, plan: plan, aspect: aspect, emit: emit,
             finished: { [weak self] in self?.enqueue { $0.photoDelegates[id] = nil } })
         photoDelegates[id] = delegate
         photoOutput.capturePhoto(with: settings, delegate: delegate)
@@ -525,14 +530,16 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     private let whiteBalance: WhiteBalanceSetting
     private let requestedAt: CFAbsoluteTime
     private let plan: CapturePlan
+    private let aspect: AspectRatio
     private let emit: AsyncStream<CaptureEvent>.Continuation
     private let finished: @Sendable () -> Void
 
-    init(whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime, plan: CapturePlan,
+    init(whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime, plan: CapturePlan, aspect: AspectRatio,
          emit: AsyncStream<CaptureEvent>.Continuation, finished: @escaping @Sendable () -> Void) {
         self.whiteBalance = whiteBalance
         self.requestedAt = requestedAt
         self.plan = plan
+        self.aspect = aspect
         self.emit = emit
         self.finished = finished
     }
@@ -542,7 +549,8 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         guard let data = photo.fileDataRepresentation() else { return }
         let info = PhotoInfo(metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto), whiteBalance: whiteBalance, fileBytes: data.count)
         emit.yield(.photoCaptured(CapturedPhoto(data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
-                                                needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto))))
+                                                needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto),
+                                                keepsDNG: plan.keepsDNG(isRawPhoto: photo.isRawPhoto), aspect: aspect)))
     }
 
     /// The last callback for a capture, so the session can release this delegate.
