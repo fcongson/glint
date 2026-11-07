@@ -46,6 +46,7 @@ final class CameraController {
     let peakingModel = PeakingModel()
     /// Focus peaking is shown with manual focus (in MANUAL), where the focus rail is. On by default.
     private(set) var isPeakingEnabled = true
+    private(set) var peakingSensitivity = PeakingSensitivity.medium
     /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
     private var pausedForLowPower = (histogram: false, peaking: false)
     var isPeakingShown: Bool { isPeakingEnabled && manual }
@@ -300,6 +301,12 @@ final class CameraController {
         sendAnalysis()
     }
 
+    func setPeakingSensitivity(_ sensitivity: PeakingSensitivity) {
+        guard sensitivity != peakingSensitivity else { return }
+        peakingSensitivity = sensitivity
+        sendAnalysis()
+    }
+
     /// Low Power Mode turns off the histogram and peaking, the only extra work Glint does on every preview frame.
     /// Turning either back on keeps it on; whatever was turned off comes back when Low Power Mode ends.
     private func lowPowerModeChanged(_ isOn: Bool) {
@@ -328,9 +335,9 @@ final class CameraController {
 
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
-        let histogram = isHistogramEnabled, peaking = isPeakingShown
+        let histogram = isHistogramEnabled, peaking = isPeakingShown, sensitivity = peakingSensitivity
         if !peaking { peakingModel.clear() }
-        capture.enqueue { $0.setAnalysis(histogram: histogram, peaking: peaking) }
+        capture.enqueue { $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity) }
     }
 
     // MARK: Focus

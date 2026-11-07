@@ -438,8 +438,8 @@ actor CaptureSession {
 
     /// Chooses what the luma analysis stream is for, and attaches it only while something wants it, so it costs
     /// nothing while the histogram and peaking are both off.
-    func setAnalysis(histogram: Bool, peaking: Bool) {
-        let wants = FrameAnalyzer.Wants(histogram: histogram, peaking: peaking)
+    func setAnalysis(histogram: Bool, peaking: Bool, sensitivity: PeakingSensitivity) {
+        let wants = FrameAnalyzer.Wants(histogram: histogram, peaking: peaking, sensitivity: sensitivity)
         let output = analyzer.output
         let on = wants.any
         session.beginConfiguration()

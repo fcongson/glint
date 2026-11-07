@@ -227,11 +227,48 @@ struct ContentView: View {
                  on: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
             FocusRail(position: cam.lensPosition, isAutofocus: cam.isAutofocus, angle: uiAngle,
                       onChange: { cam.setLensPosition($0) })
-            chip("PK", label: "Focus peaking", value: SettingsText.onOff(cam.isPeakingEnabled),
-                 on: cam.isPeakingEnabled) { cam.setPeakingEnabled(!cam.isPeakingEnabled) }
-                .accessibilityHint("Outlines what's in focus in amber")
+            peakingChip
         }
         .padding(.trailing, 8)
+    }
+
+    /// PK: tap to turn peaking on and off, touch and hold to choose its sensitivity.
+    private var peakingChip: some View {
+        let sensitivity = Binding(get: { cam.peakingSensitivity }, set: { cam.setPeakingSensitivity($0) })
+        let value = cam.isPeakingEnabled
+            ? "\(SettingsText.onOff(true)), \(cam.peakingSensitivity.title) sensitivity"
+            : SettingsText.onOff(false)
+        return Menu {
+            Picker("Sensitivity", selection: sensitivity) {
+                ForEach(PeakingSensitivity.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+        } label: {
+            chipLabel("PK")
+        } primaryAction: {
+            cam.setPeakingEnabled(!cam.isPeakingEnabled)
+        }
+        .menuStyle(.button)
+        .buttonStyle(ChipStyle(isOn: cam.isPeakingEnabled, angle: uiAngle))
+        .accessibilityLabel("Focus peaking")
+        .accessibilityValue(value)
+        .accessibilityHint("Outlines what's in focus in amber. Touch and hold, or swipe up or down, for sensitivity.")
+        .accessibilityAdjustableAction { direction in
+            let all = PeakingSensitivity.allCases, i = cam.peakingSensitivity.rawValue
+            switch direction {
+            case .increment: if i + 1 < all.count { cam.setPeakingSensitivity(all[i + 1]) }
+            case .decrement: if i > 0 { cam.setPeakingSensitivity(all[i - 1]) }
+            @unknown default: break
+            }
+        }
+    }
+
+    private func chipLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)   // shrink rather than wrap beside the Dynamic Island
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
     }
 
     private func overlayLabel(_ text: String) -> some View {
@@ -247,14 +284,7 @@ struct ContentView: View {
     /// label plus the current value instead.
     private func chip(_ title: String, label: String, value: String, on: Bool,
                       action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)   // shrink rather than wrap beside the Dynamic Island
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-        }
+        Button(action: action) { chipLabel(title) }
         .buttonStyle(ChipStyle(isOn: on, angle: uiAngle))
         .accessibilityLabel(label)
         .accessibilityValue(value)

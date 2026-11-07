@@ -68,12 +68,13 @@ struct Histogram: Sendable {
 /// turn it). Frames only arrive while `output` is attached to the session, which is only while one is wanted.
 ///
 /// Owned by `CaptureSession` and never shared. `wants` is set from the session's actor and read on `queue`, so
-/// it sits behind a lock; `lastHistogram` and `lastPeaking` are only touched by the delegate callback, which
-/// AVFoundation always calls on `queue`.
+/// it sits behind a lock; `lastHistogram`, `lastPeaking` and the peaking threshold are only touched by the
+/// delegate callback, which AVFoundation always calls on `queue`.
 final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     struct Wants: Sendable, Equatable {
         var histogram = false
         var peaking = false
+        var sensitivity = PeakingSensitivity.medium
         var any: Bool { histogram || peaking }
     }
 
@@ -82,6 +83,8 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private let wants = OSAllocatedUnfairLock(initialState: Wants())
     private var lastHistogram: Double = 0
     private var lastPeaking: Double = 0
+    private var threshold = PeakingThreshold()
+    private var thresholdSensitivity = PeakingSensitivity.medium
     private let publishHistogram: @Sendable (Histogram) -> Void
     private let publishPeaking: @Sendable (PeakingMask) -> Void
 
@@ -99,9 +102,10 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         output.setSampleBufferDelegate(self, queue: queue)
     }
 
-    /// The histogram is happy with roughly screen-sized frames, which cost much less memory traffic. Peaking needs
-    /// full-size ones, because shrinking a frame shrinks its blur and soft edges start to look sharp. The caller
-    /// wraps this in a session configuration, since it changes the output's buffers.
+    /// The histogram is happy with roughly screen-sized frames, which cost much less memory traffic. Peaking takes
+    /// full-size ones and shrinks them itself by a whole factor (block averaging), so its filter sees a known,
+    /// clean scale rather than whatever the preview scaler did. The caller wraps this in a session configuration,
+    /// since it changes the output's buffers.
     func set(_ new: Wants) {
         wants.withLock { $0 = new }
         let previewSized = !new.peaking
@@ -115,14 +119,20 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
         let doHistogram = current.histogram && t - lastHistogram > 0.2
         let doPeaking = current.peaking && t - lastPeaking > 0.1
+        if !current.peaking { threshold.reset() }   // start fresh when peaking comes back
         guard doHistogram || doPeaking, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
             lastHistogram = t
             publishHistogram(histogram)
         }
-        if doPeaking, let mask = PeakingMask(lumaOf: pixelBuffer) {
+        if doPeaking, let edges = EdgeMap(lumaOf: pixelBuffer) {
             lastPeaking = t
-            publishPeaking(mask)
+            if current.sensitivity != thresholdSensitivity {   // jump straight to the new level
+                thresholdSensitivity = current.sensitivity
+                threshold.reset()
+            }
+            let level = threshold.update(edges.threshold(for: current.sensitivity))
+            publishPeaking(PeakingMask(edges: edges, level: level))
         }
     }
 }

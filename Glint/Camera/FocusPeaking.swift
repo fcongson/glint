@@ -2,41 +2,58 @@ import CoreVideo
 import Observation
 import UIKit
 
-/// A focus-peaking mask for one preview frame: the cells of the frame with the sharpest detail, which is what's in focus.
-///
-/// Sharpness here is how sharply brightness *bends* at an edge, not how steep or bright the edge is. At each pixel
-/// the bend is the second difference, |2·L[x] − L[x−1] − L[x+1]|, taken as a share of the brightness range within
-/// four pixels either side. A crisp edge turns hard at its corners and keeps most of its range there; as it blurs,
-/// the bend falls away much faster than the steepness does. That matters because the iPhone sharpens its frames,
-/// which puts a steep, bright rim on blurry edges too: steepness can't tell them apart, the bend can.
-///
-/// Sensor noise bends hardest of all (one pixel up, the next down), so two checks keep it out. The bend has to
-/// clear a multiple of the frame's own noise, measured each frame as the median bend; and it has to continue
-/// along the edge, into the pixel before and after (straight or diagonal), since noise and lone specks don't.
-///
-/// Each cell keeps its best score. A cell is marked when its score clears an absolute floor (so nothing blurry is
-/// ever marked) and is close to the sharpest cells in the frame (so only the plane of focus lights up, not every
-/// edge near it).
-///
-/// It needs full-size frames: shrinking a frame shrinks its blur too, so soft edges would look crisp.
-struct PeakingMask: Sendable {
-    /// Smallest brightness range (0…255 luma) around a pixel worth scoring.
-    static let minimumContrast = 24
-    /// Lowest score, in hundredths of the range, that can ever be marked. Crisp edges score 50–100; an edge
-    /// blurred by a pixel or more scores under 30 even after the camera sharpens it.
-    static let minimumSharpness = 35
-    /// How far above the frame's noise (its median bend) a bend has to be to count.
-    static let noiseMultiple = 4
-    /// How close to the frame's sharpest cells a cell has to be, in percent of their score.
-    static let relativeSharpness = 60
-    /// Which cell counts as "the sharpest", as a percentile of scored cells, so one glint can't set the bar.
-    static let topPercentile = 99
-    /// Cells across the long side of the frame.
-    static let columns = 240
+// Focus peaking, done the way cameras do it: a high-pass filter over the picture, and a threshold on its output.
+//
+// 1. Shrink the frame to about display resolution (long side ≤ 2048) by averaging blocks of pixels, as cameras
+//    peak on their monitor feed. Averaging also takes the edge off sensor noise.
+// 2. Blur lightly (3×3 binomial), so single-pixel noise doesn't count as detail.
+// 3. High-pass with a Laplacian, |4·B − up − down − left − right|. This responds to the finest detail only: it
+//    falls away fast as an edge blurs, where a gradient filter like Sobel keeps responding to big, soft edges.
+//    Camera makers' patents describe the same choice, a high cut-off for the peaking filter.
+// 4. Threshold at the frame's mean plus a number of standard deviations, set by the sensitivity, and smoothed
+//    over frames so the outlines don't flicker as the scene shifts (`PeakingThreshold`).
+// 5. Drop marked pixels without at least two marked neighbours: edges are lines, stray noise is dots.
+//
+// Like any camera's peaking it marks the sharpest fine detail, not focus as such, so on a phone's deep depth of
+// field a lot can be marked at once. It is most telling close up, where manual focus matters most.
 
-    let width: Int       // in cells, landscape, as the sensor delivers frames
+/// How readily peaking marks detail: how many standard deviations above the frame's mean a pixel's high-pass
+/// response has to be.
+enum PeakingSensitivity: Int, CaseIterable, Sendable {
+    case low, medium, high
+
+    var deviations: Double {
+        switch self {
+        case .low: 4
+        case .medium: 3
+        case .high: 2
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .low: "Low"
+        case .medium: "Medium"
+        case .high: "High"
+        }
+    }
+}
+
+/// A frame's high-pass response, per pixel of the shrunken frame, with its statistics.
+struct EdgeMap: Sendable {
+    /// Frames are shrunk until their long side is at most this.
+    static let targetSize = 2048
+
+    let width: Int      // landscape, as the sensor delivers frames
     let height: Int
-    let values: [UInt8]  // 255 where in focus, row by row
+    let strength: [UInt16]
+    let mean: Double
+    let deviation: Double
+
+    /// The integer factor a frame is shrunk by.
+    static func scale(width: Int, height: Int) -> Int {
+        max(1, (max(width, height) + targetSize - 1) / targetSize)
+    }
 
     /// Reads the Y plane of a 420YpCbCr8 pixel buffer. Nil if it has no readable luma plane.
     init?(lumaOf pixelBuffer: CVPixelBuffer) {
@@ -50,102 +67,131 @@ struct PeakingMask: Sendable {
                   bytesPerRow: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0))
     }
 
-    init(luma: UnsafePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int, columns: Int = PeakingMask.columns) {
-        let reach = 4   // the span the range is taken over, either side
-        guard width > reach * 2, height > reach * 2 else {   // too small to sample
-            self.width = 0
-            self.height = 0
-            self.values = []
+    init(luma: UnsafePointer<UInt8>, width fullWidth: Int, height fullHeight: Int, bytesPerRow: Int) {
+        let f = Self.scale(width: fullWidth, height: fullHeight)
+        let w = fullWidth / f, h = fullHeight / f
+        guard w >= 3, h >= 3 else {
+            width = 0; height = 0; strength = []; mean = 0; deviation = 0
             return
         }
-        let cell = max(2, max(width, height) / max(columns, 1))
-        let cols = width / cell, rows = height / cell
-        func at(_ x: Int, _ y: Int) -> Int { Int(luma[y * bytesPerRow + x]) }
-        func clampX(_ x: Int) -> Int { min(max(x, reach), width - 1 - reach) }
-        func clampY(_ y: Int) -> Int { min(max(y, reach), height - 1 - reach) }
-        /// Signed bend at (x, y) across a direction (dx, dy).
-        func bend(_ x: Int, _ y: Int, _ dx: Int, _ dy: Int) -> Int {
-            2 * at(x, y) - at(x - dx, y - dy) - at(x + dx, y + dy)
-        }
 
-        // The frame's noise: the median bend along each cell row's middle line. Most of any frame is smooth, so
-        // this is what flat areas look like at this ISO and light.
-        var counts = [Int](repeating: 0, count: 256)
-        var sampled = 0
-        for r in 0..<rows {
-            let y = clampY(r * cell + cell / 2)
-            for x in reach..<(width - reach) {
-                counts[min(255, abs(bend(x, y, 1, 0)))] += 1
-                sampled += 1
-            }
-        }
-        var median = 0, seen = 0
-        while median < 255 {
-            seen += counts[median]
-            if seen * 2 >= sampled { break }
-            median += 1
-        }
-        let floorBend = (Self.minimumContrast * Self.minimumSharpness + 99) / 100
-        let minimumBend = max(floorBend, Self.noiseMultiple * median)
-
-        /// The bend at (x, y) across (dx, dy), in hundredths of the local range; 0 if it isn't an edge worth scoring.
-        func score(_ x: Int, _ y: Int, _ dx: Int, _ dy: Int) -> Int {
-            let signed = bend(x, y, dx, dy)
-            var strength = abs(signed)
-            guard strength >= minimumBend else { return 0 }   // cheap reject: most pixels are flat
-            // The edge has to carry on into the next pixel along it, either side (straight on or one step
-            // diagonal), bending the same way. Its weakest continuation is what counts.
-            let alongX = dy, alongY = dx
-            for side in stride(from: -1, through: 1, by: 2) {
-                var best = 0
-                for offset in -1...1 {
-                    let next = bend(x + side * alongX + offset * dx, y + side * alongY + offset * dy, dx, dy)
-                    if next.signum() == signed.signum() { best = max(best, abs(next)) }
+        // 1. Block average.
+        var small = [UInt16](repeating: 0, count: w * h)
+        small.withUnsafeMutableBufferPointer { out in
+            let area = f * f
+            for y in 0..<h {
+                for x in 0..<w {
+                    var sum = 0
+                    for dy in 0..<f {
+                        let row = luma + (y * f + dy) * bytesPerRow + x * f
+                        for dx in 0..<f { sum += Int(row[dx]) }
+                    }
+                    out[y * w + x] = UInt16(sum / area)
                 }
-                strength = min(strength, best)
-            }
-            guard strength >= minimumBend else { return 0 }
-            let centre = at(x, y)
-            var low = centre, high = centre
-            for step in 1...reach {
-                let a = at(x - step * dx, y - step * dy), b = at(x + step * dx, y + step * dy)
-                low = min(low, a, b)
-                high = max(high, a, b)
-            }
-            let range = high - low
-            guard range >= Self.minimumContrast else { return 0 }
-            return min(100, strength * 100 / range)
-        }
-        // Each cell is scanned along its middle row (for vertical edges) and middle column (for horizontal ones),
-        // every pixel, since an edge's corner is a single pixel. An edge crossing the cell almost always crosses
-        // one of those lines. Kept `reach` pixels in from the borders so every sample has neighbours.
-        var scores = [Int](repeating: 0, count: cols * rows)
-        for r in 0..<rows {
-            for c in 0..<cols {
-                let midY = clampY(r * cell + cell / 2), midX = clampX(c * cell + cell / 2)
-                var best = 0
-                for column in c * cell..<(c * cell + cell) { best = max(best, score(clampX(column), midY, 1, 0)) }
-                for row in r * cell..<(r * cell + cell) { best = max(best, score(midX, clampY(row), 0, 1)) }
-                scores[r * cols + c] = best
             }
         }
-        let cutoff = max(Self.minimumSharpness, Self.top(of: scores) * Self.relativeSharpness / 100)
-        self.width = cols
-        self.height = rows
-        self.values = scores.map { $0 >= cutoff ? 255 : 0 }
+
+        // 2. 3×3 binomial blur, kept at 16× scale; edges repeat their outermost pixel.
+        var blurred = [UInt16](repeating: 0, count: w * h)
+        small.withUnsafeBufferPointer { s in
+            blurred.withUnsafeMutableBufferPointer { b in
+                for y in 0..<h {
+                    let up = max(y - 1, 0) * w, mid = y * w, down = min(y + 1, h - 1) * w
+                    for x in 0..<w {
+                        let l = max(x - 1, 0), r = min(x + 1, w - 1)
+                        let sum = Int(s[up + l]) + 2 * Int(s[up + x]) + Int(s[up + r])
+                            + 2 * Int(s[mid + l]) + 4 * Int(s[mid + x]) + 2 * Int(s[mid + r])
+                            + Int(s[down + l]) + 2 * Int(s[down + x]) + Int(s[down + r])
+                        b[mid + x] = UInt16(sum)
+                    }
+                }
+            }
+        }
+
+        // 3. Laplacian, back at 1× scale. The border has no full neighbourhood and stays 0.
+        var strength = [UInt16](repeating: 0, count: w * h)
+        var sum = 0.0, sumOfSquares = 0.0
+        blurred.withUnsafeBufferPointer { b in
+            strength.withUnsafeMutableBufferPointer { e in
+                for y in 1..<(h - 1) {
+                    for x in 1..<(w - 1) {
+                        let i = y * w + x
+                        let laplacian = 4 * Int(b[i]) - Int(b[i - w]) - Int(b[i + w]) - Int(b[i - 1]) - Int(b[i + 1])
+                        let value = abs(laplacian) >> 4
+                        e[i] = UInt16(value)
+                        let v = Double(value)
+                        sum += v
+                        sumOfSquares += v * v
+                    }
+                }
+            }
+        }
+        let count = Double(w * h)
+        let mean = sum / count
+        self.width = w
+        self.height = h
+        self.strength = strength
+        self.mean = mean
+        self.deviation = max(0, sumOfSquares / count - mean * mean).squareRoot()
     }
 
-    /// The score at `topPercentile` among cells that scored at all.
-    private static func top(of scores: [Int]) -> Int {
-        let scored = scores.filter { $0 > 0 }.sorted()
-        guard !scored.isEmpty else { return 0 }
-        return scored[min(scored.count - 1, scored.count * topPercentile / 100)]
+    /// This frame's own threshold for a sensitivity, before smoothing over frames.
+    func threshold(for sensitivity: PeakingSensitivity) -> Double {
+        mean + sensitivity.deviations * deviation
+    }
+}
+
+/// The threshold, eased from frame to frame so outlines don't flicker as the frame's statistics wobble. Each new
+/// frame moves it `response` of the way to that frame's own threshold, settling in a few tenths of a second.
+struct PeakingThreshold {
+    static let response = 0.3
+    private(set) var level: Double?
+
+    mutating func update(_ frame: Double) -> Double {
+        let next = level.map { $0 + Self.response * (frame - $0) } ?? frame
+        level = next
+        return next
     }
 
-    /// Whether anything in the frame is in focus.
+    mutating func reset() { level = nil }
+}
+
+/// Which pixels of a shrunken frame to outline.
+struct PeakingMask: Sendable {
+    /// Lowest high-pass response (in luma steps) ever marked, so a featureless frame isn't outlined at all.
+    static let minimumStrength = 8
+
+    let width: Int
+    let height: Int
+    let values: [UInt8]   // 255 where outlined, row by row
+
+    init(edges: EdgeMap, level: Double) {
+        let w = edges.width, h = edges.height
+        let cutoff = max(Self.minimumStrength, Int(level))
+        var marked = [Bool](repeating: false, count: w * h)
+        for i in edges.strength.indices where Int(edges.strength[i]) > cutoff { marked[i] = true }
+        // Keep pixels with at least two marked neighbours: an edge runs through them.
+        var values = [UInt8](repeating: 0, count: w * h)
+        if w >= 3, h >= 3 {
+            for y in 1..<(h - 1) {
+                for x in 1..<(w - 1) where marked[y * w + x] {
+                    var neighbours = 0
+                    for dy in -1...1 {
+                        for dx in -1...1 where (dx != 0 || dy != 0) && marked[(y + dy) * w + x + dx] { neighbours += 1 }
+                    }
+                    if neighbours >= 2 { values[y * w + x] = 255 }
+                }
+            }
+        }
+        self.width = w
+        self.height = h
+        self.values = values
+    }
+
+    /// Whether anything in the frame is outlined.
     var isEmpty: Bool { !values.contains(255) }
 
-    /// A grey image of the mask (white = in focus), turned upright for the portrait preview. Back-camera frames
+    /// A grey image of the mask (white = outlined), turned upright for the portrait preview. Back-camera frames
     /// arrive landscape, a quarter turn anticlockwise of portrait.
     func image() -> UIImage? {
         guard width > 0, height > 0,
