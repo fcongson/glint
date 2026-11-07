@@ -122,23 +122,3 @@ struct FocusRail: View {
         }
     }
 }
-
-/// Amber outlines over whatever is in focus. The mask is laid out the way the preview shows the frame (fitted,
-/// upright), so the outlines sit on the picture.
-struct PeakingOverlay: View {
-    let model: PeakingModel
-
-    var body: some View {
-        if let image = model.image {
-            Color.amber
-                .mask(
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .luminanceToAlpha()
-                )
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-    }
-}

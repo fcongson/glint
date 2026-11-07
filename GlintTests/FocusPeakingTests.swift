@@ -1,29 +1,49 @@
+import CoreVideo
 import Foundation
 import Testing
-import UIKit
 @testable import Glint
 
+/// Runs the GPU peaking pipeline (Viewfinder.metal) on synthetic frames. Needs Metal, which the simulator has.
 struct FocusPeakingTests {
-    /// 64 × 48 luma, one byte per pixel, made by `value(x, y)`; small enough that it isn't shrunk.
-    private func edges(_ value: (Int, Int) -> Int) -> EdgeMap {
-        let width = 64, height = 48
-        var luma = [UInt8](repeating: 0, count: width * height)
-        for y in 0..<height { for x in 0..<width { luma[y * width + x] = UInt8(min(max(value(x, y), 0), 255)) } }
-        return luma.withUnsafeBufferPointer {
-            EdgeMap(luma: $0.baseAddress!, width: width, height: height, bytesPerRow: width)
+    private static let width = 64, height = 48   // small enough that frames aren't shrunk
+
+    /// A 420YpCbCr8 full-range frame whose luma is `value(x, y)` (clamped) and chroma neutral.
+    private func frame(width: Int = width, height: Int = height, _ value: (Int, Int) -> Int) throws -> CVPixelBuffer {
+        let attributes: [String: Any] = [
+            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+        ]
+        var created: CVPixelBuffer?
+        CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                            attributes as CFDictionary, &created)
+        let buffer = try #require(created)
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        let luma = try #require(CVPixelBufferGetBaseAddressOfPlane(buffer, 0)).assumingMemoryBound(to: UInt8.self)
+        let lumaRow = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        for y in 0..<height {
+            for x in 0..<width { luma[y * lumaRow + x] = UInt8(min(max(value(x, y), 0), 255)) }
         }
+        let chroma = try #require(CVPixelBufferGetBaseAddressOfPlane(buffer, 1)).assumingMemoryBound(to: UInt8.self)
+        let chromaBytes = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1) * CVPixelBufferGetHeightOfPlane(buffer, 1)
+        chroma.update(repeating: 128, count: chromaBytes)
+        return buffer
     }
 
-    private func mask(_ sensitivity: PeakingSensitivity = .medium, _ value: (Int, Int) -> Int) -> PeakingMask {
-        let map = edges(value)
-        return PeakingMask(edges: map, level: map.threshold(for: sensitivity))
+    /// The outline mask for a frame at a sensitivity, with the threshold taken from the frame's own statistics.
+    private func mask(_ sensitivity: PeakingSensitivity = .medium,
+                      _ value: (Int, Int) -> Int) throws -> PeakingRenderer.Analysis {
+        let renderer = try #require(PeakingRenderer.make())
+        let buffer = try frame(value)
+        let stats = try #require(renderer.analyse(buffer, level: nil))
+        return try #require(renderer.analyse(buffer, level: stats.mean + sensitivity.deviations * stats.deviation))
     }
 
-    private func markedColumns(_ m: PeakingMask) -> Set<Int> {
-        Set(m.values.indices.filter { m.values[$0] == 255 }.map { $0 % m.width })
+    private func columns(_ a: PeakingRenderer.Analysis) -> Set<Int> {
+        Set(a.mask.indices.filter { a.mask[$0] > 0 }.map { $0 % a.width })
     }
 
-    private func markedCount(_ m: PeakingMask) -> Int { m.values.filter { $0 == 255 }.count }
+    private func count(_ a: PeakingRenderer.Analysis) -> Int { a.mask.filter { $0 > 0 }.count }
 
     /// Repeatable sensor-like noise, roughly ±10 luma standard deviation, with no pattern to line up along.
     private static func noise(_ x: Int, _ y: Int) -> Int {
@@ -41,70 +61,73 @@ struct FocusPeakingTests {
         return x < 32 ? (x < 16 ? 60 : 190) : 250 - soft
     }
 
-    @Test func aSharpEdgeIsOutlined() {
-        let m = mask { x, _ in x < 32 ? 0 : 255 }
+    @Test func aSharpEdgeIsOutlined() throws {
+        let m = try mask { x, _ in x < 32 ? 0 : 255 }
         #expect(m.width == 64 && m.height == 48)
-        #expect(markedColumns(m) == [30, 31, 32, 33])
-        // All the way down, bar the border rows.
-        #expect((1..<47).allSatisfy { m.values[$0 * 64 + 31] == 255 })
+        #expect(columns(m) == [30, 31, 32, 33])
+        #expect((1..<47).allSatisfy { m.mask[$0 * 64 + 31] > 0 })   // all the way down, bar the border rows
     }
 
-    @Test func aSharpDarkEdgeIsOutlined() {
-        #expect(markedColumns(mask { x, _ in x < 32 ? 20 : 60 }) == [30, 31, 32, 33])
+    @Test func aSharpDarkEdgeIsOutlined() throws {
+        #expect(columns(try mask { x, _ in x < 32 ? 20 : 60 }) == [30, 31, 32, 33])
     }
 
-    @Test func horizontalEdgesCountToo() {
-        let m = mask { _, y in y < 24 ? 20 : 200 }
-        let rows = Set(m.values.indices.filter { m.values[$0] == 255 }.map { $0 / m.width })
+    @Test func horizontalEdgesCountToo() throws {
+        let m = try mask { _, y in y < 24 ? 20 : 200 }
+        let rows = Set(m.mask.indices.filter { m.mask[$0] > 0 }.map { $0 / m.width })
         #expect(rows == [22, 23, 24, 25])
     }
 
-    @Test func onlyTheSharpEdgeIsOutlined() {
+    @Test func onlyTheSharpEdgeIsOutlined() throws {
         // The soft edge is just as big a change, but the high-pass filter barely responds to it.
-        #expect(markedColumns(mask { x, _ in Self.sharpAndSoft(x) }) == [14, 15, 16, 17])
+        #expect(columns(try mask { x, _ in Self.sharpAndSoft(x) }) == [14, 15, 16, 17])
     }
 
-    @Test func onlyTheSharpEdgeIsOutlinedThroughNoise() {
+    @Test func onlyTheSharpEdgeIsOutlinedThroughNoise() throws {
         for sensitivity in PeakingSensitivity.allCases {
-            let m = mask(sensitivity) { x, y in Self.sharpAndSoft(x) + Self.noise(x, y) }
-            #expect(markedColumns(m) == [14, 15, 16, 17], "\(sensitivity)")
+            let m = try mask(sensitivity) { x, y in Self.sharpAndSoft(x) + Self.noise(x, y) }
+            #expect(columns(m) == [14, 15, 16, 17], "\(sensitivity)")
         }
     }
 
-    @Test func higherSensitivityOutlinesMore() {
-        let counts = PeakingSensitivity.allCases.map { sensitivity in
-            markedCount(mask(sensitivity) { x, y in Self.sharpAndSoft(x) + Self.noise(x, y) })
+    @Test func higherSensitivityOutlinesMore() throws {
+        let counts = try PeakingSensitivity.allCases.map { sensitivity in
+            count(try mask(sensitivity) { x, y in Self.sharpAndSoft(x) + Self.noise(x, y) })
         }
         #expect(counts[0] < counts[1] && counts[1] <= counts[2])
     }
 
-    @Test func noiseAloneIsNot() {
-        #expect(mask { x, y in 128 + Self.noise(x, y) }.isEmpty)
+    @Test func noiseAloneIsNot() throws {
+        #expect(count(try mask { x, y in 128 + Self.noise(x, y) }) == 0)
     }
 
-    @Test func flatGreyIsNot() {
-        #expect(mask { _, _ in 128 }.isEmpty)
+    @Test func flatGreyIsNot() throws {
+        #expect(count(try mask { _, _ in 128 }) == 0)
     }
 
-    @Test func aBlurryRampIsNot() {
-        #expect(mask { x, _ in x * 4 }.isEmpty)
+    @Test func aBlurryRampIsNot() throws {
+        #expect(count(try mask { x, _ in x * 4 }) == 0)
+    }
+
+    @Test func shrinkingAveragesBlocks() throws {
+        // 4100 wide shrinks by 3; each 3 × 3 block of 0s and 255s averages to 85 and is flat: no detail at all.
+        let renderer = try #require(PeakingRenderer.make())
+        let buffer = try frame(width: 4100, height: 12) { x, y in (x + y) % 3 == 0 ? 255 : 0 }
+        let a = try #require(renderer.analyse(buffer, level: nil))
+        #expect(a.width == 1366 && a.height == 4)
+        #expect(a.mean < 0.01)
     }
 
     @Test(arguments: [(4032, 3024, 2), (1920, 1080, 1), (2048, 1536, 1), (8064, 6048, 4)])
     func framesShrinkToAboutDisplaySize(width: Int, height: Int, scale: Int) {
-        #expect(EdgeMap.scale(width: width, height: height) == scale)
+        #expect(PeakingRenderer.scale(width: width, height: height) == scale)
     }
 
-    @Test func shrinkingAveragesBlocks() {
-        // 4100 wide shrinks by 3; each 3 × 3 block of 0s and 255s averages to 85 and is flat, so nothing to mark.
-        let width = 4100, height = 9
-        var luma = [UInt8](repeating: 0, count: width * height)
-        for y in 0..<height { for x in 0..<width where (x + y) % 3 == 0 { luma[y * width + x] = 255 } }
-        let map = luma.withUnsafeBufferPointer {
-            EdgeMap(luma: $0.baseAddress!, width: width, height: height, bytesPerRow: width)
-        }
-        #expect(map.width == 1366 && map.height == 3)
-        #expect(map.strength.allSatisfy { $0 == 0 })
+    @Test func framesAreFittedUprightLikeThePreview() {
+        let box = CGSize(width: 300, height: 400)   // the 3:4 viewfinder
+        #expect(PeakingRenderer.fitScale(frameWidth: 4032, frameHeight: 3024, viewSize: box) == SIMD2(1, 1))
+        // 16:9 video stands 9:16 upright: full height, three quarters of the width.
+        #expect(PeakingRenderer.fitScale(frameWidth: 3840, frameHeight: 2160, viewSize: box) == SIMD2(0.75, 1))
     }
 
     @Test func theThresholdEasesTowardEachFrame() {
@@ -113,11 +136,5 @@ struct FocusPeakingTests {
         #expect(abs(threshold.update(200) - 130) < 0.001)
         threshold.reset()
         #expect(threshold.update(50) == 50)
-    }
-
-    @Test func maskBecomesAnUprightImage() throws {
-        let image = try #require(mask { x, _ in x < 32 ? 0 : 255 }.image())
-        #expect(image.imageOrientation == .right)   // landscape frame, shown in the portrait preview
-        #expect(image.size == CGSize(width: 48, height: 64))
     }
 }

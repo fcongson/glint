@@ -92,6 +92,13 @@ struct ContentView: View {
                         if focusTapCount == n { focusPoint = nil }
                     }
                 }, onLayerReady: { cam.attachPreviewLayer($0) })
+                // While peaking is on, the viewfinder is drawn with its outlines on the GPU, over the system
+                // preview, so they can't lag the picture. Touches go through to the preview.
+                if cam.isPeakingShown, let renderer = cam.peakingRenderer {
+                    PeakingViewfinder(renderer: renderer)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 if let p = focusPoint {
                     FocusBox().id(focusTapCount).position(p).accessibilityHidden(true)
                 }
@@ -99,10 +106,6 @@ struct ContentView: View {
             }
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipped()
-            .overlay {
-                // Focus peaking, under the crop mask so it's dimmed outside the frame too.
-                if cam.isPeakingShown { PeakingOverlay(model: cam.peakingModel) }
-            }
             .overlay {
                 // The crop for 3:2, 1:1 and 16:9, dimmed outside, so what's just out of frame stays visible.
                 if cam.captureMode == .video {

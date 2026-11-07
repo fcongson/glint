@@ -51,7 +51,6 @@ enum CaptureEvent: Sendable {
     case audioLevel(Float)
     case histogram(Histogram)
     /// Where the preview frame is in focus.
-    case peaking(PeakingMask)
     case photoCaptured(CapturedPhoto)
     case recordingStarted
     case recordingFinished(URL)
@@ -102,11 +101,12 @@ actor CaptureSession {
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
-    init() {
+    /// `peaking` draws the viewfinder while focus peaking is on; nil leaves peaking unavailable.
+    init(peaking: PeakingRenderer?) {
         let (events, emit) = AsyncStream.makeStream(of: CaptureEvent.self)
         self.events = events
         self.emit = emit
-        analyzer = FrameAnalyzer(histogram: { emit.yield(.histogram($0)) }, peaking: { emit.yield(.peaking($0)) })
+        analyzer = FrameAnalyzer(histogram: { emit.yield(.histogram($0)) }, peaking: peaking)
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
         self.commands = commands

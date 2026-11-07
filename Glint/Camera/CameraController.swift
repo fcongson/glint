@@ -43,7 +43,8 @@ final class CameraController {
     private(set) var whiteBalanceKelvin: Float = 5500
     private(set) var isHistogramEnabled = false
     let histogramModel = HistogramModel()
-    let peakingModel = PeakingModel()
+    /// Draws the viewfinder with peaking outlines, on the GPU. Nil without Metal, which leaves peaking off.
+    let peakingRenderer: PeakingRenderer?
     /// Focus peaking is shown while focusing by hand (AF off), as on a camera in MF. On by default.
     private(set) var isPeakingEnabled = true
     private(set) var peakingSensitivity = PeakingSensitivity.medium
@@ -55,7 +56,7 @@ final class CameraController {
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
     private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
 
-    private let capture = CaptureSession()
+    private let capture: CaptureSession
     private let locationProvider = LocationProvider()
     private let reviewRenderer: ReviewImageRenderer
     private let developer: PhotoDeveloper
@@ -64,6 +65,10 @@ final class CameraController {
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
 
     init() {
+        let peaking = PeakingRenderer.make()
+        peakingRenderer = peaking
+        capture = CaptureSession(peaking: peaking)
+        isPeakingEnabled = peaking != nil
         let renderer = ReviewImageRenderer()
         reviewRenderer = renderer
         developer = PhotoDeveloper(renderer: renderer)   // shares the renderer's CIContext
@@ -150,8 +155,6 @@ final class CameraController {
             }
         case .histogram(let histogram):
             if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
-        case .peaking(let mask):
-            if isPeakingShown { peakingModel.show(mask) }
         case .photoCaptured(let photo):
             photoCaptured(photo)
         case .recordingStarted:
@@ -295,7 +298,7 @@ final class CameraController {
     }
 
     func setPeakingEnabled(_ on: Bool) {
-        guard on != isPeakingEnabled else { return }
+        guard on != isPeakingEnabled, !on || peakingRenderer != nil else { return }
         isPeakingEnabled = on
         pausedForLowPower.peaking = false   // the user's choice now
         sendAnalysis()
@@ -336,7 +339,6 @@ final class CameraController {
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
         let histogram = isHistogramEnabled, peaking = isPeakingShown, sensitivity = peakingSensitivity
-        if !peaking { peakingModel.clear() }
         capture.enqueue { $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity) }
     }
 
