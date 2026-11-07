@@ -33,6 +33,9 @@ final class CameraController {
     private(set) var auto = AutoSettings()
     private(set) var exposureBias: Float = 0     // exposure compensation in stops, while the camera chooses some exposure
     private var hasManualWhiteBalance = false    // false until manual WB has been seeded from auto once
+    private(set) var videoFormat = VideoFormat()
+    private(set) var videoCapabilities = VideoCapabilities()
+    private(set) var audioLevel: Float = 0       // 0 … 1, while recording
     private(set) var status = ""           // transient message; cleared automatically by `post`
     private(set) var lenses: [Lens] = []
     private(set) var currentLensID = ""
@@ -94,10 +97,16 @@ final class CameraController {
         case .ready(let lenses, let device):
             self.lenses = lenses
             apply(device)
-        case .lensChanged(let device):
+        case .lensChanged(let device), .formatChanged(let device):
             apply(device)
-            // A new device starts in auto, so re-lock exposure/WB/focus if the user is in manual.
+            // A new device or format starts in auto, so re-lock exposure/WB/focus if the user is in manual.
             if manual { sendExposureMode(keepWhiteBalance: true) }
+        case .videoCapabilities(let caps):
+            videoCapabilities = caps
+        case .videoFormatResolved(let format):
+            videoFormat = format
+        case .audioLevel(let level):
+            audioLevel = level
         case .exposureOffset(let offset):
             exposureOffset = offset
         case .lensPosition(let position):
@@ -135,6 +144,9 @@ final class CameraController {
         case .recordingFinished(let url):
             isRecording = false
             recordingStartedAt = nil
+            // Recording held white balance (and exposure, if asked) still; put the normal modes back.
+            capture.enqueue { $0.recordingEnded() }
+            sendExposureMode(keepWhiteBalance: true)
             let report = statusReporter
             Task.detached(priority: .utility) { MediaLibrary.saveVideo(at: url, report: report) }
         case .status(let message):
@@ -164,6 +176,28 @@ final class CameraController {
     func setCaptureMode(_ mode: CaptureMode) {
         guard mode != captureMode, !isRecording else { return }
         captureMode = mode
+        let video = mode == .video, format = videoFormat
+        capture.enqueue { $0.setCaptureMode(video: video, format: format) }
+    }
+
+    /// A choice from the video format panel, settled to the nearest one this lens can record.
+    func setVideoFormat(_ format: VideoFormat) {
+        guard !isRecording else { return }
+        let format = format.normalized(for: videoCapabilities)
+        guard format != videoFormat else { return }
+        videoFormat = format
+        capture.enqueue { $0.setVideoFormat(format) }
+    }
+
+    /// While recording with "exposure while recording: locked", the exposure controls don't respond.
+    var isExposureLocked: Bool {
+        isRecording && captureMode == .video && videoFormat.locksExposureWhileRecording
+    }
+
+    /// The shutter actually in use: in video, A means the 180° rule and nothing is slower than a frame.
+    var effectiveShutterDenominator: Double {
+        guard captureMode == .video else { return shutterDenominator }
+        return videoFormat.exposure(auto: manual ? auto : AutoSettings(), shutterDenominator: shutterDenominator).shutterDenominator
     }
 
     // The photo format is read at capture time; nothing to send to the device.

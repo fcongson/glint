@@ -14,7 +14,8 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **Per-setting A:** in MANUAL, the A at the end of the ruler hands the selected setting to the camera, like the A on a Leica dial; its readout gets a red A and shows what the camera chose. ISO on auto gives shutter priority, shutter on auto gives ISO priority, both give program. AVFoundation has no priority modes, so Glint corrects the auto setting from the meter. While ISO or shutter is on auto, the ruler sets exposure compensation (−3 to +3 EV in 1/3 stops). Turning an A off picks up from the camera's choice, so the picture doesn't jump.
 - **Manual focus:** in MANUAL, a rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail or turning AF off takes over from wherever autofocus left the lens, so the picture doesn't jump; tapping the viewfinder hands focus back to autofocus. The rail fades when idle (it stays visible with VoiceOver, where it's adjustable by swiping up and down).
 - **Exposure meter:** Leica-style LEDs in the top bar (▶ under, ● on target, ◀ over) with the offset in stops, from the camera's own metering.
-- **PHOTO · VIDEO:** under the shutter; in VIDEO the shutter becomes the record button and the top bar shows the recording time. Neither switch can change mid-recording.
+- **PHOTO · VIDEO:** under the shutter; in VIDEO the shutter becomes the record button and the top bar shows the recording time and a microphone level meter. Neither switch can change mid-recording.
+- **Video format panel:** in VIDEO, tap the format chip ("4K 24 HEVC"). RESOLUTION (4K, 1080p), FRAME RATE (24, 25, 30, 60), FORMAT (HEVC, ProRes, ProRes RAW), ENCODING (Standard, Apple Log with ProRes) and EXPOSURE WHILE RECORDING (Adjustable, Locked). Choices the lens can't record are greyed out; ProRes needs a Pro iPhone and ProRes RAW an iPhone 17 Pro on iOS 26 (Apple recommends an external drive for it). The viewfinder shows the 16:9 frame. In MANUAL, shutter on A follows the 180° rule (1/48 at 24 fps), and no shutter is slower than a frame. White balance holds still while recording.
 - **Lens switching:** all rear lenses, labelled by zoom factor (0.5x, 1x, 3x...), with a read-only aperture readout.
 - **Tap to focus**, lens buttons over the bottom of the viewfinder, a live histogram with clipping warnings (HIST chip, off by default), and a review thumbnail rendered from the saved DNG.
 - **Photo review:** swipe through this session's shots. An info card shows the capture date, camera and lens, format, resolution and file size, the exposure settings (ISO, shutter, aperture, focal length, EV, white balance), and where the photo was taken.
@@ -36,13 +37,14 @@ Glint/
     ExposureScale.swift        ISO, shutter and WB stops
     ExposureMeter.swift        meter reading and the focus rail's scale
     AutoExposure.swift         per-setting auto, and the shutter/ISO priority correction
+    VideoFormat.swift          video resolutions, frame rates, codecs, the 180° shutter and settling choices to what a lens supports
     Throttled.swift            rate-limits KVO updates (meter, lens position)
     HistogramAnalyzer.swift    histogram and clipping
     ReviewImageRenderer.swift  DNG development and review thumbnails
     LocationProvider.swift     location fixes for photo tagging, place names
     MediaLibrary.swift         saves to Documents and Photos
     PhotoInfo.swift            settings and capture details of a photo
-  Views/                       controls and switches, ruler picker, focus rail, photo format panel and crop mask, histogram, focus box, review screen with info card
+  Views/                       controls and switches, ruler picker, focus rail, photo and video format panels and crop mask, histogram, focus box, review screen with info card
   Assets.xcassets              app icon (light, dark, tinted) and accent color
 GlintTests/                    Swift Testing coverage of the pure logic
 ```
@@ -56,7 +58,7 @@ GlintTests/                    Swift Testing coverage of the pure logic
 For performance testing, run from the Home Screen or use a Release build. Debug builds from Xcode (debugger plus Metal validation) make image work much slower.
 
 ## Tests
-Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture planning, exposure scales, the meter and focus scale, priority exposure, histogram, lenses, photo info, settings text, location freshness rules) and need no camera.
+Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, histogram, lenses, photo info, settings text, location freshness rules) and need no camera.
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.

@@ -91,6 +91,20 @@ struct SettingsTextTests {
         #expect(SettingsText.duration(seconds: seconds) == text)
     }
 
+    @Test func videoFormatChip() {
+        var f = VideoFormat()
+        #expect(SettingsText.videoFormat(f) == "4K 24 HEVC")
+        f.codec = .proRes
+        f.encoding = .log
+        #expect(SettingsText.videoFormat(f) == "4K 24 ProRes Log")
+        f.codec = .proResRAW
+        #expect(SettingsText.videoFormat(f) == "ProRes RAW 24")
+        f = VideoFormat()
+        f.resolution = .hd1080
+        f.frameRate = 60
+        #expect(SettingsText.videoFormat(f) == "1080p 60 HEVC")
+    }
+
     @Test func settingNames() {
         #expect(SettingsText.name(.iso) == "ISO")
         #expect(SettingsText.name(.shutter) == "Shutter speed")
