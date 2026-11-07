@@ -29,6 +29,7 @@ struct SettingReadout: View {
     let label: String
     let value: String
     var highlighted = false
+    var isAuto = false   // a red A before the value, like the A on a Leica dial: the camera chose it
     let angle: Angle
 
     var body: some View {
@@ -36,9 +37,16 @@ struct SettingReadout: View {
             Text(label)
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(Color.white.opacity(0.6))
-            Text(value)
-                .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                .foregroundStyle(highlighted ? Color.amber : Color.white)
+            HStack(spacing: 3) {
+                if isAuto {
+                    Text("A")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.autoRed)
+                }
+                Text(value)
+                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(highlighted ? Color.amber : Color.white)
+            }
         }
         .rotationEffect(angle)
     }
@@ -143,6 +151,8 @@ struct ModeStrip<Value: Hashable>: View {
 extension Color {
     /// Glint's accent, the amber from the app icon (#F5A524). Black text on it is about 10:1.
     static let amber = Color(red: 0xF5 / 255, green: 0xA5 / 255, blue: 0x24 / 255)
+    /// The red of the A on a Leica dial (#FF4A3A), marking settings the camera chooses. About 6:1 on black either way.
+    static let autoRed = Color(red: 1, green: 0x4A / 255, blue: 0x3A / 255)
 }
 
 extension Angle {

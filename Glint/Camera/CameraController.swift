@@ -27,6 +27,11 @@ final class CameraController {
     private(set) var isAutofocus = true
     private(set) var lensPosition: Float = 0.5   // 0 nearest … 1 farthest
     private(set) var exposureOffset: Float = 0   // the meter, in stops
+    /// In manual, the settings handed back to the camera with their A buttons. Kept while in auto mode, so
+    /// returning to manual restores them.
+    private(set) var auto = AutoSettings()
+    private(set) var exposureBias: Float = 0     // exposure compensation in stops, while the camera chooses some exposure
+    private var hasManualWhiteBalance = false    // false until manual WB has been seeded from auto once
     private(set) var status = ""           // transient message; cleared automatically by `post`
     private(set) var lenses: [Lens] = []
     private(set) var currentLensID = ""
@@ -102,7 +107,18 @@ final class CameraController {
             lensPosition = position
         case .manualFocusUnavailable:
             isAutofocus = true
+        case .autoValues(let autoISO, let shutterSeconds):
+            // Shown as the nearest ruler stop, which is also where manual picks up if the A is turned off.
+            if let autoISO, auto.iso {
+                iso = ExposureScale.nearest(autoISO, in: ExposureScale.isoStops(min: minISO, max: maxISO))
+            }
+            if let shutterSeconds, auto.shutter, shutterSeconds > 0 {
+                shutterDenominator = ExposureScale.nearest(1 / shutterSeconds, in: ExposureScale.shutterDenominators)
+            }
+        case .autoWhiteBalance(let kelvin):
+            if auto.whiteBalance { whiteBalanceKelvin = ExposureScale.nearest(kelvin, in: ExposureScale.whiteBalanceKelvins) }
         case .whiteBalanceSeeded(let kelvin):
+            hasManualWhiteBalance = true
             whiteBalanceKelvin = kelvin   // display only; the device already has auto's exact gains locked
         case .previewRotation(let angle):
             if let conn = previewLayer?.connection, conn.isVideoRotationAngleSupported(angle) {
@@ -154,27 +170,45 @@ final class CameraController {
     }
 
     /// Switch between manual exposure + locked white balance, and continuous auto.
-    /// Entering manual seeds the white balance from whatever auto has currently chosen.
+    /// The first time into manual, white balance starts from whatever auto has chosen; after that, returning to
+    /// manual restores your Kelvin setting, like ISO and shutter.
     func setManual(_ on: Bool) {
         guard on != manual else { return }
         manual = on
-        sendExposureMode(keepWhiteBalance: false)
+        sendExposureMode(keepWhiteBalance: hasManualWhiteBalance)
+    }
+
+    /// Hands one manual setting to the camera (A on) or takes it back (A off). Taking it back starts from what the
+    /// camera had chosen, so the picture doesn't jump.
+    func setAuto(_ setting: ManualSetting, _ on: Bool) {
+        guard manual, auto[setting] != on else { return }
+        auto[setting] = on
+        // Turning WB's A off locks auto's current gains; otherwise the manual Kelvin value is re-applied.
+        sendExposureMode(keepWhiteBalance: !(setting == .whiteBalance && !on))
+    }
+
+    /// Exposure compensation, in stops, for when the camera chooses some of the exposure.
+    func setExposureBias(_ value: Float) {
+        guard value != exposureBias else { return }
+        exposureBias = value
+        let bias = value
+        capture.enqueue { $0.applyExposureBias(bias) }
     }
 
     func setISO(_ value: Float) {
-        guard value != iso else { return }
+        guard value != iso, !auto.iso else { return }
         iso = value
         sendExposure()
     }
 
     func setShutterDenominator(_ value: Double) {
-        guard value != shutterDenominator else { return }
+        guard value != shutterDenominator, !auto.shutter else { return }
         shutterDenominator = value
         sendExposure()
     }
 
     func setWhiteBalanceKelvin(_ value: Float) {
-        guard value != whiteBalanceKelvin else { return }
+        guard value != whiteBalanceKelvin, !auto.whiteBalance else { return }
         whiteBalanceKelvin = value
         guard manual else { return }
         let kelvin = value
@@ -184,9 +218,10 @@ final class CameraController {
     private func sendExposureMode(keepWhiteBalance: Bool) {
         let manual = manual, iso = iso, denom = shutterDenominator, kelvin = whiteBalanceKelvin
         let manualFocus: Float? = isAutofocus ? nil : lensPosition
+        let auto = auto, bias = exposureBias
         capture.enqueue {
             $0.setExposureMode(manual: manual, iso: iso, shutterDenominator: denom, kelvin: kelvin,
-                               keepWhiteBalance: keepWhiteBalance, manualFocus: manualFocus)
+                               keepWhiteBalance: keepWhiteBalance, manualFocus: manualFocus, auto: auto, bias: bias)
         }
     }
 

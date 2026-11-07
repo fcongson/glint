@@ -86,6 +86,12 @@ struct SettingsTextTests {
         #expect(SettingsText.duration(seconds: seconds) == text)
     }
 
+    @Test func settingNames() {
+        #expect(SettingsText.name(.iso) == "ISO")
+        #expect(SettingsText.name(.shutter) == "Shutter speed")
+        #expect(SettingsText.name(.whiteBalance) == "White balance")
+    }
+
     @Test func spokenToggleValues() {
         #expect(SettingsText.onOff(true) == "On")
         #expect(SettingsText.onOff(false) == "Off")

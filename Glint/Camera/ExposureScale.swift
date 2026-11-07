@@ -14,6 +14,12 @@ enum ExposureScale {
     /// White balance runs 2000–10000K in 100K steps.
     static let whiteBalanceKelvins: [Float] = stride(from: 2000, through: 10000, by: 100).map { Float($0) }
 
+    /// Exposure compensation, −3 to +3 in 1/3 stops.
+    static let exposureBiasStops: [Float] = (-9...9).map { Float($0) / 3 }
+
+    /// Whole stops of compensation (−3, −2 … +3), counting from the first.
+    static func isFullStopBias(index: Int) -> Bool { index % 3 == 0 }
+
     /// The ISO stops within a lens's range. Never empty: falls back to the minimum if no conventional stop fits.
     static func isoStops(min: Float, max: Float) -> [Float] {
         let stops = allISOStops.filter { $0 >= min && $0 <= max }
