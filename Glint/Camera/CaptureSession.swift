@@ -275,8 +275,9 @@ actor CaptureSession {
 
     // MARK: Exposure and white balance
 
-    /// Manual: custom exposure plus locked white balance, and the lens locked at `manualFocus` if there is one
-    /// (otherwise continuous autofocus). Auto: everything returns to continuous auto, including focus.
+    /// Manual: custom exposure plus locked white balance. Auto: exposure and white balance return to continuous
+    /// auto. Focus is separate from both, as on a camera's AF/MF switch: the lens stays locked at `manualFocus` if
+    /// there is one, otherwise continuous autofocus.
     /// `keepWhiteBalance` re-applies `kelvin` (after a lens switch) instead of locking whatever auto has currently chosen.
     ///
     /// In manual, `auto` hands individual settings back to the camera: both exposure settings means continuous auto
@@ -294,7 +295,7 @@ actor CaptureSession {
                 if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
                 if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
                 applyBias(0, d)
-                applyFocus(d, lockedAt: nil)
+                applyFocus(d, lockedAt: manualFocus)
                 return
             }
             applyBias(auto.usesCompensation ? bias : 0, d)

@@ -124,8 +124,9 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .trailing) {
-                // Manual focus lives on the viewfinder's edge, where the thumb can reach it while framing.
-                if cam.manual { focusControls }
+                // Focus lives on the viewfinder's edge, where the thumb can reach it while framing. It's there in
+                // AUTO too: exposure and focus are separate, as on a camera.
+                focusControls
             }
             .overlay(alignment: .bottom) {
                 // Lens buttons sit over the bottom of the preview, as in the system Camera, so the controls below
