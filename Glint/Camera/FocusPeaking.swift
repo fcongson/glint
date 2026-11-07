@@ -2,13 +2,18 @@ import CoreVideo
 import Observation
 import UIKit
 
-/// A focus-peaking mask for one preview frame: the cells of the frame with fine, high-contrast detail, which is
-/// what's in focus. Blur spreads an edge over several pixels, so the difference between a pixel's immediate
-/// neighbours stays small; a sharp edge makes it jump. Cells are sampled rather than every pixel, but the
-/// gradient itself is always measured between neighbouring pixels, so a blurry frame shows nothing.
+/// A focus-peaking mask for one preview frame: the cells of the frame with sharp detail, which is what's in focus.
+///
+/// Sharpness here is how *abruptly* brightness changes, not how much. At each sample the change across one pixel
+/// either side (fine) is compared with the change across four either side (coarse). A sharp edge makes nearly
+/// all of its change within the fine span; a soft one spreads it out, so its fine change is a small part of the
+/// coarse one. Brightness doesn't matter: a soft edge on a bright window fails, a sharp one in shadow passes.
+/// Fine texture, where the coarse span takes in several ups and downs, passes on its fine change alone.
 struct PeakingMask: Sendable {
-    /// |dx| + |dy| between neighbouring luma pixels (0…510) at or above which a cell counts as in focus.
-    static let threshold = 36
+    /// Smallest fine change (0…255 luma) worth marking, so sensor noise in flat areas isn't.
+    static let minimumDetail = 24
+    /// How much of the coarse change has to happen in the fine span, in tenths: 7 means 70%.
+    static let sharpnessTenths = 7
     /// Cells across the long side of the frame.
     static let columns = 240
 
@@ -28,9 +33,9 @@ struct PeakingMask: Sendable {
                   bytesPerRow: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0))
     }
 
-    init(luma: UnsafePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int,
-         columns: Int = PeakingMask.columns, threshold: Int = PeakingMask.threshold) {
-        guard width >= 3, height >= 3 else {   // too small to have neighbours on both sides
+    init(luma: UnsafePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int, columns: Int = PeakingMask.columns) {
+        let reach = 4   // the coarse span, either side
+        guard width > reach * 2, height > reach * 2 else {   // too small to sample
             self.width = 0
             self.height = 0
             self.values = []
@@ -39,22 +44,27 @@ struct PeakingMask: Sendable {
         let cell = max(2, max(width, height) / max(columns, 1))
         let cols = width / cell, rows = height / cell
         var values = [UInt8](repeating: 0, count: cols * rows)
-        // Two samples per cell, a quarter and three quarters of the way in, so a thin edge between sample
-        // points isn't missed.
+        func at(_ x: Int, _ y: Int) -> Int { Int(luma[y * bytesPerRow + x]) }
+        func isSharp(fine: Int, coarse: Int) -> Bool {
+            fine >= Self.minimumDetail && fine * 10 >= coarse * Self.sharpnessTenths
+        }
+        // Two samples per cell, a quarter and three quarters of the way in, so a thin edge between sample points
+        // isn't missed. Kept `reach` pixels in from the borders so every sample has neighbours on each side.
         let offsets = [(cell / 4, cell / 4), (3 * cell / 4, 3 * cell / 4)]
         for r in 0..<rows {
             for c in 0..<cols {
-                var strongest = 0
                 for (ox, oy) in offsets {
-                    // Kept one pixel in from the edges, so every sample has a neighbour on each side; a sample
-                    // that fell on the border would otherwise be skipped and miss an edge there.
-                    let x = min(max(c * cell + ox, 1), width - 2)
-                    let y = min(max(r * cell + oy, 1), height - 2)
-                    let dx = abs(Int(luma[y * bytesPerRow + x + 1]) - Int(luma[y * bytesPerRow + x - 1]))
-                    let dy = abs(Int(luma[(y + 1) * bytesPerRow + x]) - Int(luma[(y - 1) * bytesPerRow + x]))
-                    strongest = max(strongest, dx + dy)
+                    let x = min(max(c * cell + ox, reach), width - 1 - reach)
+                    let y = min(max(r * cell + oy, reach), height - 1 - reach)
+                    let sharpX = isSharp(fine: abs(at(x + 1, y) - at(x - 1, y)),
+                                         coarse: abs(at(x + reach, y) - at(x - reach, y)))
+                    let sharpY = isSharp(fine: abs(at(x, y + 1) - at(x, y - 1)),
+                                         coarse: abs(at(x, y + reach) - at(x, y - reach)))
+                    if sharpX || sharpY {
+                        values[r * cols + c] = 255
+                        break
+                    }
                 }
-                if strongest >= threshold { values[r * cols + c] = 255 }
             }
         }
         self.width = cols

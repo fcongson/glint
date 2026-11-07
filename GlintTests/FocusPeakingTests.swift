@@ -29,6 +29,21 @@ struct FocusPeakingTests {
         #expect(mask { x, _ in UInt8(x * 4) }.isEmpty)
     }
 
+    @Test func aSoftHighContrastEdgeIsNot() {
+        // Black to white over 8 pixels: a big change, but gradual. This used to light up bright, blurry edges.
+        #expect(mask { x, _ in UInt8(min(max((x - 28) * 32, 0), 255)) }.isEmpty)
+    }
+
+    @Test func aSharpDarkEdgeIsMarked() {
+        // A small but abrupt change in shadow counts: sharpness, not brightness.
+        #expect(!mask { x, _ in x < 32 ? 20 : 60 }.isEmpty)
+    }
+
+    @Test func fineTextureIsMarked() {
+        // Alternating 2-pixel stripes: the coarse span averages out, the fine change carries it.
+        #expect(!mask { x, _ in (x / 2) % 2 == 0 ? 40 : 140 }.isEmpty)
+    }
+
     @Test func flatGreyIsNot() {
         #expect(mask { _, _ in 128 }.isEmpty)
     }
