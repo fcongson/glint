@@ -50,6 +50,7 @@ enum CaptureEvent: Sendable {
     /// Microphone level while recording, 0 (silence) … 1 (full scale).
     case audioLevel(Float)
     case histogram(Histogram)
+    /// Where the preview frame is in focus.
     case photoCaptured(CapturedPhoto)
     case recordingStarted
     case recordingFinished(URL)
@@ -81,7 +82,7 @@ actor CaptureSession {
 
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
-    private let histogram: HistogramAnalyzer
+    private let analyzer: FrameAnalyzer   // histogram and focus peaking, from one video data output
     private var device: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
     private var lensDevices: [String: AVCaptureDevice] = [:]
@@ -100,11 +101,12 @@ actor CaptureSession {
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
-    init() {
+    /// `peaking` draws the viewfinder while focus peaking is on; nil leaves peaking unavailable.
+    init(peaking: PeakingRenderer?) {
         let (events, emit) = AsyncStream.makeStream(of: CaptureEvent.self)
         self.events = events
         self.emit = emit
-        histogram = HistogramAnalyzer { emit.yield(.histogram($0)) }
+        analyzer = FrameAnalyzer(histogram: { emit.yield(.histogram($0)) }, peaking: peaking)
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
         self.commands = commands
@@ -167,7 +169,7 @@ actor CaptureSession {
                 movieOutput.isDeferredStartEnabled = false
             }
         }
-        // The histogram's output is attached separately, only while it's switched on.
+        // The analysis output (histogram, peaking) is attached separately, only while one of them is on.
         session.commitConfiguration()
 
         let info = applyDeviceSettings(wide)
@@ -273,8 +275,9 @@ actor CaptureSession {
 
     // MARK: Exposure and white balance
 
-    /// Manual: custom exposure plus locked white balance, and the lens locked at `manualFocus` if there is one
-    /// (otherwise continuous autofocus). Auto: everything returns to continuous auto, including focus.
+    /// Manual: custom exposure plus locked white balance. Auto: exposure and white balance return to continuous
+    /// auto. Focus is separate from both, as on a camera's AF/MF switch: the lens stays locked at `manualFocus` if
+    /// there is one, otherwise continuous autofocus.
     /// `keepWhiteBalance` re-applies `kelvin` (after a lens switch) instead of locking whatever auto has currently chosen.
     ///
     /// In manual, `auto` hands individual settings back to the camera: both exposure settings means continuous auto
@@ -292,7 +295,7 @@ actor CaptureSession {
                 if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
                 if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
                 applyBias(0, d)
-                applyFocus(d, lockedAt: nil)
+                applyFocus(d, lockedAt: manualFocus)
                 return
             }
             applyBias(auto.usesCompensation ? bias : 0, d)
@@ -424,10 +427,24 @@ actor CaptureSession {
 
     // MARK: Histogram
 
-    /// Attaches or detaches the luma analysis stream, so it costs nothing while the histogram is off.
-    func setHistogramAttached(_ on: Bool) {
-        let output = histogram.output
+    /// Stops the camera while it isn't on screen (the review), which is most of what a camera app spends battery
+    /// on, and starts it again after. Never stops mid-recording.
+    func setRunning(_ running: Bool) {
+        if running {
+            if !session.isRunning { session.startRunning() }
+        } else if session.isRunning, !movieOutput.isRecording {
+            session.stopRunning()
+        }
+    }
+
+    /// Chooses what the luma analysis stream is for, and attaches it only while something wants it, so it costs
+    /// nothing while the histogram and peaking are both off.
+    func setAnalysis(histogram: Bool, peaking: Bool, sensitivity: PeakingSensitivity) {
+        let wants = FrameAnalyzer.Wants(histogram: histogram, peaking: peaking, sensitivity: sensitivity)
+        let output = analyzer.output
+        let on = wants.any
         session.beginConfiguration()
+        analyzer.set(wants)   // may change the output's frame size
         if on {
             if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }
         } else if session.outputs.contains(output) {

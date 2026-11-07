@@ -10,9 +10,11 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **RAW (DNG) stills:** Bayer RAW, not Apple ProRAW.
 - **Photo format panel:** tap the format chip in the top bar. FILE is RAW (the default), HEIC or RAW+HEIC; ASPECT is 4:3 (the full sensor), 3:2, 1:1 or 16:9. Other ratios dim the viewfinder outside the crop, with bright-line corners. The crop is applied to the HEIC when it's developed; a DNG always keeps the full sensor. RAW+HEIC saves both files to Documents and one Photos asset (the HEIC, with the DNG as its RAW alternate).
 - **Neutral HEIC:** still shoots Bayer RAW, then develops it into a full-resolution HEIC with noise reduction, sharpening, contrast, detail, moire and boost turned off, so the result matches the DNG. In HEIC the developed file replaces the DNG; in RAW+HEIC both are kept. If developing fails the DNG is kept; if Bayer RAW isn't available the camera's own HEIC is saved (fusion off).
-- **AUTO | MANUAL:** a switch beside the shutter. In MANUAL, tap ISO, SHUTTER or WB to set it on one camera-style ruler (1/3-stop steps; shutter 1/8 to 1/8000; white balance in Kelvin). Exposure and white balance are locked. AUTO hides the manual controls; switching back restores your manual settings, including white balance and which settings are on A.
+- **AUTO | MANUAL:** a switch beside the shutter. In MANUAL, tap ISO, SHUTTER or WB to set it on one camera-style ruler (1/3-stop steps; shutter 1/8 to 1/8000; white balance in Kelvin). Exposure and white balance are locked. AUTO hides the manual exposure controls (focus stays, see below); switching back restores your manual settings, including white balance and which settings are on A.
 - **Per-setting A:** in MANUAL, the A at the end of the ruler hands the selected setting to the camera, like the A on a Leica dial; its readout gets a red A and shows what the camera chose. ISO on auto gives shutter priority, shutter on auto gives ISO priority, both give program. AVFoundation has no priority modes, so Glint corrects the auto setting from the meter. While ISO or shutter is on auto, the ruler sets exposure compensation (−3 to +3 EV in 1/3 stops). Turning an A off picks up from the camera's choice, so the picture doesn't jump.
-- **Manual focus:** in MANUAL, a rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail or turning AF off takes over from wherever autofocus left the lens, so the picture doesn't jump; tapping the viewfinder hands focus back to autofocus. The rail fades when idle (it stays visible with VoiceOver, where it's adjustable by swiping up and down).
+- **Manual focus:** separate from AUTO and MANUAL, which are about exposure, as a camera's AF/MF switch is separate from its mode dial. A rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail or turning AF off takes over from wherever autofocus left the lens, so the picture doesn't jump; tapping the viewfinder hands focus back to autofocus. The rail fades when idle (it stays visible with VoiceOver, where it's adjustable by swiping up and down).
+- **Focus peaking:** while focusing by hand (AF off), as on a camera in MF, a PK switch under the focus rail (on by default) outlines the sharpest fine detail in amber. Touch and hold PK (or swipe up or down with VoiceOver) for Low, Medium or High sensitivity. As on a camera, the outlines are drawn into the viewfinder image itself: while peaking is on, Glint draws the viewfinder on the GPU, every frame with its own outlines, so they can't lag the picture. Each frame is shrunk to about display size, lightly blurred, high-passed with a Laplacian (which responds to fine detail and falls away fast as edges blur), and thresholded at the frame's mean plus 4, 3 or 2 standard deviations, eased over frames so it doesn't flicker. Stray single pixels are dropped. The system preview stays underneath and shows through if frames stop.
+- **Battery:** the camera stops while the review screen is open (unless recording). Low Power Mode turns off the histogram and peaking, the only per-frame work Glint adds; turning either back on keeps it on, and they return when Low Power Mode ends.
 - **Exposure meter:** Leica-style LEDs in the top bar (▶ under, ● on target, ◀ over) with the offset in stops, from the camera's own metering.
 - **PHOTO · VIDEO:** under the shutter; in VIDEO the shutter becomes the record button and the top bar shows the recording time and a microphone level meter. Neither switch can change mid-recording.
 - **Video format panel:** in VIDEO, tap the format chip ("4K 24 HEVC"). RESOLUTION (4K, 1080p), FRAME RATE (24, 25, 30, 60), FORMAT (HEVC, ProRes, ProRes RAW), ENCODING (Standard, Apple Log with ProRes) and EXPOSURE WHILE RECORDING (Adjustable, Locked). Choices the lens can't record are greyed out; ProRes needs a Pro iPhone and ProRes RAW an iPhone 17 Pro on iOS 26 (Apple recommends an external drive for it). The viewfinder shows the 16:9 frame. In MANUAL, shutter on A follows the 180° rule (1/48 at 24 fps), and no shutter is slower than a frame. White balance holds still while recording.
@@ -39,7 +41,10 @@ Glint/
     AutoExposure.swift         per-setting auto, and the shutter/ISO priority correction
     VideoFormat.swift          video resolutions, frame rates, codecs, the 180° shutter and settling choices to what a lens supports
     Throttled.swift            rate-limits KVO updates (meter, lens position)
-    HistogramAnalyzer.swift    histogram and clipping
+    HistogramAnalyzer.swift    histogram and clipping, and the shared preview analysis for it and peaking
+    FocusPeaking.swift         peaking sensitivity and the eased threshold
+    PeakingRenderer.swift      the GPU viewfinder with peaking outlines, while peaking is on
+    Viewfinder.metal           its shaders: shrink, high-pass, mark, draw
     ReviewImageRenderer.swift  DNG development and review thumbnails
     LocationProvider.swift     location fixes for photo tagging, place names
     MediaLibrary.swift         saves to Documents and Photos
@@ -58,7 +63,7 @@ GlintTests/                    Swift Testing coverage of the pure logic
 For performance testing, run from the Home Screen or use a Release build. Debug builds from Xcode (debugger plus Metal validation) make image work much slower.
 
 ## Tests
-Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, histogram, lenses, photo info, settings text, location freshness rules) and need no camera.
+Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, focus peaking, histogram, lenses, photo info, settings text, location freshness rules) and need no camera.
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.
@@ -68,4 +73,4 @@ Run the `GlintTests` scheme (Cmd-U). The tests cover pure logic only (capture pl
 
 ## Ideas
 - 48MP RAW option and a 2x sensor-crop button
-- Focus peaking and zebras
+- Zebras

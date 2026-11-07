@@ -1,5 +1,6 @@
 import AVFoundation
 import Observation
+import os
 
 /// Separate from the controller so histogram updates redraw only the histogram, not the whole screen.
 @MainActor
@@ -62,35 +63,67 @@ struct Histogram: Sendable {
     }
 }
 
-/// Receives preview frames from `output` on its own queue, analyses about five a second and passes each result to
-/// `publish`. Frames only arrive while `output` is attached to the session.
+/// Receives preview frames from `output` on its own queue for whichever of the histogram and focus peaking is
+/// wanted: the histogram about five times a second, and with peaking every frame goes to `peaking`, which draws
+/// the viewfinder with its outlines. Frames only arrive while `output` is attached to the session, which is only
+/// while one is wanted.
 ///
-/// Owned by `CaptureSession` and never shared, so it isn't Sendable. `lastFrameTime` is only touched by the
-/// delegate callback, which AVFoundation always calls on `queue`.
-final class HistogramAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+/// Owned by `CaptureSession` and never shared. `wants` is set from the session's actor and read on `queue`, so
+/// it sits behind a lock; `lastHistogram` is only touched by the delegate callback, which AVFoundation always
+/// calls on `queue`.
+final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    struct Wants: Sendable, Equatable {
+        var histogram = false
+        var peaking = false
+        var sensitivity = PeakingSensitivity.medium
+        var any: Bool { histogram || peaking }
+    }
+
     let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "glint.analysis")
-    private let updateInterval: Double = 0.2   // seconds
-    private var lastFrameTime: Double = 0
-    private let publish: @Sendable (Histogram) -> Void
+    private let wants = OSAllocatedUnfairLock(initialState: Wants())
+    private var lastHistogram: Double = 0
+    private let publishHistogram: @Sendable (Histogram) -> Void
+    private let peaking: PeakingRenderer?
 
-    init(publish: @escaping @Sendable (Histogram) -> Void) {
-        self.publish = publish
+    init(histogram: @escaping @Sendable (Histogram) -> Void, peaking: PeakingRenderer?) {
+        publishHistogram = histogram
+        self.peaking = peaking
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
+        // Frame size is chosen in `set(_:)`: small for the histogram alone, full size for peaking.
+        output.automaticallyConfiguresOutputBufferDimensions = false
+        output.deliversPreviewSizedOutputBuffers = true
         output.videoSettings = [   // only the luma plane is read
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
         output.setSampleBufferDelegate(self, queue: queue)
     }
 
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-        guard t - lastFrameTime > updateInterval else { return }
-        lastFrameTime = t
+    /// The histogram is happy with roughly screen-sized frames, which cost much less memory traffic. Peaking takes
+    /// full-size ones and shrinks them itself by a whole factor (block averaging) on the GPU, so its filter sees a
+    /// known, clean scale rather than whatever the preview scaler did. The caller wraps this in a session configuration,
+    /// since it changes the output's buffers.
+    func set(_ new: Wants) {
+        wants.withLock { $0 = new }
+        let previewSized = !new.peaking
+        if output.deliversPreviewSizedOutputBuffers != previewSized {
+            output.deliversPreviewSizedOutputBuffers = previewSized
+        }
+    }
 
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let histogram = Histogram(lumaOf: pixelBuffer) else { return }
-        publish(histogram)
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let current = wants.withLock { $0 }
+        let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        let doHistogram = current.histogram && t - lastHistogram > 0.2
+        let doPeaking = current.peaking && peaking != nil
+        guard doHistogram || doPeaking, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
+            lastHistogram = t
+            publishHistogram(histogram)
+        }
+        if doPeaking {
+            peaking?.render(pixelBuffer, sensitivity: current.sensitivity)
+        }
     }
 }

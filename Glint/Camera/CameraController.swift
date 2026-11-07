@@ -43,12 +43,20 @@ final class CameraController {
     private(set) var whiteBalanceKelvin: Float = 5500
     private(set) var isHistogramEnabled = false
     let histogramModel = HistogramModel()
+    /// Draws the viewfinder with peaking outlines, on the GPU. Nil without Metal, which leaves peaking off.
+    let peakingRenderer: PeakingRenderer?
+    /// Focus peaking is shown while focusing by hand (AF off), as on a camera in MF. On by default.
+    private(set) var isPeakingEnabled = true
+    private(set) var peakingSensitivity = PeakingSensitivity.medium
+    /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
+    private var pausedForLowPower = (histogram: false, peaking: false)
+    var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
     private(set) var timing = ""
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
     private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
 
-    private let capture = CaptureSession()
+    private let capture: CaptureSession
     private let locationProvider = LocationProvider()
     private let reviewRenderer: ReviewImageRenderer
     private let developer: PhotoDeveloper
@@ -57,6 +65,10 @@ final class CameraController {
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
 
     init() {
+        let peaking = PeakingRenderer.make()
+        peakingRenderer = peaking
+        capture = CaptureSession(peaking: peaking)
+        isPeakingEnabled = peaking != nil
         let renderer = ReviewImageRenderer()
         reviewRenderer = renderer
         developer = PhotoDeveloper(renderer: renderer)   // shares the renderer's CIContext
@@ -76,6 +88,12 @@ final class CameraController {
         locationProvider.start()
         Task {
             for await event in capture.events { handle(event) }
+        }
+        Task {
+            if ProcessInfo.processInfo.isLowPowerModeEnabled { lowPowerModeChanged(true) }
+            for await _ in NotificationCenter.default.notifications(named: .NSProcessInfoPowerStateDidChange) {
+                lowPowerModeChanged(ProcessInfo.processInfo.isLowPowerModeEnabled)
+            }
         }
         Task {
             guard await AVCaptureDevice.requestAccess(for: .video) else { post("Camera access denied"); return }
@@ -99,8 +117,8 @@ final class CameraController {
             apply(device)
         case .lensChanged(let device), .formatChanged(let device):
             apply(device)
-            // A new device or format starts in auto, so re-lock exposure/WB/focus if the user is in manual.
-            if manual { sendExposureMode(keepWhiteBalance: true) }
+            // A new device or format starts in auto, so re-lock exposure/WB if in MANUAL, and focus if by hand.
+            if manual || !isAutofocus { sendExposureMode(keepWhiteBalance: true) }
         case .videoCapabilities(let caps):
             videoCapabilities = caps
         case .videoFormatResolved(let format):
@@ -117,6 +135,7 @@ final class CameraController {
             lensPosition = position
         case .manualFocusUnavailable:
             isAutofocus = true
+            sendAnalysis()
         case .autoValues(let autoISO, let shutterSeconds):
             // Shown as the nearest ruler stop, which is also where manual picks up if the A is turned off.
             if let autoISO, auto.iso {
@@ -212,7 +231,7 @@ final class CameraController {
     func setManual(_ on: Bool) {
         guard on != manual else { return }
         manual = on
-        sendExposureMode(keepWhiteBalance: hasManualWhiteBalance)
+        sendExposureMode(keepWhiteBalance: hasManualWhiteBalance)   // focus is left as it is
     }
 
     /// Hands one manual setting to the camera (A on) or takes it back (A off). Taking it back starts from what the
@@ -274,21 +293,72 @@ final class CameraController {
         guard on != isHistogramEnabled else { return }
         isHistogramEnabled = on
         if !on { histogramModel.clear() }
-        capture.enqueue { $0.setHistogramAttached(on) }
+        pausedForLowPower.histogram = false   // the user's choice now
+        sendAnalysis()
+    }
+
+    func setPeakingEnabled(_ on: Bool) {
+        guard on != isPeakingEnabled, !on || peakingRenderer != nil else { return }
+        isPeakingEnabled = on
+        pausedForLowPower.peaking = false   // the user's choice now
+        sendAnalysis()
+    }
+
+    func setPeakingSensitivity(_ sensitivity: PeakingSensitivity) {
+        guard sensitivity != peakingSensitivity else { return }
+        peakingSensitivity = sensitivity
+        sendAnalysis()
+    }
+
+    /// Low Power Mode turns off the histogram and peaking, the only extra work Glint does on every preview frame.
+    /// Turning either back on keeps it on; whatever was turned off comes back when Low Power Mode ends.
+    private func lowPowerModeChanged(_ isOn: Bool) {
+        if isOn {
+            guard isHistogramEnabled || isPeakingEnabled else { return }
+            pausedForLowPower = (isHistogramEnabled, isPeakingEnabled)
+            isHistogramEnabled = false
+            isPeakingEnabled = false
+            histogramModel.clear()
+            sendAnalysis()
+            post("Low Power Mode: histogram and peaking off")
+        } else {
+            guard pausedForLowPower.histogram || pausedForLowPower.peaking else { return }
+            if pausedForLowPower.histogram { isHistogramEnabled = true }
+            if pausedForLowPower.peaking { isPeakingEnabled = true }
+            pausedForLowPower = (false, false)
+            sendAnalysis()
+        }
+    }
+
+    /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
+    func setReviewing(_ isReviewing: Bool) {
+        let running = !isReviewing
+        capture.enqueue { $0.setRunning(running) }
+    }
+
+    /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
+    private func sendAnalysis() {
+        let histogram = isHistogramEnabled, peaking = isPeakingShown, sensitivity = peakingSensitivity
+        capture.enqueue { $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity) }
     }
 
     // MARK: Focus
 
-    /// Tap to focus. In manual mode this also hands focus back to autofocus.
+    /// Tap to focus. This also hands focus back to autofocus.
     func focus(at point: CGPoint) {
-        if manual { isAutofocus = true }
+        if !isAutofocus {
+            isAutofocus = true
+            sendAnalysis()   // peaking is for manual focus
+        }
         capture.enqueue { $0.focus(at: point) }
     }
 
-    /// Turning autofocus off locks the lens where autofocus left it, so the picture doesn't jump.
+    /// Turning autofocus off locks the lens where autofocus left it, so the picture doesn't jump. Independent of
+    /// AUTO and MANUAL, which are about exposure, like a camera's AF/MF switch and its mode dial.
     func setAutofocus(_ on: Bool) {
-        guard on != isAutofocus, manual else { return }
+        guard on != isAutofocus else { return }
         isAutofocus = on
+        sendAnalysis()
         if on {
             capture.enqueue { $0.setAutofocus() }
         } else {
@@ -298,9 +368,11 @@ final class CameraController {
 
     /// Moving the focus rail. Turns autofocus off if it was on.
     func setLensPosition(_ position: Float) {
-        guard manual else { return }
         let position = FocusScale.clamp(position)
-        isAutofocus = false
+        if isAutofocus {
+            isAutofocus = false
+            sendAnalysis()
+        }
         lensPosition = position
         capture.enqueue { $0.setManualFocus(position) }
     }
