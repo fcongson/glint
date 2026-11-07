@@ -15,8 +15,8 @@ actor PhotoDeveloper {
         self.renderer = renderer
     }
 
-    func develop(_ dng: Data) -> Data? {
-        renderer.developHEIC(from: dng)
+    func develop(_ dng: Data, aspect: AspectRatio) -> Data? {
+        renderer.developHEIC(from: dng, aspect: aspect)
     }
 }
 
@@ -32,8 +32,8 @@ struct ReviewImageRenderer: @unchecked Sendable {
     private let ciContext = CIContext()
 
     /// Develops a Bayer DNG at full resolution into HEIC data, with the optional enhancements switched off so the
-    /// result looks like the RAW itself. Slow; run off the main actor.
-    func developHEIC(from dng: Data) -> Data? {
+    /// result looks like the RAW itself, cropped to `aspect`. Slow; run off the main actor.
+    func developHEIC(from dng: Data, aspect: AspectRatio) -> Data? {
         guard let filter = CIRAWFilter(imageData: dng, identifierHint: "com.adobe.raw-image") else { return nil }
         filter.luminanceNoiseReductionAmount = 0
         filter.colorNoiseReductionAmount = 0
@@ -43,8 +43,14 @@ struct ReviewImageRenderer: @unchecked Sendable {
         filter.moireReductionAmount = 0
         filter.boostAmount = 0
         filter.boostShadowAmount = 0
-        guard let image = filter.outputImage,
+        guard var image = filter.outputImage,
               let colorSpace = CGColorSpace(name: CGColorSpace.displayP3) else { return nil }
+        if !aspect.isFullSensor {
+            // The developed image is already upright, so the crop's long side is the image's long side.
+            let extent = image.extent
+            let crop = aspect.cropRect(in: extent.size).offsetBy(dx: extent.minX, dy: extent.minY).integral
+            image = image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+        }
         return ciContext.heifRepresentation(of: image, format: .RGBA8, colorSpace: colorSpace, options: [:])
     }
 

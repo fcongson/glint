@@ -44,6 +44,34 @@ enum SettingsText {
         switch format {
         case .raw: "RAW"
         case .heic: "HEIC"
+        case .rawAndHEIC: "RAW+HEIC"
+        }
+    }
+
+    static func fileType(_ type: PhotoFileType) -> String {
+        switch type {
+        case .raw: "RAW"
+        case .heic: "HEIC"
+        case .rawAndHEIC: "RAW+HEIC"
+        }
+    }
+
+    static func aspect(_ aspect: AspectRatio) -> String {
+        switch aspect {
+        case .fourThree: "4:3"
+        case .threeTwo: "3:2"
+        case .oneOne: "1:1"
+        case .sixteenNine: "16:9"
+        }
+    }
+
+    /// VoiceOver reads "3:2" as "3 colon 2", so say it the way photographers do.
+    static func aspectSpoken(_ aspect: AspectRatio) -> String {
+        switch aspect {
+        case .fourThree: "4 by 3, full sensor"
+        case .threeTwo: "3 by 2"
+        case .oneOne: "Square"
+        case .sixteenNine: "16 by 9"
         }
     }
 

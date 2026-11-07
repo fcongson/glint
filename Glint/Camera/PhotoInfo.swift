@@ -3,8 +3,9 @@ import ImageIO
 import UIKit
 
 enum PhotoFormat: Sendable {
-    case raw    // Bayer DNG
+    case raw          // Bayer DNG
     case heic
+    case rawAndHEIC   // a DNG with a HEIC developed from it
 }
 
 enum WhiteBalanceSetting: Equatable, Sendable {
@@ -25,9 +26,9 @@ struct PhotoInfo: Sendable {
     let capturedAt: Date?
     let cameraModel: String?    // make and model, e.g. "Apple iPhone 15 Pro"
     let lensModel: String?
-    let pixelWidth: Int?
-    let pixelHeight: Int?
-    let fileBytes: Int
+    private(set) var pixelWidth: Int?
+    private(set) var pixelHeight: Int?
+    private(set) var fileBytes: Int
 
     init(metadata: [String: Any], format: PhotoFormat, whiteBalance: WhiteBalanceSetting, fileBytes: Int) {
         self.format = format
@@ -52,6 +53,16 @@ struct PhotoInfo: Sendable {
         lensModel = exif[kCGImagePropertyExifLensModel as String] as? String
         pixelWidth = (metadata[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue
         pixelHeight = (metadata[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue
+    }
+
+    /// The same info for the file actually saved, when it differs from the capture: a cropped HEIC is smaller
+    /// than the sensor, and a developed HEIC is a different size on disk from the DNG it came from.
+    func saved(pixelWidth: Int?, pixelHeight: Int?, fileBytes: Int) -> PhotoInfo {
+        var info = self
+        info.pixelWidth = pixelWidth
+        info.pixelHeight = pixelHeight
+        info.fileBytes = fileBytes
+        return info
     }
 
     /// EXIF writes capture time as local wall-clock text with no zone.

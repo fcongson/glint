@@ -38,6 +38,34 @@ enum MediaLibrary {
         }
     }
 
+    /// RAW+HEIC: both files in Documents under one name, and one Photos asset, the HEIC with the DNG as its
+    /// RAW alternate (as a camera's RAW+JPEG pair imports).
+    static func savePhotoPair(heic: Data, dng: Data, captureID: Int64, location: CLLocation?,
+                              report: @escaping @Sendable (String) -> Void) {
+        if let dir = documentsDirectory {
+            let base = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID)"
+            do {
+                try heic.write(to: dir.appendingPathComponent(base + ".heic"))
+                try dng.write(to: dir.appendingPathComponent(base + ".dng"))
+            } catch {
+                report("Save failed: \(error.localizedDescription)")
+            }
+        }
+        requestAddAccess { granted in
+            guard granted else { report("Photos access denied"); return }
+            PHPhotoLibrary.shared().performChanges({
+                let request = PHAssetCreationRequest.forAsset()
+                request.location = location
+                request.addResource(with: .photo, data: heic, options: nil)
+                let rawOptions = PHAssetResourceCreationOptions()
+                rawOptions.uniformTypeIdentifier = "com.adobe.raw-image"
+                request.addResource(with: .alternatePhoto, data: dng, options: rawOptions)
+            }) { ok, error in
+                report(ok ? "Saved" : "Save failed: \(error?.localizedDescription ?? "?")")
+            }
+        }
+    }
+
     /// Copies a finished recording into Documents, adds it to Photos, then deletes the temporary file.
     static func saveVideo(at tempURL: URL, report: @escaping @Sendable (String) -> Void) {
         if let dir = documentsDirectory {

@@ -4,6 +4,7 @@ import UIKit
 struct ContentView: View {
     @State private var cam = CameraController()
     @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
+    @State private var showingFormat = false
     @State private var selected: Param = .shutter
     @State private var flash = false
     @State private var shutterTaps = 0
@@ -43,6 +44,15 @@ struct ContentView: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear { cam.start() }
+        .sheet(isPresented: $showingFormat) {
+            PhotoFormatSheet(fileType: cam.fileType, aspect: cam.aspect,
+                             onFileType: { cam.setFileType($0) }, onAspect: { cam.setAspect($0) },
+                             onDone: { showingFormat = false })
+                .presentationDetents([.height(340)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color(white: 0.1))
+                .preferredColorScheme(.dark)
+        }
         .task {
             // Cancelled automatically when the view goes away, which balances the begin/end calls.
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -80,6 +90,10 @@ struct ContentView: View {
             }
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipped()
+            .overlay {
+                // The crop for 3:2, 1:1 and 16:9, dimmed outside, so what's just out of frame stays visible.
+                if cam.captureMode == .photo && !cam.aspect.isFullSensor { CropMask(aspect: cam.aspect) }
+            }
             .overlay(alignment: .topLeading) {
                 if cam.isHistogramEnabled {
                     // Reserve the rotated footprint so it stays inside the corner.
@@ -149,9 +163,12 @@ struct ContentView: View {
             if cam.isRecording {
                 recordingTimer
             } else if cam.captureMode == .photo {
-                let format = SettingsText.format(cam.captureRAW ? .raw : .heic)
-                chip(format, label: "Photo format", value: format,
-                     on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
+                // Opens the photo format panel; the chip shows the file type and, when cropped, the aspect.
+                let file = SettingsText.fileType(cam.fileType)
+                let title = cam.aspect.isFullSensor ? file : "\(file) \(SettingsText.aspect(cam.aspect))"
+                chip(title, label: "Photo format", value: "\(file), \(SettingsText.aspectSpoken(cam.aspect))",
+                     on: false) { showingFormat = true }
+                    .accessibilityHint("Opens file type and aspect ratio")
             }
             chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
                  on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
