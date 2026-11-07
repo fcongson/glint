@@ -98,6 +98,35 @@ enum SettingsText {
         return "\(Int((position * 100).rounded()))% toward infinity"
     }
 
+    static func resolution(_ r: VideoResolution) -> String {
+        switch r {
+        case .uhd4K: "4K"
+        case .hd1080: "1080p"
+        }
+    }
+
+    static func codec(_ c: VideoCodec) -> String {
+        switch c {
+        case .hevc: "HEVC"
+        case .proRes: "ProRes"
+        case .proResRAW: "ProRes RAW"
+        }
+    }
+
+    static func encoding(_ e: VideoEncoding) -> String {
+        switch e {
+        case .standard: "Standard"
+        case .log: "Log"
+        }
+    }
+
+    /// The video format chip: "4K 24 HEVC", "4K 24 ProRes Log", "ProRes RAW 24".
+    static func videoFormat(_ f: VideoFormat) -> String {
+        if f.codec == .proResRAW { return "ProRes RAW \(f.frameRate)" }
+        let log = f.encoding == .log ? " Log" : ""
+        return "\(resolution(f.resolution)) \(f.frameRate) \(codec(f.codec))\(log)"
+    }
+
     /// A manual setting's name, for its A button.
     static func name(_ setting: ManualSetting) -> String {
         switch setting {

@@ -41,6 +41,14 @@ enum CaptureEvent: Sendable {
     case autoValues(iso: Float?, shutterSeconds: Double?)
     /// Auto white balance's current temperature, while white balance is on auto.
     case autoWhiteBalance(kelvin: Float)
+    /// The device format changed (photo/video switch, or a new video format); re-apply manual settings.
+    case formatChanged(DeviceInfo)
+    /// What the current lens can record, for the video format panel.
+    case videoCapabilities(VideoCapabilities)
+    /// The video format actually in use, when it had to differ from the one asked for.
+    case videoFormatResolved(VideoFormat)
+    /// Microphone level while recording, 0 (silence) … 1 (full scale).
+    case audioLevel(Float)
     case histogram(Histogram)
     case photoCaptured(CapturedPhoto)
     case recordingStarted
@@ -84,7 +92,11 @@ actor CaptureSession {
     private var deviceObservations: [NSKeyValueObservation] = []   // meter and lens position, for the active device
     private var manualFocusPosition: Float?   // nil while autofocus is in charge
     private var isManual = false                 // the AUTO | MANUAL switch, as last applied
-    private var autoSettings = AutoSettings()    // which manual settings the camera chooses
+    private var autoSettings = AutoSettings()    // which manual settings the camera chooses (as applied, see `effective`)
+    private var isVideo = false                  // PHOTO · VIDEO: video uses a video device format
+    private var videoFormat = VideoFormat()
+    private var exposureFrozen = false           // video's "exposure while recording: locked"
+    private var audioMeterTask: Task<Void, Never>?
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
@@ -150,6 +162,10 @@ actor CaptureSession {
         }
         if session.canAddOutput(movieOutput) {
             session.addOutput(movieOutput)
+            if #available(iOS 26.0, *), movieOutput.isDeferredStartSupported {
+                // Deferred start can leave the encoder unprepared for the first take (notably ProRes RAW).
+                movieOutput.isDeferredStartEnabled = false
+            }
         }
         // The histogram's output is attached separately, only while it's switched on.
         session.commitConfiguration()
@@ -163,6 +179,7 @@ actor CaptureSession {
         }
         updateRotationCoordinator()
         emit.yield(.ready(lenses: lenses, device: info))
+        emit.yield(.videoCapabilities(videoCapabilities(wide)))
     }
 
     /// The mic input puts the audio session in record mode, which silences the Taptic Engine by default.
@@ -247,8 +264,10 @@ actor CaptureSession {
         allowHapticsDuringRecording()
 
         guard let current = device else { return }
+        if isVideo { configureVideoFormat(current) }   // each lens has its own formats
         let info = applyDeviceSettings(current)
         updateRotationCoordinator()
+        emit.yield(.videoCapabilities(videoCapabilities(current)))
         emit.yield(.lensChanged(info))
     }
 
@@ -264,8 +283,10 @@ actor CaptureSession {
     func setExposureMode(manual: Bool, iso: Float, shutterDenominator: Double, kelvin: Float, keepWhiteBalance: Bool,
                          manualFocus: Float?, auto: AutoSettings, bias: Float) {
         guard let d = device else { return }
+        let (auto, shutterDenominator) = effective(auto: auto, shutterDenominator: shutterDenominator)
         isManual = manual
         autoSettings = auto
+        exposureFrozen = false
         withLockedDevice(d, failure: "Config") { d in
             guard manual else {
                 if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
@@ -305,8 +326,9 @@ actor CaptureSession {
 
     /// Applies the manual exposure settings. A setting on auto is left where the camera has it.
     func applyExposure(iso: Float, shutterDenominator: Double) {
-        guard let d = device, d.isExposureModeSupported(.custom), !autoSettings.isProgram else { return }
+        guard let d = device, d.isExposureModeSupported(.custom), !autoSettings.isProgram, !exposureFrozen else { return }
         let auto = autoSettings
+        let shutterDenominator = isVideo ? max(shutterDenominator, videoFormat.slowestShutterDenominator) : shutterDenominator
         withLockedDevice(d, failure: "Config") { d in
             let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
             let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
@@ -316,7 +338,7 @@ actor CaptureSession {
 
     /// Exposure compensation, in stops.
     func applyExposureBias(_ bias: Float) {
-        guard let d = device, isManual, autoSettings.usesCompensation else { return }
+        guard let d = device, isManual, autoSettings.usesCompensation, !exposureFrozen else { return }
         withLockedDevice(d, failure: "Config") { d in applyBias(bias, d) }
     }
 
@@ -329,7 +351,7 @@ actor CaptureSession {
     /// Called with each meter reading. In shutter or ISO priority, nudges the setting on auto toward the
     /// (compensated) target; in any partly-auto manual mode, reports what the camera is using for the readouts.
     private func followAuto(offset: Float) {
-        guard isManual, autoSettings.usesCompensation, let d = device else { return }
+        guard isManual, autoSettings.usesCompensation, !exposureFrozen, let d = device else { return }
         let auto = autoSettings
         if auto.isPriority, d.exposureMode == .custom {
             let format = d.activeFormat
@@ -384,6 +406,11 @@ actor CaptureSession {
         g.greenGain = min(max(g.greenGain, 1), m)
         g.blueGain = min(max(g.blueGain, 1), m)
         return g
+    }
+
+    /// In video the shutter on A follows the 180° rule and manual shutters stay within one frame.
+    private func effective(auto: AutoSettings, shutterDenominator: Double) -> (AutoSettings, Double) {
+        isVideo ? videoFormat.exposure(auto: auto, shutterDenominator: shutterDenominator) : (auto, shutterDenominator)
     }
 
     private func clampedDuration(_ denom: Double, _ d: AVCaptureDevice) -> CMTime {
@@ -509,15 +536,194 @@ actor CaptureSession {
         photoOutput.capturePhoto(with: settings, delegate: delegate)
     }
 
+    // MARK: Video formats
+
+    /// PHOTO · VIDEO. Video switches the device to a video format for `format`; photo returns to the photo preset
+    /// (Bayer RAW stills). Either way the controller re-applies manual settings on `.formatChanged`.
+    func setCaptureMode(video: Bool, format: VideoFormat) {
+        guard let d = device, !movieOutput.isRecording else { return }
+        isVideo = video
+        videoFormat = format
+        if video {
+            configureVideoFormat(d)
+        } else {
+            session.beginConfiguration()
+            session.automaticallyConfiguresCaptureDeviceForWideColor = true
+            session.sessionPreset = .photo
+            session.commitConfiguration()
+        }
+        allowHapticsDuringRecording()
+        let info = applyDeviceSettings(d)
+        emit.yield(.videoCapabilities(videoCapabilities(d)))
+        emit.yield(.formatChanged(info))
+    }
+
+    /// A new choice from the video format panel.
+    func setVideoFormat(_ format: VideoFormat) {
+        guard let d = device, !movieOutput.isRecording else { return }
+        // The exposure lock only matters when recording starts; no need to touch the device for it.
+        var sameDeviceFormat = format
+        sameDeviceFormat.locksExposureWhileRecording = videoFormat.locksExposureWhileRecording
+        let needsDeviceFormat = sameDeviceFormat != videoFormat
+        videoFormat = format
+        guard isVideo, needsDeviceFormat else { return }
+        configureVideoFormat(d)
+        let info = applyDeviceSettings(d)
+        emit.yield(.videoCapabilities(videoCapabilities(d)))
+        emit.yield(.formatChanged(info))
+    }
+
+    /// Picks and activates the device format for `videoFormat`, settling on the nearest one the lens has.
+    private func configureVideoFormat(_ d: AVCaptureDevice) {
+        let caps = videoCapabilities(d)
+        let wanted = videoFormat.normalized(for: caps)
+        guard let format = deviceFormat(for: wanted, on: d) else {
+            emit.yield(.status("This lens can't record that format"))
+            return
+        }
+        // Apple Log needs the session to leave the colour space alone.
+        session.automaticallyConfiguresCaptureDeviceForWideColor = wanted.encoding != .log
+        withLockedDevice(d, failure: "Video format") { d in
+            d.activeFormat = format
+            let frame = CMTime(value: 1, timescale: CMTimeScale(wanted.frameRate))
+            d.activeVideoMinFrameDuration = frame
+            d.activeVideoMaxFrameDuration = frame
+            let space: AVCaptureColorSpace = wanted.encoding == .log ? .appleLog : .sRGB
+            if format.supportedColorSpaces.contains(space) { d.activeColorSpace = space }
+        }
+        if wanted != videoFormat {
+            videoFormat = wanted
+            emit.yield(.videoFormatResolved(wanted))
+        }
+    }
+
+    /// The device format for a choice: ProRes RAW uses the Bayer video formats (largest first); everything else
+    /// the YUV format of that size and frame rate, unbinned first, with Apple Log support when Log is wanted.
+    private func deviceFormat(for f: VideoFormat, on d: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        let candidates = d.formats.filter { format in
+            guard Self.supports(format, frameRate: f.frameRate) else { return false }
+            if f.codec == .proResRAW { return Self.isBayerVideo(format) }
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard !Self.isBayerVideo(format), VideoResolution(width: dims.width, height: dims.height) == f.resolution else { return false }
+            return f.encoding == .log ? format.supportedColorSpaces.contains(.appleLog) : true
+        }
+        if f.codec == .proResRAW {
+            return candidates.max {
+                let a = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+                let b = CMVideoFormatDescriptionGetDimensions($1.formatDescription)
+                return Int(a.width) * Int(a.height) < Int(b.width) * Int(b.height)
+            }
+        }
+        return candidates.first { !$0.isVideoBinned } ?? candidates.first
+    }
+
+    /// What this lens can record, from its formats; ProRes from the movie output as currently configured.
+    private func videoCapabilities(_ d: AVCaptureDevice) -> VideoCapabilities {
+        var caps = VideoCapabilities()
+        for format in d.formats {
+            let bayer = Self.isBayerVideo(format)
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let resolution = VideoResolution(width: dims.width, height: dims.height)
+            for fps in VideoFormat.frameRates where Self.supports(format, frameRate: fps) {
+                if bayer {
+                    caps.proResRAWFrameRates.insert(fps)
+                } else if let resolution {
+                    let mode = VideoMode(resolution: resolution, frameRate: fps)
+                    caps.modes.insert(mode)
+                    if format.supportedColorSpaces.contains(.appleLog) { caps.logModes.insert(mode) }
+                }
+            }
+        }
+        let codecs = movieOutput.availableVideoCodecTypes
+        caps.proRes = codecs.contains(.proRes422HQ) || codecs.contains(.proRes422)
+        return caps
+    }
+
+    private static func supports(_ format: AVCaptureDevice.Format, frameRate: Int) -> Bool {
+        format.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= Double(frameRate) && Double(frameRate) <= $0.maxFrameRate }
+    }
+
+    /// Bayer RAW video formats exist from iOS 26 (iPhone 17 Pro); they're what ProRes RAW records from.
+    private static func isBayerVideo(_ format: AVCaptureDevice.Format) -> Bool {
+        guard #available(iOS 26.0, *) else { return false }
+        return CMFormatDescriptionGetMediaSubType(format.formatDescription) == kCVPixelFormatType_96VersatileBayerPacked12
+    }
+
+    /// Sets the movie output's codec for the chosen format, falling back to HEVC if it isn't offered.
+    private func applyCodec() {
+        guard let connection = movieOutput.connection(with: .video) else { return }
+        let available = movieOutput.availableVideoCodecTypes
+        var wanted: [AVVideoCodecType] = []
+        switch videoFormat.codec {
+        case .hevc: break
+        case .proRes: wanted = [.proRes422HQ, .proRes422]
+        case .proResRAW:
+            if #available(iOS 26.0, *) { wanted = [.proResRAW] }
+        }
+        let codec = wanted.first(where: { available.contains($0) }) ?? .hevc
+        if !wanted.isEmpty && codec == .hevc { emit.yield(.status("That format isn't available here, recording HEVC")) }
+        if available.contains(codec) { movieOutput.setOutputSettings([AVVideoCodecKey: codec], for: connection) }
+    }
+
+    /// White balance always holds still while recording, so colour doesn't drift mid-clip; exposure too when
+    /// the video format says so. The controller re-applies the normal modes when recording finishes.
+    private func lockForRecording() {
+        guard let d = device else { return }
+        let lockExposure = isVideo && videoFormat.locksExposureWhileRecording
+        exposureFrozen = lockExposure
+        withLockedDevice(d, failure: "Config") { d in
+            if d.whiteBalanceMode == .continuousAutoWhiteBalance, d.isWhiteBalanceModeSupported(.locked) {
+                d.whiteBalanceMode = .locked
+            }
+            if lockExposure, d.exposureMode == .continuousAutoExposure, d.isExposureModeSupported(.locked) {
+                d.exposureMode = .locked
+            }
+        }
+    }
+
+    /// Polls the microphone's level about ten times a second while recording.
+    private func startAudioMeter() {
+        audioMeterTask?.cancel()
+        audioMeterTask = Task { [self] in
+            while !Task.isCancelled {
+                reportAudioLevel()
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    private func reportAudioLevel() {
+        guard let channel = movieOutput.connection(with: .audio)?.audioChannels.first else { return }
+        // -50 dB (a quiet room) … 0 dB (full scale), as 0 … 1.
+        emit.yield(.audioLevel(min(max((channel.averagePowerLevel + 50) / 50, 0), 1)))
+    }
+
+    private func stopAudioMeter() {
+        audioMeterTask?.cancel()
+        audioMeterTask = nil
+        emit.yield(.audioLevel(0))
+    }
+
+    /// Called when a recording has finished, however it ended: stops the meter and lifts the exposure lock.
+    /// The controller then re-applies its exposure and white balance modes.
+    func recordingEnded() {
+        stopAudioMeter()
+        exposureFrozen = false
+    }
+
     // MARK: Video
 
     /// Starts recording, or stops it if already recording. Emits `.recordingStarted` and `.recordingFinished`.
     func toggleRecording() {
         if movieOutput.isRecording {
             movieOutput.stopRecording()
+            stopAudioMeter()
             return
         }
         applyCaptureRotation(to: movieOutput)
+        if isVideo { applyCodec() }
+        lockForRecording()
+        startAudioMeter()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(Int(Date().timeIntervalSince1970)).mov")
         let delegate = RecordingDelegate(emit: emit, finished: { [weak self] in self?.enqueue { $0.recordingDelegate = nil } })
         recordingDelegate = delegate

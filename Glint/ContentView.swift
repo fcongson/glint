@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var cam = CameraController()
     @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
     @State private var showingFormat = false
+    @State private var showingVideoFormat = false
     @State private var selected: Param = .shutter
     @State private var flash = false
     @State private var shutterTaps = 0
@@ -44,6 +45,14 @@ struct ContentView: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear { cam.start() }
+        .sheet(isPresented: $showingVideoFormat) {
+            VideoFormatSheet(format: cam.videoFormat, capabilities: cam.videoCapabilities,
+                             onChange: { cam.setVideoFormat($0) }, onDone: { showingVideoFormat = false })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color(white: 0.1))
+                .preferredColorScheme(.dark)
+        }
         .sheet(isPresented: $showingFormat) {
             PhotoFormatSheet(fileType: cam.fileType, aspect: cam.aspect,
                              onFileType: { cam.setFileType($0) }, onAspect: { cam.setAspect($0) },
@@ -92,7 +101,11 @@ struct ContentView: View {
             .clipped()
             .overlay {
                 // The crop for 3:2, 1:1 and 16:9, dimmed outside, so what's just out of frame stays visible.
-                if cam.captureMode == .photo && !cam.aspect.isFullSensor { CropMask(aspect: cam.aspect) }
+                if cam.captureMode == .video {
+                    CropMask(aspect: .sixteenNine)   // video is 16:9 from the 4:3 sensor
+                } else if !cam.aspect.isFullSensor {
+                    CropMask(aspect: cam.aspect)
+                }
             }
             .overlay(alignment: .topLeading) {
                 if cam.isHistogramEnabled {
@@ -169,6 +182,10 @@ struct ContentView: View {
                 chip(title, label: "Photo format", value: "\(file), \(SettingsText.aspectSpoken(cam.aspect))",
                      on: false) { showingFormat = true }
                     .accessibilityHint("Opens file type and aspect ratio")
+            } else {
+                let title = SettingsText.videoFormat(cam.videoFormat)
+                chip(title, label: "Video format", value: title, on: false) { showingVideoFormat = true }
+                    .accessibilityHint("Opens resolution, frame rate, codec and exposure lock")
             }
             chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
                  on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
@@ -188,6 +205,7 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Circle().fill(.red).frame(width: 8, height: 8)
                 Text(elapsed).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                AudioLevelMeter(level: cam.audioLevel)
             }
             .foregroundStyle(Color.red)
             .fixedSize()
@@ -242,7 +260,7 @@ struct ContentView: View {
             if cam.manual {
                 HStack(spacing: 20) {
                     readout("ISO", SettingsText.iso(cam.iso), .iso)
-                    readout("SHUTTER", SettingsText.shutter(denominator: cam.shutterDenominator), .shutter)
+                    readout("SHUTTER", SettingsText.shutter(denominator: cam.effectiveShutterDenominator), .shutter)
                     readout("WB", SettingsText.kelvin(cam.whiteBalanceKelvin), .wb)
                     SettingReadout(label: "APERTURE", value: SettingsText.aperture(Double(cam.aperture)), angle: uiAngle)   // fixed lens: display only
                 }
@@ -280,6 +298,8 @@ struct ContentView: View {
                 }
                 .padding(.leading, 28)
                 .padding(.trailing, 16)
+                .disabled(cam.isExposureLocked)
+                .opacity(cam.isExposureLocked ? 0.4 : 1)
             }
 
             // AUTO | MANUAL and the last shot either side of the capture button, PHOTO · VIDEO under it.
