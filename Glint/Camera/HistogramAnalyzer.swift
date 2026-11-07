@@ -90,9 +90,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         publishPeaking = peaking
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
-        // Roughly screen-sized frames rather than full sensor or 4K ones: plenty for a histogram and peaking, and
-        // much less memory traffic on every frame. If peaking marks slightly soft detail at this size, raise
-        // `PeakingMask.sharpnessTenths`.
+        // Frame size is chosen in `set(_:)`: small for the histogram alone, full size for peaking.
         output.automaticallyConfiguresOutputBufferDimensions = false
         output.deliversPreviewSizedOutputBuffers = true
         output.videoSettings = [   // only the luma plane is read
@@ -101,8 +99,15 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         output.setSampleBufferDelegate(self, queue: queue)
     }
 
+    /// The histogram is happy with roughly screen-sized frames, which cost much less memory traffic. Peaking needs
+    /// full-size ones, because shrinking a frame shrinks its blur and soft edges start to look sharp. The caller
+    /// wraps this in a session configuration, since it changes the output's buffers.
     func set(_ new: Wants) {
         wants.withLock { $0 = new }
+        let previewSized = !new.peaking
+        if output.deliversPreviewSizedOutputBuffers != previewSized {
+            output.deliversPreviewSizedOutputBuffers = previewSized
+        }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {

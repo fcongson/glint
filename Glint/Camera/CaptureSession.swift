@@ -440,11 +440,10 @@ actor CaptureSession {
     /// nothing while the histogram and peaking are both off.
     func setAnalysis(histogram: Bool, peaking: Bool) {
         let wants = FrameAnalyzer.Wants(histogram: histogram, peaking: peaking)
-        analyzer.set(wants)
         let output = analyzer.output
         let on = wants.any
-        guard on != session.outputs.contains(output) else { return }
         session.beginConfiguration()
+        analyzer.set(wants)   // may change the output's frame size
         if on {
             if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }
         } else if session.outputs.contains(output) {

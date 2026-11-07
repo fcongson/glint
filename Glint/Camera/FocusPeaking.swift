@@ -9,6 +9,8 @@ import UIKit
 /// all of its change within the fine span; a soft one spreads it out, so its fine change is a small part of the
 /// coarse one. Brightness doesn't matter: a soft edge on a bright window fails, a sharp one in shadow passes.
 /// Fine texture, where the coarse span takes in several ups and downs, passes on its fine change alone.
+///
+/// It needs full-size frames: shrinking a frame shrinks its blur too, so soft edges would look abrupt.
 struct PeakingMask: Sendable {
     /// Smallest fine change (0…255 luma) worth marking, so sensor noise in flat areas isn't.
     static let minimumDetail = 24
@@ -48,23 +50,27 @@ struct PeakingMask: Sendable {
         func isSharp(fine: Int, coarse: Int) -> Bool {
             fine >= Self.minimumDetail && fine * 10 >= coarse * Self.sharpnessTenths
         }
-        // Two samples per cell, a quarter and three quarters of the way in, so a thin edge between sample points
-        // isn't missed. Kept `reach` pixels in from the borders so every sample has neighbours on each side.
-        let offsets = [(cell / 4, cell / 4), (3 * cell / 4, 3 * cell / 4)]
+        func clampX(_ x: Int) -> Int { min(max(x, reach), width - 1 - reach) }
+        func clampY(_ y: Int) -> Int { min(max(y, reach), height - 1 - reach) }
+        // Each cell is scanned along its middle row (for vertical edges) and middle column (for horizontal ones),
+        // every second pixel: an edge between two pixels is always caught from one side or the other, and an
+        // edge crossing the cell almost always crosses one of those lines. Kept `reach` pixels in from the
+        // borders so every test has neighbours on each side.
         for r in 0..<rows {
             for c in 0..<cols {
-                for (ox, oy) in offsets {
-                    let x = min(max(c * cell + ox, reach), width - 1 - reach)
-                    let y = min(max(r * cell + oy, reach), height - 1 - reach)
-                    let sharpX = isSharp(fine: abs(at(x + 1, y) - at(x - 1, y)),
-                                         coarse: abs(at(x + reach, y) - at(x - reach, y)))
-                    let sharpY = isSharp(fine: abs(at(x, y + 1) - at(x, y - 1)),
-                                         coarse: abs(at(x, y + reach) - at(x, y - reach)))
-                    if sharpX || sharpY {
-                        values[r * cols + c] = 255
-                        break
-                    }
+                let midY = clampY(r * cell + cell / 2), midX = clampX(c * cell + cell / 2)
+                var sharp = false
+                for column in stride(from: c * cell, to: c * cell + cell, by: 2) where !sharp {
+                    let x = clampX(column)
+                    sharp = isSharp(fine: abs(at(x + 1, midY) - at(x - 1, midY)),
+                                    coarse: abs(at(x + reach, midY) - at(x - reach, midY)))
                 }
+                for row in stride(from: r * cell, to: r * cell + cell, by: 2) where !sharp {
+                    let y = clampY(row)
+                    sharp = isSharp(fine: abs(at(midX, y + 1) - at(midX, y - 1)),
+                                    coarse: abs(at(midX, y + reach) - at(midX, y - reach)))
+                }
+                if sharp { values[r * cols + c] = 255 }
             }
         }
         self.width = cols

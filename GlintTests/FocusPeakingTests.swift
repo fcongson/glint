@@ -18,8 +18,8 @@ struct FocusPeakingTests {
         let m = mask { x, _ in x < 32 ? 0 : 255 }
         #expect(m.width == 16 && m.height == 12)   // 4-pixel cells
         #expect(!m.isEmpty)
-        // Only the column of cells straddling the edge, all the way down.
-        let marked = (0..<m.height).allSatisfy { m.values[$0 * m.width + 7] == 255 }
+        // Only the column of cells where the edge is, all the way down: column 8 starts at the first bright pixel.
+        let marked = (0..<m.height).allSatisfy { m.values[$0 * m.width + 8] == 255 }
         #expect(marked)
         #expect(m.values.filter { $0 == 255 }.count == m.height)
     }
