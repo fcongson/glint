@@ -33,6 +33,10 @@ enum CaptureEvent: Sendable {
     case manualFocusSeeded(Float)
     /// This lens can't be focused by hand, so autofocus stays on.
     case manualFocusUnavailable
+    /// What the camera chose for the settings on auto (nil for those that aren't), for the readouts.
+    case autoValues(iso: Float?, shutterSeconds: Double?)
+    /// Auto white balance's current temperature, while white balance is on auto.
+    case autoWhiteBalance(kelvin: Float)
     case histogram(Histogram)
     case photoCaptured(CapturedPhoto)
     case recordingStarted
@@ -75,6 +79,8 @@ actor CaptureSession {
     private var subjectAreaObserver: (any NSObjectProtocol)?
     private var deviceObservations: [NSKeyValueObservation] = []   // meter and lens position, for the active device
     private var manualFocusPosition: Float?   // nil while autofocus is in charge
+    private var isManual = false                 // the AUTO | MANUAL switch, as last applied
+    private var autoSettings = AutoSettings()    // which manual settings the camera chooses
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
@@ -177,11 +183,23 @@ actor CaptureSession {
     /// Reports the exposure offset (for the meter) and the lens position (for the focus rail) as they change,
     /// throttled so a moving scene doesn't flood the main actor. Replaces the previous lens's observers.
     private func observeMeterAndLens(_ d: AVCaptureDevice) {
-        let meter = Throttled(interval: 0.1, minChange: 0.05) { [emit] offset in emit.yield(.exposureOffset(offset)) }
+        // Each meter reading also drives shutter/ISO priority and refreshes the auto readouts.
+        let meter = Throttled(interval: 0.1, minChange: 0.05) { [emit, weak self] offset in
+            emit.yield(.exposureOffset(offset))
+            guard let self else { return }
+            Task { await self.followAuto(offset: offset) }
+        }
         let lens = Throttled(interval: 0.1, minChange: 0.005) { [emit] position in emit.yield(.lensPosition(position)) }
+        let temperature = Throttled(interval: 0.25, minChange: 50) { [weak self] kelvin in
+            guard let self else { return }
+            Task { await self.reportAutoWhiteBalance(kelvin) }
+        }
         deviceObservations = [
             d.observe(\.exposureTargetOffset, options: [.initial, .new]) { d, _ in meter.send(d.exposureTargetOffset) },
             d.observe(\.lensPosition, options: [.initial, .new]) { d, _ in lens.send(d.lensPosition) },
+            d.observe(\.deviceWhiteBalanceGains, options: [.new]) { d, _ in
+                temperature.send(d.temperatureAndTintValues(for: d.deviceWhiteBalanceGains).temperature)
+            },
         ]
     }
 
@@ -235,20 +253,35 @@ actor CaptureSession {
     /// Manual: custom exposure plus locked white balance, and the lens locked at `manualFocus` if there is one
     /// (otherwise continuous autofocus). Auto: everything returns to continuous auto, including focus.
     /// `keepWhiteBalance` re-applies `kelvin` (after a lens switch) instead of locking whatever auto has currently chosen.
+    ///
+    /// In manual, `auto` hands individual settings back to the camera: both exposure settings means continuous auto
+    /// exposure (program); one means shutter or ISO priority, where `followAuto` corrects the other from the meter.
+    /// `bias` is exposure compensation in stops, used only while the camera chooses some of the exposure.
     func setExposureMode(manual: Bool, iso: Float, shutterDenominator: Double, kelvin: Float, keepWhiteBalance: Bool,
-                         manualFocus: Float?) {
+                         manualFocus: Float?, auto: AutoSettings, bias: Float) {
         guard let d = device else { return }
+        isManual = manual
+        autoSettings = auto
         withLockedDevice(d, failure: "Config") { d in
             guard manual else {
                 if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
                 if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
+                applyBias(0, d)
                 applyFocus(d, lockedAt: nil)
                 return
             }
-            if d.isExposureModeSupported(.custom) {   // setExposureModeCustom raises if unsupported
-                d.setExposureModeCustom(duration: clampedDuration(shutterDenominator, d), iso: clampedISO(iso, d), completionHandler: nil)
+            applyBias(auto.usesCompensation ? bias : 0, d)
+            if auto.isProgram {
+                if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
+            } else if d.isExposureModeSupported(.custom) {   // setExposureModeCustom raises if unsupported
+                // The setting on auto starts from where the camera has it now; the meter corrects it from there.
+                let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
+                let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
+                d.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
             }
-            if d.isWhiteBalanceModeSupported(.locked) {
+            if auto.whiteBalance {
+                if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
+            } else if d.isWhiteBalanceModeSupported(.locked) {
                 if keepWhiteBalance {
                     let tt = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: wbTint)
                     d.setWhiteBalanceModeLocked(with: clampedGains(d.deviceWhiteBalanceGains(for: tt), d), completionHandler: nil)
@@ -266,11 +299,56 @@ actor CaptureSession {
         }
     }
 
+    /// Applies the manual exposure settings. A setting on auto is left where the camera has it.
     func applyExposure(iso: Float, shutterDenominator: Double) {
-        guard let d = device, d.isExposureModeSupported(.custom) else { return }
+        guard let d = device, d.isExposureModeSupported(.custom), !autoSettings.isProgram else { return }
+        let auto = autoSettings
         withLockedDevice(d, failure: "Config") { d in
-            d.setExposureModeCustom(duration: clampedDuration(shutterDenominator, d), iso: clampedISO(iso, d), completionHandler: nil)
+            let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
+            let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
+            d.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
         }
+    }
+
+    /// Exposure compensation, in stops.
+    func applyExposureBias(_ bias: Float) {
+        guard let d = device, isManual, autoSettings.usesCompensation else { return }
+        withLockedDevice(d, failure: "Config") { d in applyBias(bias, d) }
+    }
+
+    /// The device must already be locked. Clamped to what the lens allows.
+    private func applyBias(_ bias: Float, _ d: AVCaptureDevice) {
+        let clamped = min(max(bias, d.minExposureTargetBias), d.maxExposureTargetBias)
+        if d.exposureTargetBias != clamped { d.setExposureTargetBias(clamped, completionHandler: nil) }
+    }
+
+    /// Called with each meter reading. In shutter or ISO priority, nudges the setting on auto toward the
+    /// (compensated) target; in any partly-auto manual mode, reports what the camera is using for the readouts.
+    private func followAuto(offset: Float) {
+        guard isManual, autoSettings.usesCompensation, let d = device else { return }
+        let auto = autoSettings
+        if auto.isPriority, d.exposureMode == .custom {
+            let format = d.activeFormat
+            if auto.iso, let next = PriorityExposure.nextISO(current: d.iso, offset: offset,
+                                                             min: format.minISO, max: format.maxISO) {
+                withLockedDevice(d, failure: "Config") { d in
+                    d.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration, iso: next, completionHandler: nil)
+                }
+            } else if auto.shutter, let next = PriorityExposure.nextDuration(
+                current: d.exposureDuration.seconds, offset: offset,
+                min: format.minExposureDuration.seconds, max: format.maxExposureDuration.seconds) {
+                withLockedDevice(d, failure: "Config") { d in
+                    d.setExposureModeCustom(duration: CMTime(seconds: next, preferredTimescale: 1_000_000),
+                                            iso: AVCaptureDevice.currentISO, completionHandler: nil)
+                }
+            }
+        }
+        emit.yield(.autoValues(iso: auto.iso ? d.iso : nil, shutterSeconds: auto.shutter ? d.exposureDuration.seconds : nil))
+    }
+
+    private func reportAutoWhiteBalance(_ kelvin: Float) {
+        guard isManual, autoSettings.whiteBalance, kelvin.isFinite else { return }
+        emit.yield(.autoWhiteBalance(kelvin: kelvin))
     }
 
     func applyWhiteBalance(kelvin: Float) {

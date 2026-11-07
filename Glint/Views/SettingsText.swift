@@ -70,6 +70,15 @@ enum SettingsText {
         return "\(Int((position * 100).rounded()))% toward infinity"
     }
 
+    /// A manual setting's name, for its A button.
+    static func name(_ setting: ManualSetting) -> String {
+        switch setting {
+        case .iso: "ISO"
+        case .shutter: "Shutter speed"
+        case .whiteBalance: "White balance"
+        }
+    }
+
     /// Recording time: "00:42", or "1:02:05" past an hour.
     static func duration(seconds: Int) -> String {
         let s = max(seconds, 0)
