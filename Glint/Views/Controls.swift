@@ -44,6 +44,102 @@ struct SettingReadout: View {
     }
 }
 
+/// Leica-style meter: ▶ lights when under, ● on target, ◀ when over, with the offset in stops beside it.
+struct ExposureMeterView: View {
+    let meter: ExposureMeter
+    let angle: Angle
+
+    var body: some View {
+        HStack(spacing: 4) {
+            led("▶", lit: meter.reading == .under)
+            led("●", lit: meter.reading == .onTarget)
+            led("◀", lit: meter.reading == .over)
+            Text(SettingsText.meterOffset(meter.offset))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.white)
+                .frame(width: 36, alignment: .trailing)
+        }
+        .fixedSize()
+        .rotationEffect(angle)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Exposure meter")
+        .accessibilityValue(SettingsText.meterSpoken(meter))
+    }
+
+    private func led(_ symbol: String, lit: Bool) -> some View {
+        Text(symbol)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(lit ? Color.red : Color.red.opacity(0.25))
+    }
+}
+
+/// One choice in a `SegmentedSwitch` or `ModeStrip`.
+struct SwitchOption<Value: Hashable> {
+    let title: String
+    let value: Value
+}
+
+/// Two options side by side in one capsule, like AUTO | MANUAL. Labels stay horizontal when the phone turns,
+/// like the system Camera's mode labels.
+struct SegmentedSwitch<Value: Hashable>: View {
+    let label: String
+    let options: [SwitchOption<Value>]
+    let selection: Value
+    let onSelect: (Value) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options, id: \.value) { option in
+                let selected = option.value == selection
+                Button { onSelect(option.value) } label: {
+                    Text(option.title)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(selected ? Color.black : Color.white)
+                        .frame(width: 62, height: 44)
+                        .background(selected ? Color.yellow : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .background(Color.white.opacity(0.12), in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+    }
+}
+
+/// PHOTO · VIDEO under the shutter: the current mode is white with a dot under it, the other is dimmed.
+struct ModeStrip<Value: Hashable>: View {
+    let label: String
+    let options: [SwitchOption<Value>]
+    let selection: Value
+    let onSelect: (Value) -> Void
+
+    var body: some View {
+        HStack(spacing: 24) {
+            ForEach(options, id: \.value) { option in
+                let selected = option.value == selection
+                Button { onSelect(option.value) } label: {
+                    VStack(spacing: 4) {
+                        Text(option.title)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(selected ? Color.white : Color.white.opacity(0.55))
+                        Circle()
+                            .fill(selected ? Color.yellow : Color.clear)
+                            .frame(width: 4, height: 4)
+                    }
+                    .frame(minWidth: 64, minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+    }
+}
+
 extension Angle {
     /// True at ±90° (and 270°…): the content's width now runs along the screen's height.
     /// `rotationEffect` doesn't change layout, so rotated views need their frame swapped by hand.

@@ -47,8 +47,36 @@ enum SettingsText {
         }
     }
 
-    /// Spoken value for the exposure mode chip, whose visible label is just "M" or "A".
-    static func exposureMode(manual: Bool) -> String { manual ? "Manual" : "Auto" }
+    /// The meter's offset to one decimal with an explicit sign ("+1.3", "-0.7"), or "±0" on the dot.
+    static func meterOffset(_ ev: Float) -> String {
+        let rounded = (ev * 10).rounded() / 10
+        return rounded == 0 ? "±0" : String(format: "%+.1f", Double(rounded))
+    }
+
+    /// The meter in words, since it's otherwise shown only by which LED is lit.
+    static func meterSpoken(_ meter: ExposureMeter) -> String {
+        let stops = String(format: "%.1f", Double(abs((meter.offset * 10).rounded() / 10)))
+        switch meter.reading {
+        case .onTarget: return "On target"
+        case .under: return "Under by \(stops) stops"
+        case .over: return "Over by \(stops) stops"
+        }
+    }
+
+    /// Where the lens is on the near-to-infinity rail. Positions aren't calibrated distances, so this stays loose.
+    static func focusPosition(_ position: Float) -> String {
+        if position >= 0.99 { return "Infinity" }
+        if position <= 0.01 { return "Nearest" }
+        return "\(Int((position * 100).rounded()))% toward infinity"
+    }
+
+    /// Recording time: "00:42", or "1:02:05" past an hour.
+    static func duration(seconds: Int) -> String {
+        let s = max(seconds, 0)
+        return s >= 3600
+            ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+            : String(format: "%02d:%02d", s / 60, s % 60)
+    }
 
     /// Spoken value for a toggle that is shown only by colour.
     static func onOff(_ isOn: Bool) -> String { isOn ? "On" : "Off" }

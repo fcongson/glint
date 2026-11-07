@@ -2,6 +2,9 @@ import AVFoundation
 import CoreLocation
 import SwiftUI
 
+/// Whether the big capture button takes a photo or records video.
+enum CaptureMode: Sendable { case photo, video }
+
 /// The camera screen's state, on the main actor.
 ///
 /// Properties are read-only from outside: views change them through the `set…` methods, which also send the change
@@ -10,6 +13,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class CameraController {
+    private(set) var captureMode: CaptureMode = .photo
     private(set) var captureRAW = true
     private(set) var manual = false
     private(set) var iso: Float = 100
@@ -17,6 +21,12 @@ final class CameraController {
     private(set) var minISO: Float = 25
     private(set) var maxISO: Float = 1600
     private(set) var isRecording = false   // true only once the movie output confirms recording has started
+    private(set) var recordingStartedAt: Date?
+    /// Manual focus is only used in manual mode; auto mode always autofocuses. The choice is kept, so returning to
+    /// manual restores it, like the other manual settings.
+    private(set) var isAutofocus = true
+    private(set) var lensPosition: Float = 0.5   // 0 nearest … 1 farthest
+    private(set) var exposureOffset: Float = 0   // the meter, in stops
     private(set) var status = ""           // transient message; cleared automatically by `post`
     private(set) var lenses: [Lens] = []
     private(set) var currentLensID = ""
@@ -82,6 +92,16 @@ final class CameraController {
             apply(device)
             // A new device starts in auto, so re-lock exposure/WB/focus if the user is in manual.
             if manual { sendExposureMode(keepWhiteBalance: true) }
+        case .exposureOffset(let offset):
+            exposureOffset = offset
+        case .lensPosition(let position):
+            // Only autofocus moves the rail. While focusing by hand (or keeping a manual position for when auto mode
+            // ends) the rail is the source of truth, and reports would fight it.
+            if isAutofocus { lensPosition = position }
+        case .manualFocusSeeded(let position):
+            lensPosition = position
+        case .manualFocusUnavailable:
+            isAutofocus = true
         case .whiteBalanceSeeded(let kelvin):
             whiteBalanceKelvin = kelvin   // display only; the device already has auto's exact gains locked
         case .previewRotation(let angle):
@@ -94,8 +114,10 @@ final class CameraController {
             photoCaptured(photo)
         case .recordingStarted:
             isRecording = true
+            recordingStartedAt = Date()
         case .recordingFinished(let url):
             isRecording = false
+            recordingStartedAt = nil
             let report = statusReporter
             Task.detached(priority: .utility) { MediaLibrary.saveVideo(at: url, report: report) }
         case .status(let message):
@@ -120,6 +142,12 @@ final class CameraController {
     }
 
     // MARK: Settings
+
+    /// Photo or video. Can't change mid-recording.
+    func setCaptureMode(_ mode: CaptureMode) {
+        guard mode != captureMode, !isRecording else { return }
+        captureMode = mode
+    }
 
     func setCaptureRAW(_ on: Bool) {
         captureRAW = on   // read at capture time; nothing to send to the device
@@ -155,8 +183,10 @@ final class CameraController {
 
     private func sendExposureMode(keepWhiteBalance: Bool) {
         let manual = manual, iso = iso, denom = shutterDenominator, kelvin = whiteBalanceKelvin
+        let manualFocus: Float? = isAutofocus ? nil : lensPosition
         capture.enqueue {
-            $0.setExposureMode(manual: manual, iso: iso, shutterDenominator: denom, kelvin: kelvin, keepWhiteBalance: keepWhiteBalance)
+            $0.setExposureMode(manual: manual, iso: iso, shutterDenominator: denom, kelvin: kelvin,
+                               keepWhiteBalance: keepWhiteBalance, manualFocus: manualFocus)
         }
     }
 
@@ -177,8 +207,30 @@ final class CameraController {
 
     // MARK: Focus
 
+    /// Tap to focus. In manual mode this also hands focus back to autofocus.
     func focus(at point: CGPoint) {
+        if manual { isAutofocus = true }
         capture.enqueue { $0.focus(at: point) }
+    }
+
+    /// Turning autofocus off locks the lens where autofocus left it, so the picture doesn't jump.
+    func setAutofocus(_ on: Bool) {
+        guard on != isAutofocus, manual else { return }
+        isAutofocus = on
+        if on {
+            capture.enqueue { $0.setAutofocus() }
+        } else {
+            capture.enqueue { $0.setManualFocus(nil) }
+        }
+    }
+
+    /// Moving the focus rail. Turns autofocus off if it was on.
+    func setLensPosition(_ position: Float) {
+        guard manual else { return }
+        let position = FocusScale.clamp(position)
+        isAutofocus = false
+        lensPosition = position
+        capture.enqueue { $0.setManualFocus(position) }
     }
 
     // MARK: Stills

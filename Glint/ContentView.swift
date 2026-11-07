@@ -70,7 +70,7 @@ struct ContentView: View {
             }
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipped()
-            .overlay(alignment: .topTrailing) {
+            .overlay(alignment: .topLeading) {
                 if cam.isHistogramEnabled {
                     // Reserve the rotated footprint so it stays inside the corner.
                     let size = HistogramView.size
@@ -82,6 +82,20 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
             }
+            .overlay(alignment: .trailing) {
+                // Manual focus lives on the viewfinder's edge, where the thumb can reach it while framing.
+                if cam.manual { focusControls }
+            }
+            .overlay(alignment: .bottom) {
+                // Lens buttons sit over the bottom of the preview, as in the system Camera, so the controls below
+                // fit without shrinking the preview.
+                if cam.lenses.count > 1 {
+                    lensPicker
+                        .padding(4)
+                        .background(Color.black.opacity(0.45), in: Capsule())
+                        .padding(.bottom, 10)
+                }
+            }
             .overlay(alignment: .bottomLeading) {
                 // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
                 // there's room to read them; the top bar has no space to spare beside the Dynamic Island.
@@ -91,6 +105,7 @@ struct ContentView: View {
                 }
                 .rotationEffect(uiAngle)
                 .padding(8)
+                .padding(.bottom, cam.lenses.count > 1 ? 48 : 0)   // clear of the lens buttons
                 .allowsHitTesting(false)
             }
             Spacer(minLength: 0)
@@ -117,31 +132,54 @@ struct ContentView: View {
 
     // MARK: Top bar
 
-    /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear.
+    /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear. The settings themselves
+    /// are shown by the controls at the bottom, so the bar holds only the format, the histogram switch and the meter.
     private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 10) {
-            let format = SettingsText.format(cam.captureRAW ? .raw : .heic)
-            chip(format, label: "Photo format", value: format,
-                 on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
-            chip(cam.manual ? "M" : "A", label: "Exposure mode", value: SettingsText.exposureMode(manual: cam.manual),
-                 on: cam.manual) { cam.setManual(!cam.manual) }
-            Spacer(minLength: 140)
             if cam.isRecording {
-                HStack(spacing: 6) {
-                    Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("REC").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                }
-                .foregroundStyle(Color.red)
-                .rotationEffect(uiAngle)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Recording")
+                recordingTimer
+            } else if cam.captureMode == .photo {
+                let format = SettingsText.format(cam.captureRAW ? .raw : .heic)
+                chip(format, label: "Photo format", value: format,
+                     on: cam.captureRAW) { cam.setCaptureRAW(!cam.captureRAW) }
             }
             chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
                  on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+            Spacer(minLength: 140)
+            ExposureMeterView(meter: ExposureMeter(offset: cam.exposureOffset), angle: uiAngle)
         }
         .padding(.horizontal, 16)
         .padding(.top, topPadding)
         .padding(.bottom, 10)
+    }
+
+    /// Elapsed time while recording, in place of the format chip (which can't change mid-recording anyway).
+    private var recordingTimer: some View {
+        let start = cam.recordingStartedAt ?? Date()
+        return TimelineView(.periodic(from: start, by: 1)) { context in
+            let elapsed = SettingsText.duration(seconds: Int(context.date.timeIntervalSince(start)))
+            HStack(spacing: 6) {
+                Circle().fill(.red).frame(width: 8, height: 8)
+                Text(elapsed).font(.system(size: 13, weight: .semibold, design: .monospaced))
+            }
+            .foregroundStyle(Color.red)
+            .fixedSize()
+            .rotationEffect(uiAngle)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Recording")
+            .accessibilityValue(elapsed)
+        }
+    }
+
+    /// AF on top of the focus rail. Turning AF off, or touching the rail, locks the lens where autofocus left it.
+    private var focusControls: some View {
+        VStack(spacing: 10) {
+            chip("AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
+                 on: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
+            FocusRail(position: cam.lensPosition, isAutofocus: cam.isAutofocus, angle: uiAngle,
+                      onChange: { cam.setLensPosition($0) })
+        }
+        .padding(.trailing, 8)
     }
 
     private func overlayLabel(_ text: String) -> some View {
@@ -171,7 +209,7 @@ struct ContentView: View {
     // MARK: Bottom controls
 
     private var controls: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 10) {
             if cam.manual {
                 HStack(spacing: 20) {
                     readout("ISO", SettingsText.iso(cam.iso), .iso)
@@ -188,7 +226,6 @@ struct ContentView: View {
                                     label: "ISO", valueText: SettingsText.iso(cam.iso))
                             .id("iso-\(stops.count)")
                     } else if selected == .wb {
-                        wbPresetPicker
                         let stops = ExposureScale.whiteBalanceKelvins
                         RulerPicker(count: stops.count,
                                     index: stopIndex(stops, value: { cam.whiteBalanceKelvin }, set: cam.setWhiteBalanceKelvin),
@@ -207,35 +244,41 @@ struct ContentView: View {
                 .padding(.horizontal, 28)
             }
 
-            if cam.lenses.count > 1 { lensPicker }
-
-            HStack {
-                recordButton
-                Spacer()
-                shutterButton
-                Spacer()
-                thumbnailButton
+            // AUTO | MANUAL and the last shot either side of the capture button, PHOTO · VIDEO under it.
+            // Neither switch can change mid-recording.
+            ZStack {
+                HStack {
+                    SegmentedSwitch(label: "Exposure mode",
+                                    options: [SwitchOption(title: "AUTO", value: false),
+                                              SwitchOption(title: "MANUAL", value: true)],
+                                    selection: cam.manual,
+                                    onSelect: { cam.setManual($0) })
+                        .disabled(cam.isRecording)
+                        .opacity(cam.isRecording ? 0.4 : 1)
+                    Spacer()
+                    thumbnailButton
+                }
+                captureButton
             }
-            .padding(.horizontal, 36)
+            .padding(.horizontal, 16)
+
+            ModeStrip(label: "Capture mode",
+                      options: [SwitchOption(title: "PHOTO", value: CaptureMode.photo),
+                                SwitchOption(title: "VIDEO", value: CaptureMode.video)],
+                      selection: cam.captureMode,
+                      onSelect: { cam.setCaptureMode($0) })
+                .disabled(cam.isRecording)
+                .opacity(cam.isRecording ? 0.4 : 1)
         }
         .padding(.top, 8)
-        .padding(.bottom, 20)
+        .padding(.bottom, 4)
     }
 
-    private var wbPresetPicker: some View {
-        HStack(spacing: 6) {
-            ForEach(ExposureScale.whiteBalancePresets, id: \.name) { preset in
-                Button { cam.setWhiteBalanceKelvin(preset.kelvin) } label: {
-                    Text(preset.name)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                }
-                .buttonStyle(ChipStyle(isOn: cam.whiteBalanceKelvin == preset.kelvin, angle: uiAngle))
-                .accessibilityAddTraits(cam.whiteBalanceKelvin == preset.kelvin ? .isSelected : [])
-            }
+    @ViewBuilder
+    private var captureButton: some View {
+        switch cam.captureMode {
+        case .photo: shutterButton
+        case .video: recordButton
         }
     }
 
@@ -301,13 +344,14 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showReview) { ReviewView(shots: cam.shots, angle: uiAngle) }
     }
 
+    /// Takes the shutter's place in video mode, at the same size: a red dot that becomes a stop square.
     private var recordButton: some View {
         Button { cam.toggleRecording() } label: {
             ZStack {
-                Circle().strokeBorder(Color.white.opacity(0.8), lineWidth: 2).frame(width: 48, height: 48)
-                RoundedRectangle(cornerRadius: cam.isRecording ? 4 : 12)
+                Circle().strokeBorder(Color.white, lineWidth: 4).frame(width: 78, height: 78)
+                RoundedRectangle(cornerRadius: cam.isRecording ? 6 : 32)
                     .fill(Color.red)
-                    .frame(width: cam.isRecording ? 18 : 24, height: cam.isRecording ? 18 : 24)
+                    .frame(width: cam.isRecording ? 30 : 64, height: cam.isRecording ? 30 : 64)
             }
             .animation(.easeInOut(duration: 0.2), value: cam.isRecording)
         }
