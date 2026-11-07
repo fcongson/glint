@@ -453,6 +453,7 @@ struct ContentView: View {
         .accessibilityLabel("Review photos")
         .disabled(cam.lastThumbnail == nil)
         .fullScreenCover(isPresented: $showReview) { ReviewView(shots: cam.shots, angle: uiAngle) }
+        .onChange(of: showReview) { _, isReviewing in cam.setReviewing(isReviewing) }   // saves battery
     }
 
     /// Takes the shutter's place in video mode, at the same size: a red dot that becomes a stop square.

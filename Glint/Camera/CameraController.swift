@@ -46,6 +46,8 @@ final class CameraController {
     let peakingModel = PeakingModel()
     /// Focus peaking is shown with manual focus (in MANUAL), where the focus rail is. On by default.
     private(set) var isPeakingEnabled = true
+    /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
+    private var pausedForLowPower = (histogram: false, peaking: false)
     var isPeakingShown: Bool { isPeakingEnabled && manual }
     private(set) var timing = ""
     private(set) var lastThumbnail: UIImage?
@@ -80,6 +82,12 @@ final class CameraController {
         locationProvider.start()
         Task {
             for await event in capture.events { handle(event) }
+        }
+        Task {
+            if ProcessInfo.processInfo.isLowPowerModeEnabled { lowPowerModeChanged(true) }
+            for await _ in NotificationCenter.default.notifications(named: .NSProcessInfoPowerStateDidChange) {
+                lowPowerModeChanged(ProcessInfo.processInfo.isLowPowerModeEnabled)
+            }
         }
         Task {
             guard await AVCaptureDevice.requestAccess(for: .video) else { post("Camera access denied"); return }
@@ -281,13 +289,41 @@ final class CameraController {
         guard on != isHistogramEnabled else { return }
         isHistogramEnabled = on
         if !on { histogramModel.clear() }
+        pausedForLowPower.histogram = false   // the user's choice now
         sendAnalysis()
     }
 
     func setPeakingEnabled(_ on: Bool) {
         guard on != isPeakingEnabled else { return }
         isPeakingEnabled = on
+        pausedForLowPower.peaking = false   // the user's choice now
         sendAnalysis()
+    }
+
+    /// Low Power Mode turns off the histogram and peaking, the only extra work Glint does on every preview frame.
+    /// Turning either back on keeps it on; whatever was turned off comes back when Low Power Mode ends.
+    private func lowPowerModeChanged(_ isOn: Bool) {
+        if isOn {
+            guard isHistogramEnabled || isPeakingEnabled else { return }
+            pausedForLowPower = (isHistogramEnabled, isPeakingEnabled)
+            isHistogramEnabled = false
+            isPeakingEnabled = false
+            histogramModel.clear()
+            sendAnalysis()
+            post("Low Power Mode: histogram and peaking off")
+        } else {
+            guard pausedForLowPower.histogram || pausedForLowPower.peaking else { return }
+            if pausedForLowPower.histogram { isHistogramEnabled = true }
+            if pausedForLowPower.peaking { isPeakingEnabled = true }
+            pausedForLowPower = (false, false)
+            sendAnalysis()
+        }
+    }
+
+    /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
+    func setReviewing(_ isReviewing: Bool) {
+        let running = !isReviewing
+        capture.enqueue { $0.setRunning(running) }
     }
 
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.

@@ -426,6 +426,16 @@ actor CaptureSession {
 
     // MARK: Histogram
 
+    /// Stops the camera while it isn't on screen (the review), which is most of what a camera app spends battery
+    /// on, and starts it again after. Never stops mid-recording.
+    func setRunning(_ running: Bool) {
+        if running {
+            if !session.isRunning { session.startRunning() }
+        } else if session.isRunning, !movieOutput.isRecording {
+            session.stopRunning()
+        }
+    }
+
     /// Chooses what the luma analysis stream is for, and attaches it only while something wants it, so it costs
     /// nothing while the histogram and peaking are both off.
     func setAnalysis(histogram: Bool, peaking: Bool) {
