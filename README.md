@@ -55,6 +55,7 @@ Glint/
   Resources/WarmUp.dng         64 × 64 DNG decoded at launch to prepare RAW decoding
   Views/                       controls and switches, ruler picker, focus rail, photo and video format panels and crop mask, histogram, focus box, review screen with info card
   Assets.xcassets              app icon (light, dark, tinted) and accent color
+tools/make_warmup_dng.py       regenerates Resources/WarmUp.dng (needs tifffile)
 GlintTests/                    Swift Testing coverage of the logic, and of the peaking shaders on synthetic frames
 ```
 
@@ -67,7 +68,7 @@ GlintTests/                    Swift Testing coverage of the logic, and of the p
 For performance testing, run from the Home Screen or use a Release build. Debug builds from Xcode (debugger plus Metal validation) make image work much slower.
 
 ## Tests
-Run the `GlintTests` scheme (Cmd-U). The tests cover capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, the histogram, lenses, photo info, settings text and location freshness rules as pure logic. Focus peaking's tests run the real GPU shaders on synthetic frames (the Simulator's Metal is enough), sweep tracking is tested as logic, and the warm-up tests decode the bundled DNG. None need a camera.
+Run the `GlintTests` scheme (Cmd-U). The tests cover capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, the histogram, lenses, photo info, settings text and location freshness rules as pure logic. Focus peaking's tests run the real GPU shaders on synthetic frames (the Simulator's Metal is enough), sweep tracking is tested as logic, and the warm-up tests decode the bundled DNG (on a device only: Core Image doesn't decode RAW in the Simulator, so run them on your iPhone after changing the DNG). None need a camera.
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.
