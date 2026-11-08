@@ -115,6 +115,9 @@ actor CaptureSession {
         self.events = events
         self.emit = emit
         analyzer = FrameAnalyzer(histogram: { emit.yield(.histogram($0)) }, peaking: peaking)
+        #if DEBUG
+        analyzer.debugReadout = { emit.yield(.debugReadout($0)) }
+        #endif
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
         self.commands = commands
