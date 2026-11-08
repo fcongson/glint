@@ -60,11 +60,11 @@ final class CameraController {
     // moves it, in autofocus it follows the tapped focus point.
     private(set) var magnifyPoint = CGPoint(x: 0.5, y: 0.5)   // 0…1 across and down the viewfinder
     private(set) var magnification = Magnification.actual
-    private(set) var isMagnifierLocked = false                // MAG: stays on until switched off
+    private(set) var isMagnifierEnabled = true                // MAG: whether touching the rail magnifies
     private(set) var isRailHeld = false                       // on while the focus rail is touched, and a moment after
     @ObservationIgnored private var railReleaseTask: Task<Void, Never>?
     var isMagnifierAvailable: Bool { peakingRenderer != nil }
-    var isMagnifying: Bool { isMagnifierAvailable && (isMagnifierLocked || isRailHeld) }
+    var isMagnifying: Bool { isMagnifierAvailable && isMagnifierEnabled && isRailHeld }
     /// Whether the GPU viewfinder draws, for outlines or magnifying.
     var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying }
     private(set) var timing = ""
@@ -344,9 +344,10 @@ final class CameraController {
         }
     }
 
-    func setMagnifierLocked(_ on: Bool) {
-        guard on != isMagnifierLocked, !on || isMagnifierAvailable else { return }
-        isMagnifierLocked = on
+    /// MAG: whether touching the focus rail magnifies, like a camera's MF Assist setting.
+    func setMagnifierEnabled(_ on: Bool) {
+        guard on != isMagnifierEnabled else { return }
+        isMagnifierEnabled = on
         if !on { magnification = .actual }
         sendAnalysis()
     }
