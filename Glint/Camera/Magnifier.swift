@@ -64,5 +64,6 @@ struct ViewfinderSettings: Equatable, Sendable {
     var outlines = false
     var sensitivity = PeakingSensitivity.medium
     var appearance = PeakingAppearance()
+    var mode = PeakingMode.standard
     var magnifier: Magnifier?
 }

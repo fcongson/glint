@@ -67,9 +67,12 @@ final class PeakingRenderer: @unchecked Sendable {
     private var target: (layer: CAMetalLayer, size: CGSize)?   // behind `lock`
     private var threshold = PeakingThreshold()                  // behind `lock`
     private var thresholdGeneration = 0                         // behind `lock`; bumped when it starts over
+    private var sweep = SweepTracker()                          // behind `lock`
+    private var latestVerdicts: (any MTLBuffer)?                // behind `lock`: the last tile verdicts worked out
 
     // Only touched by whoever is rendering (the analysis queue, or a test).
     private var sensitivity = PeakingSensitivity.medium
+    private var mode = PeakingMode.standard
     private var work: Work?
     private var slot = 0
     private var colorSpaceName: CFString?
@@ -83,6 +86,7 @@ final class PeakingRenderer: @unchecked Sendable {
         let mask: any MTLTexture
         let groups: MTLSize
         let partials: [any MTLBuffer]
+        let verdicts: [any MTLBuffer]   // per tile, for sweep peaking; one per frame in flight, like `partials`
     }
 
     /// Keeps a frame's resources alive until the GPU is done with it, across the completion handler.
@@ -164,7 +168,8 @@ final class PeakingRenderer: @unchecked Sendable {
     func render(_ pixelBuffer: CVPixelBuffer, settings: ViewfinderSettings) {
         guard let target = lock.withLock({ self.target }), target.size.width > 0, target.size.height > 0 else { return }
         let sensitivity = settings.sensitivity, appearance = settings.appearance
-        let level = settings.outlines ? prepare(sensitivity) : nil
+        let mode = settings.mode
+        let level = settings.outlines ? prepare(sensitivity, mode: mode) : nil
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
@@ -175,13 +180,16 @@ final class PeakingRenderer: @unchecked Sendable {
             inFlight.signal()
             return
         }
-        let partials = work.partials[slot]
+        let partials = work.partials[slot], ownVerdicts = work.verdicts[slot]
         slot = (slot + 1) % work.partials.count
         let scale = Self.fitScale(frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
                                   viewSize: target.size)
         var outlineMask = work.mask
         if settings.outlines {
-            encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level)
+            // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
+            let verdicts = mode == .sweep ? lock.withLock({ latestVerdicts }) : nil
+            encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
+                           verdicts: verdicts ?? ownVerdicts, sweep: verdicts != nil)
             // Magnified, mask texels are already a screen pixel or more across: draw from the full mask.
             if settings.magnifier == nil {
                 outlineMask = encodePool(commandBuffer, work: work,
@@ -229,16 +237,27 @@ final class PeakingRenderer: @unchecked Sendable {
                              pixelCount: work.small.width * work.small.height)
         let generation = lock.withLock { thresholdGeneration }
         let outlines = settings.outlines
+        let sweeping = mode == .sweep
+        let verdictsOut = UncheckedBuffer(ownVerdicts)
         commandBuffer.addCompletedHandler { [self] _ in
             guard outlines else {
                 inFlight.signal()
                 return
             }
             let stats = Self.statistics(frame)
+            let tiles = sweeping ? Self.tiles(frame) : nil
             lock.withLock {
-                // A frame from before a sensitivity change mustn't pull the new threshold back.
-                if thresholdGeneration == generation {
-                    _ = threshold.update(Self.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity))
+                // A frame from before a sensitivity or mode change mustn't pull the new state back.
+                guard thresholdGeneration == generation else { return }
+                _ = threshold.update(Self.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity))
+                if let tiles {
+                    // Written to this frame's own buffer, which no frame still in flight reads: they read the
+                    // latest verdicts from before this frame finished, and frames finish in order.
+                    let cutoffs = sweep.update(sharpness: tiles.sharpness, luma: tiles.luma,
+                                               minimumStrength: Self.minimumStrength)
+                    let out = verdictsOut.buffer.contents().bindMemory(to: Float.self, capacity: cutoffs.count)
+                    for (i, cutoff) in cutoffs.enumerated() { out[i] = cutoff }
+                    latestVerdicts = verdictsOut.buffer
                 }
             }
             inFlight.signal()
@@ -248,12 +267,15 @@ final class PeakingRenderer: @unchecked Sendable {
 
     /// The threshold for this frame: the one the previous frames' statistics settled on. A change of sensitivity
     /// starts over, so it jumps straight to the new level.
-    private func prepare(_ sensitivity: PeakingSensitivity) -> Double? {
-        if sensitivity != self.sensitivity {
+    private func prepare(_ sensitivity: PeakingSensitivity, mode: PeakingMode) -> Double? {
+        if sensitivity != self.sensitivity || mode != self.mode {
             self.sensitivity = sensitivity
+            self.mode = mode
             lock.withLock {
                 threshold.reset()
                 thresholdGeneration += 1
+                sweep.reset()
+                latestVerdicts = nil
             }
         }
         return lock.withLock { threshold.level }
@@ -262,7 +284,7 @@ final class PeakingRenderer: @unchecked Sendable {
     /// Steps 1–4: shrink, high-pass, smooth (with statistics into `partials`), and mark against `level`. With no level
     /// yet (the first frame), nothing is marked.
     private func encodeAnalysis(_ commandBuffer: any MTLCommandBuffer, luma: any MTLTexture, work: Work,
-                                partials: any MTLBuffer, level: Double?) {
+                                partials: any MTLBuffer, level: Double?, verdicts: any MTLBuffer, sweep: Bool) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         let size = MTLSize(width: work.small.width, height: work.small.height, depth: 1)
         let group = MTLSize(width: 16, height: 16, depth: 1)
@@ -287,14 +309,17 @@ final class PeakingRenderer: @unchecked Sendable {
         encoder.setComputePipelineState(edgesPipeline)
         encoder.setTexture(work.response, index: 0)
         encoder.setTexture(work.edges, index: 1)
+        encoder.setTexture(work.small, index: 2)
         encoder.setBuffer(partials, offset: 0, index: 0)
         encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)   // whole groups, for the sums
 
-        var cutoff = level.map { max(Self.minimumStrength, Float($0)) } ?? .infinity
+        var params = MaskParams(cutoff: level.map { max(Self.minimumStrength, Float($0)) } ?? .infinity,
+                                tilesAcross: UInt32(work.groups.width), sweep: sweep ? 1 : 0)
         encoder.setComputePipelineState(maskPipeline)
         encoder.setTexture(work.edges, index: 0)
         encoder.setTexture(work.mask, index: 1)
-        encoder.setBytes(&cutoff, length: MemoryLayout<Float>.size, index: 0)
+        encoder.setBytes(&params, length: MemoryLayout<MaskParams>.stride, index: 0)
+        encoder.setBuffer(verdicts, offset: 0, index: 1)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
         encoder.endEncoding()
     }
@@ -321,18 +346,29 @@ final class PeakingRenderer: @unchecked Sendable {
             return device.makeTexture(descriptor: d)
         }
         let groups = MTLSize(width: (w + 15) / 16, height: (h + 15) / 16, depth: 1)
-        let partialsLength = groups.width * groups.height * MemoryLayout<SIMD2<Float>>.stride
+        let partialsLength = groups.width * groups.height * MemoryLayout<SIMD4<Float>>.stride
         let partials = (0..<Self.framesInFlight).compactMap { _ in
             device.makeBuffer(length: partialsLength, options: .storageModeShared)
+        }
+        let verdictsLength = groups.width * groups.height * MemoryLayout<Float>.stride
+        let verdicts = (0..<Self.framesInFlight).compactMap { _ -> (any MTLBuffer)? in
+            guard let buffer = device.makeBuffer(length: verdictsLength, options: .storageModeShared) else { return nil }
+            memset(buffer.contents(), 0, verdictsLength)   // no verdicts: standard peaking
+            return buffer
         }
         guard let small = make(.r16Float), let blurred = make(.r16Float), let response = make(.r16Float),
               let edges = make(.r16Float),
               let mask = make(.r8Unorm),
-              partials.count == Self.framesInFlight else { return nil }
+              partials.count == Self.framesInFlight, verdicts.count == Self.framesInFlight else { return nil }
         let new = Work(frameWidth: width, frameHeight: height, factor: factor, small: small, blurred: blurred,
-                       response: response, edges: edges, mask: mask, groups: groups, partials: partials)
+                       response: response, edges: edges, mask: mask, groups: groups, partials: partials,
+                       verdicts: verdicts)
         work = new
         slot = 0
+        lock.withLock {   // new tile grid: start the sweep over
+            sweep.reset()
+            latestVerdicts = nil
+        }
         return new
     }
 
@@ -366,8 +402,20 @@ final class PeakingRenderer: @unchecked Sendable {
         return texture
     }
 
+    /// Each tile's average high-pass response and brightness, for sweep peaking.
+    private static func tiles(_ frame: InFlight) -> (sharpness: [Float], luma: [Float]) {
+        let values = frame.partials.contents().bindMemory(to: SIMD4<Float>.self, capacity: frame.groupCount)
+        var sharpness = [Float](repeating: 0, count: frame.groupCount)
+        var luma = [Float](repeating: 0, count: frame.groupCount)
+        for i in 0..<frame.groupCount {
+            sharpness[i] = values[i].x / 256
+            luma[i] = values[i].z / 256
+        }
+        return (sharpness, luma)
+    }
+
     private static func statistics(_ frame: InFlight) -> (mean: Double, deviation: Double) {
-        let values = frame.partials.contents().bindMemory(to: SIMD2<Float>.self, capacity: frame.groupCount)
+        let values = frame.partials.contents().bindMemory(to: SIMD4<Float>.self, capacity: frame.groupCount)
         var sum = 0.0, sumOfSquares = 0.0
         for i in 0..<frame.groupCount {
             sum += Double(values[i].x)
@@ -379,6 +427,19 @@ final class PeakingRenderer: @unchecked Sendable {
     }
 
     // MARK: Drawing details
+
+    /// Matches `MaskParams` in Viewfinder.metal.
+    private struct MaskParams {
+        var cutoff: Float
+        var tilesAcross: UInt32
+        var sweep: UInt32
+    }
+
+    /// A Metal buffer handed to a completion handler.
+    private struct UncheckedBuffer: @unchecked Sendable {
+        let buffer: any MTLBuffer
+        init(_ buffer: any MTLBuffer) { self.buffer = buffer }
+    }
 
     private struct Uniforms {
         var scale: SIMD2<Float>
@@ -432,7 +493,8 @@ final class PeakingRenderer: @unchecked Sendable {
               let work = workspace(width: lumaTexture.width, height: lumaTexture.height),
               let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
         let partials = work.partials[0]
-        encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level)
+        encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
+                       verdicts: work.verdicts[0], sweep: false)
 
         // Copy the private mask texture somewhere readable.
         let w = work.mask.width, h = work.mask.height

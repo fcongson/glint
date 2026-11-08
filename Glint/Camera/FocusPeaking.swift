@@ -93,3 +93,79 @@ struct PeakingAppearance: Equatable, Sendable {
     var color = PeakingColor.amber
     var lines = PeakingLines.bold
 }
+
+/// What peaking outlines. Standard is a camera's peaking: the sharpest fine detail in the frame, which favours
+/// high contrast (a bold edge that's slightly soft can outrank fine detail that's perfectly sharp). Sweep
+/// compares each part of the picture with itself as you focus, and outlines what's at its sharpest now, at any
+/// contrast; it needs focus moved past the subject and back, and falls back to standard until it has.
+enum PeakingMode: Int, CaseIterable, Sendable {
+    case standard, sweep
+
+    var title: String {
+        switch self {
+        case .standard: "Standard"
+        case .sweep: "Sweep"
+        }
+    }
+}
+
+/// Sweep peaking's memory: for each 16 × 16 tile of the frame, how sharp it has been at its sharpest and least
+/// sharp since the picture last moved, as focus is swept (the idea behind contrast-detect autofocus).
+///
+/// A tile gets a verdict once focus has visibly changed it (its sharpest is `informative` times its least):
+/// near its sharpest (`nearPeak`), its detail is outlined at a threshold of its own, so low-contrast detail
+/// counts; otherwise it isn't outlined at all, however contrasty. Tiles with no verdict yet get standard
+/// peaking. Sharpness is taken relative to the tile's brightness, so exposure changes don't move it, and the
+/// memory starts over when the picture moves (its pattern of brightness changes).
+struct SweepTracker {
+    static let nearPeak: Float = 0.85
+    static let informative: Float = 1.4
+    /// Within a tile at its sharpest, outline what's this many times the tile's average response.
+    static let detailFactor: Float = 2
+    /// Average change in the frame's brightness pattern (in luma steps, exposure aside) that counts as moving.
+    static let motionLimit: Float = 6
+
+    private var peak: [Float] = []
+    private var low: [Float] = []
+    private var strongest: [Float] = []
+    private var reference: [Float] = []
+
+    mutating func reset() {
+        peak = []
+        low = []
+        strongest = []
+        reference = []
+    }
+
+    /// Takes each tile's average high-pass response and brightness, and returns its cutoff for the outline mask:
+    /// 0 for no verdict (standard peaking), a positive cutoff where it's at its sharpest, or −1 for no outlines.
+    mutating func update(sharpness: [Float], luma: [Float], minimumStrength: Float) -> [Float] {
+        let count = sharpness.count
+        guard count > 0, luma.count == count else { return [] }
+        let meanLuma = max(luma.reduce(0, +) / Float(count), 1)
+        let pattern = luma.map { $0 / meanLuma * 128 }
+        let relative = zip(sharpness, luma).map { $0 / ($1 + 8) }
+
+        let moved = reference.count == count
+            && zip(pattern, reference).reduce(0) { $0 + abs($1.0 - $1.1) } / Float(count) > Self.motionLimit
+        if reference.count != count || moved {
+            peak = relative
+            low = relative
+            strongest = sharpness
+            reference = pattern
+            return [Float](repeating: 0, count: count)
+        }
+
+        var cutoffs = [Float](repeating: 0, count: count)
+        for i in 0..<count {
+            peak[i] = max(peak[i], relative[i])
+            low[i] = min(low[i], relative[i])
+            strongest[i] = max(strongest[i], sharpness[i])
+            guard strongest[i] >= minimumStrength, peak[i] >= Self.informative * low[i] else { continue }
+            cutoffs[i] = relative[i] >= Self.nearPeak * peak[i]
+                ? max(minimumStrength, Self.detailFactor * sharpness[i])
+                : -1
+        }
+        return cutoffs
+    }
+}

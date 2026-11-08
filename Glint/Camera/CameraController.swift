@@ -49,6 +49,7 @@ final class CameraController {
     private(set) var isPeakingEnabled = true
     private(set) var peakingSensitivity = PeakingSensitivity.medium
     private(set) var peakingAppearance = PeakingAppearance()
+    private(set) var peakingMode = PeakingMode.standard
     /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
     private var pausedForLowPower = (histogram: false, peaking: false)
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
@@ -354,6 +355,12 @@ final class CameraController {
         sendAnalysis()
     }
 
+    func setPeakingMode(_ mode: PeakingMode) {
+        guard mode != peakingMode else { return }
+        peakingMode = mode
+        sendAnalysis()
+    }
+
     func setPeakingColor(_ color: PeakingColor) {
         guard color != peakingAppearance.color else { return }
         peakingAppearance.color = color
@@ -403,7 +410,7 @@ final class CameraController {
         let histogram = isHistogramEnabled
         let viewfinder: ViewfinderSettings? = isViewfinderDrawn
             ? ViewfinderSettings(outlines: isPeakingShown, sensitivity: peakingSensitivity,
-                                 appearance: peakingAppearance,
+                                 appearance: peakingAppearance, mode: peakingMode,
                                  magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil)
             : nil
         capture.enqueue { $0.setAnalysis(histogram: histogram, viewfinder: viewfinder) }
