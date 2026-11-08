@@ -104,13 +104,18 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// known, clean scale rather than whatever the preview scaler did. The caller wraps this in a session configuration,
     /// since it changes the output's buffers.
     /// Whether `new` changes the output's frame size, which has to happen inside a session configuration.
+    /// Screen-sized frames unless the GPU viewfinder needs full resolution (peaking, magnifying).
+    private static func previewSized(_ wants: Wants) -> Bool {
+        wants.viewfinder?.needsFullResolution != true
+    }
+
     func needsReconfiguration(for new: Wants) -> Bool {
-        output.deliversPreviewSizedOutputBuffers != (new.viewfinder == nil)
+        output.deliversPreviewSizedOutputBuffers != Self.previewSized(new)
     }
 
     func set(_ new: Wants) {
         wants.withLock { $0 = new }
-        let previewSized = new.viewfinder == nil
+        let previewSized = Self.previewSized(new)
         if output.deliversPreviewSizedOutputBuffers != previewSized {
             output.deliversPreviewSizedOutputBuffers = previewSized
         }
