@@ -113,11 +113,11 @@ struct FocusPeakingTests {
     }
 
     @Test func shrinkingAveragesBlocks() throws {
-        // 4100 wide shrinks by 3; each 3 × 3 block of 0s and 255s averages to 85 and is flat: no detail at all.
+        // 4100 wide shrinks by 2; each 2 × 2 block of a checkerboard averages to 127 and is flat: no detail at all.
         let renderer = try #require(PeakingRenderer.make())
-        let buffer = try frame(width: 4100, height: 12) { x, y in (x + y) % 3 == 0 ? 255 : 0 }
+        let buffer = try frame(width: 4100, height: 12) { x, y in (x + y) % 2 == 0 ? 255 : 0 }
         let a = try #require(renderer.analyse(buffer, level: nil))
-        #expect(a.width == 1366 && a.height == 4)
+        #expect(a.width == 2050 && a.height == 6)
         #expect(a.mean < 0.01)
     }
 
@@ -127,8 +127,9 @@ struct FocusPeakingTests {
         #expect(PeakingRenderer.level(mean: 4, deviation: 1, sensitivity: .medium) == 10)
     }
 
-    @Test(arguments: [(4032, 3024, 2), (1920, 1080, 1), (2048, 1536, 1), (8064, 6048, 4)])
-    func framesShrinkToAboutDisplaySize(width: Int, height: Int, scale: Int) {
+    /// Analysed at full resolution: only frames past 4096 on the long side (48 MP) are shrunk.
+    @Test(arguments: [(4032, 3024, 1), (3840, 2160, 1), (4096, 3072, 1), (8064, 6048, 2)])
+    func framesAreAnalysedAtFullResolution(width: Int, height: Int, scale: Int) {
         #expect(PeakingRenderer.scale(width: width, height: height) == scale)
     }
 
