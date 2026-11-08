@@ -164,6 +164,11 @@ struct ContentView: View {
                 // AUTO too: exposure and focus are separate, as on a camera.
                 focusControls
             }
+            .overlay(alignment: .leading) {
+                // Exposure aids on the opposite edge, mirroring focus: grouped by purpose, as on a camera, and
+                // clear of the Dynamic Island. Centred, below the histogram and above the status messages.
+                exposureAids
+            }
             .overlay(alignment: .bottom) {
                 // Lens buttons sit over the bottom of the preview, as in the system Camera, so the controls below
                 // fit without shrinking the preview.
@@ -228,10 +233,7 @@ struct ContentView: View {
                 chip(title, label: "Video format", value: title, on: false) { showingVideoFormat = true }
                     .accessibilityHint("Opens resolution, frame rate, codec and exposure lock")
             }
-            chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
-                 on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
-            if cam.peakingRenderer != nil { zebraChip }
-            Spacer(minLength: 140)
+            Spacer(minLength: 140)   // the Dynamic Island
             ExposureMeterView(meter: ExposureMeter(offset: cam.exposureOffset), angle: uiAngle)
         }
         .padding(.horizontal, 16)
@@ -280,6 +282,15 @@ struct ContentView: View {
         return cam.isAutofocus
             ? "Touch the viewfinder to set the focus point"
             : "Touch the viewfinder to choose where the magnifier looks. Autofocus is off."
+    }
+
+    private var exposureAids: some View {
+        VStack(spacing: 10) {
+            chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
+                 on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+            if cam.peakingRenderer != nil { zebraChip }
+        }
+        .padding(.leading, 8)
     }
 
     /// ZEB: tap for zebras on and off, touch and hold for the level they start at.
