@@ -439,16 +439,21 @@ actor CaptureSession {
 
     /// Chooses what the luma analysis stream is for, and attaches it only while something wants it, so it costs
     /// nothing while the histogram and peaking are both off.
-    func setAnalysis(histogram: Bool, peaking: Bool, sensitivity: PeakingSensitivity, appearance: PeakingAppearance) {
-        let wants = FrameAnalyzer.Wants(histogram: histogram, peaking: peaking, sensitivity: sensitivity,
-                                        appearance: appearance)
+    func setAnalysis(histogram: Bool, viewfinder: ViewfinderSettings?) {
+        let wants = FrameAnalyzer.Wants(histogram: histogram, viewfinder: viewfinder)
         let output = analyzer.output
-        let on = wants.any
+        let attached = session.outputs.contains(output)
+        // Settings that only change how frames are drawn (magnifier point, colour, …) needn't touch the session;
+        // reconfiguring it on every tap would stall the preview.
+        guard wants.any != attached || analyzer.needsReconfiguration(for: wants) else {
+            analyzer.set(wants)
+            return
+        }
         session.beginConfiguration()
         analyzer.set(wants)   // may change the output's frame size
-        if on {
-            if !session.outputs.contains(output), session.canAddOutput(output) { session.addOutput(output) }
-        } else if session.outputs.contains(output) {
+        if wants.any {
+            if !attached, session.canAddOutput(output) { session.addOutput(output) }
+        } else if attached {
             session.removeOutput(output)
         }
         session.commitConfiguration()

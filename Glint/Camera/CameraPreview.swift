@@ -3,8 +3,10 @@ import AVFoundation
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
-    /// (device point 0...1, point in the preview view's coordinates)
-    var onTap: ((CGPoint, CGPoint) -> Void)? = nil
+    /// What a touch on the viewfinder does, for VoiceOver.
+    var hint = "Touch the viewfinder to set the focus point"
+    /// (device point 0...1, point in the preview view's coordinates, the view's size)
+    var onTap: ((CGPoint, CGPoint, CGSize) -> Void)? = nil
     var onLayerReady: ((AVCaptureVideoPreviewLayer) -> Void)? = nil
 
     final class PreviewView: UIView {
@@ -14,13 +16,13 @@ struct CameraPreview: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject {
-        var onTap: ((CGPoint, CGPoint) -> Void)?
+        var onTap: ((CGPoint, CGPoint, CGSize) -> Void)?
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
             guard let v = g.view as? PreviewView else { return }
             let p = g.location(in: v)
             let devicePoint = v.previewLayer.captureDevicePointConverted(fromLayerPoint: p)
-            onTap?(devicePoint, p)
+            onTap?(devicePoint, p, v.bounds.size)
         }
     }
 
@@ -31,7 +33,7 @@ struct CameraPreview: UIViewRepresentable {
         // Like the system Camera: VoiceOver users can touch the viewfinder directly to set the focus point.
         v.isAccessibilityElement = true
         v.accessibilityLabel = "Camera viewfinder"
-        v.accessibilityHint = "Touch the viewfinder to set the focus point"
+        v.accessibilityHint = hint
         v.accessibilityTraits = .allowsDirectInteraction
         v.previewLayer.session = session
         v.previewLayer.videoGravity = .resizeAspect   // show the whole frame when the sensor image is landscape in the portrait box
@@ -44,5 +46,6 @@ struct CameraPreview: UIViewRepresentable {
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.onTap = onTap
+        uiView.accessibilityHint = hint
     }
 }
