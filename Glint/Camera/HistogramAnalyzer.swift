@@ -63,9 +63,9 @@ struct Histogram: Sendable {
     }
 }
 
-/// Receives preview frames from `output` on its own queue for whichever of the histogram and focus peaking is
-/// wanted: the histogram about five times a second, and with peaking every frame goes to `peaking`, which draws
-/// the viewfinder with its outlines. Frames only arrive while `output` is attached to the session, which is only
+/// Receives preview frames from `output` on its own queue for whichever of the histogram and the GPU viewfinder
+/// (focus peaking, the magnifier) is wanted: the histogram about five times a second, and every frame to
+/// `peaking`, which draws the viewfinder. Frames only arrive while `output` is attached to the session, which is only
 /// while one is wanted.
 ///
 /// Owned by `CaptureSession` and never shared. `wants` is set from the session's actor and read on `queue`, so
@@ -74,11 +74,8 @@ struct Histogram: Sendable {
 final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     struct Wants: Sendable, Equatable {
         var histogram = false
-        var peaking = false
-        var sensitivity = PeakingSensitivity.medium
-        var appearance = PeakingAppearance()
-        var mode = PeakingMode.standard
-        var any: Bool { histogram || peaking }
+        var viewfinder: ViewfinderSettings?   // non-nil while the GPU viewfinder draws (peaking or magnifier)
+        var any: Bool { histogram || viewfinder != nil }
     }
 
     let output = AVCaptureVideoDataOutput()
@@ -93,7 +90,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         self.peaking = peaking
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
-        // Frame size is chosen in `set(_:)`: small for the histogram alone, full size for peaking.
+        // Frame size is chosen in `set(_:)`: small for the histogram alone, full size for the GPU viewfinder.
         output.automaticallyConfiguresOutputBufferDimensions = false
         output.deliversPreviewSizedOutputBuffers = true
         output.videoSettings = [   // only the luma plane is read
@@ -106,9 +103,14 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// full-size ones and shrinks them itself by a whole factor (block averaging) on the GPU, so its filter sees a
     /// known, clean scale rather than whatever the preview scaler did. The caller wraps this in a session configuration,
     /// since it changes the output's buffers.
+    /// Whether `new` changes the output's frame size, which has to happen inside a session configuration.
+    func needsReconfiguration(for new: Wants) -> Bool {
+        output.deliversPreviewSizedOutputBuffers != (new.viewfinder == nil)
+    }
+
     func set(_ new: Wants) {
         wants.withLock { $0 = new }
-        let previewSized = !new.peaking
+        let previewSized = new.viewfinder == nil
         if output.deliversPreviewSizedOutputBuffers != previewSized {
             output.deliversPreviewSizedOutputBuffers = previewSized
         }
@@ -118,15 +120,14 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         let current = wants.withLock { $0 }
         let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
         let doHistogram = current.histogram && t - lastHistogram > 0.2
-        let doPeaking = current.peaking && peaking != nil
+        let doPeaking = current.viewfinder != nil && peaking != nil
         guard doHistogram || doPeaking, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
             lastHistogram = t
             publishHistogram(histogram)
         }
         if doPeaking {
-            peaking?.render(pixelBuffer, sensitivity: current.sensitivity, appearance: current.appearance,
-                            mode: current.mode)
+            if let settings = current.viewfinder { peaking?.render(pixelBuffer, settings: settings) }
         }
     }
 }

@@ -6,7 +6,8 @@ import QuartzCore
 import SwiftUI
 import UIKit
 
-/// Draws the viewfinder while focus peaking is on, each camera frame with its own outlines, on the GPU.
+/// Draws the viewfinder while focus peaking or the focus magnifier is on, each camera frame with its own outlines
+/// and magnified from the full-resolution frame, on the GPU.
 ///
 /// Peaking drawn over the system preview from separately analysed frames always trails the picture, so outlines
 /// ghost when the phone moves. Cameras draw peaking into the viewfinder image itself; this does the same. The
@@ -172,11 +173,12 @@ final class PeakingRenderer: @unchecked Sendable {
 
     /// Draws one camera frame (420YpCbCr8 full range) with its peaking outlines. Does nothing while no view is
     /// attached.
-    func render(_ pixelBuffer: CVPixelBuffer, sensitivity: PeakingSensitivity, appearance: PeakingAppearance,
-                mode: PeakingMode) {
+    func render(_ pixelBuffer: CVPixelBuffer, settings: ViewfinderSettings) {
         guard let target = lock.withLock({ self.target }), target.size.width > 0, target.size.height > 0 else { return }
-        let level = prepare(sensitivity, mode: mode)
-        let outlines = !lock.withLock { analysisPaused }
+        let sensitivity = settings.sensitivity, appearance = settings.appearance
+        let mode = settings.mode
+        let outlines = settings.outlines && !lock.withLock({ analysisPaused })
+        let level = outlines ? prepare(sensitivity, mode: mode) : nil
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
@@ -197,8 +199,11 @@ final class PeakingRenderer: @unchecked Sendable {
             let verdicts = mode == .sweep ? lock.withLock({ latestVerdicts }) : nil
             encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
                            verdicts: verdicts ?? ownVerdicts, sweep: verdicts != nil)
-            outlineMask = encodePool(commandBuffer, work: work,
-                                     pictureWidthOnScreen: Float(target.size.width) * scale.x)
+            // Magnified, mask texels are already a screen pixel or more across: draw from the full mask.
+            if settings.magnifier == nil {
+                outlineMask = encodePool(commandBuffer, work: work,
+                                         pictureWidthOnScreen: Float(target.size.width) * scale.x)
+            }
         }
 
         updateColorSpace(of: target.layer, for: pixelBuffer)
@@ -209,12 +214,22 @@ final class PeakingRenderer: @unchecked Sendable {
             pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
             pass.colorAttachments[0].storeAction = .store
             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
+                var magnify = SIMD4<Float>(0.5, 0.5, 1, 0)
+                if let magnifier = settings.magnifier {
+                    let zoom = Magnifier.zoom(for: magnifier.magnification, uprightFrameWidth: lumaTexture.height,
+                                              pictureWidthOnScreen: Float(target.size.width) * scale.x)
+                    let centre = Magnifier.pictureCenter(viewCenter: magnifier.center, scale: scale, zoom: zoom)
+                    magnify = SIMD4(centre.x, centre.y, zoom, 0)
+                }
+                // Magnified, the mask's texels are already a few screen pixels across: draw them as they are.
+                let reach = magnify.z > 1 ? 0 : appearance.lines.reach
                 var uniforms = Uniforms(
                     scale: scale,
                     matrix: Self.matrix(for: pixelBuffer),
                     color: SIMD4(appearance.color.rgb, 1),
-                    lines: SIMD4(1 / Float(outlineMask.width), 1 / Float(outlineMask.height), appearance.lines.reach,
-                                 outlines ? 1 : 0))
+                    lines: SIMD4(1 / Float(outlineMask.width), 1 / Float(outlineMask.height), reach,
+                                 outlines ? 1 : 0),
+                    magnify: magnify)
                 encoder.setRenderPipelineState(drawPipeline)
                 encoder.setFragmentTexture(lumaTexture, index: 0)
                 encoder.setFragmentTexture(chromaTexture, index: 1)
@@ -451,6 +466,7 @@ final class PeakingRenderer: @unchecked Sendable {
         var matrix: SIMD4<Float>
         var color: SIMD4<Float>
         var lines: SIMD4<Float>
+        var magnify: SIMD4<Float>
     }
 
     /// The upright picture's size as a fraction of the view when fitted inside it (like `.resizeAspect`).

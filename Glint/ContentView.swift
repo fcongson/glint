@@ -83,7 +83,19 @@ struct ContentView: View {
         VStack(spacing: 0) {
             topBar(topPadding: topPadding)
             ZStack {
-                CameraPreview(session: cam.session, onTap: { devicePoint, layerPoint in
+                CameraPreview(session: cam.session, hint: viewfinderHint, onTap: { devicePoint, layerPoint, size in
+                    // Magnified, a tap steps 1:1 ↔ 2:1. Otherwise it sets where the magnifier punches in; in
+                    // autofocus it's also the focus point, while in manual focus it leaves the lens alone, as on
+                    // a camera in MF (AF hands focus back).
+                    if cam.isMagnifying {
+                        cam.stepMagnification()
+                        AccessibilityNotification.Announcement("Magnified, \(cam.magnification.spoken)").post()
+                        return
+                    }
+                    if size.width > 0, size.height > 0 {
+                        cam.setMagnifyPoint(CGPoint(x: layerPoint.x / size.width, y: layerPoint.y / size.height))
+                    }
+                    guard cam.isAutofocus else { return }
                     cam.focus(at: devicePoint)
                     focusPoint = layerPoint
                     focusTapCount += 1
@@ -92,9 +104,10 @@ struct ContentView: View {
                         if focusTapCount == n { focusPoint = nil }
                     }
                 }, onLayerReady: { cam.attachPreviewLayer($0) })
-                // While peaking is on, the viewfinder is drawn with its outlines on the GPU, over the system
-                // preview, so they can't lag the picture. Touches go through to the preview.
-                if cam.isPeakingShown, let renderer = cam.peakingRenderer {
+                // While peaking or the magnifier is on, the viewfinder is drawn on the GPU over the system
+                // preview, so outlines can't lag the picture and magnifying uses the full-resolution frame.
+                // Touches go through to the preview.
+                if cam.isViewfinderDrawn, let renderer = cam.peakingRenderer {
                     PeakingViewfinder(renderer: renderer)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -102,13 +115,33 @@ struct ContentView: View {
                 if let p = focusPoint {
                     FocusBox().id(focusTapCount).position(p).accessibilityHidden(true)
                 }
+                // In manual focus, where the magnifier will punch in.
+                if !cam.isAutofocus, !cam.isMagnifying, cam.isMagnifierAvailable, cam.isMagnifierEnabled {
+                    GeometryReader { geo in
+                        MagnifyFrame()
+                            .position(x: cam.magnifyPoint.x * geo.size.width, y: cam.magnifyPoint.y * geo.size.height)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+                if cam.isMagnifying {
+                    overlayLabel("\(cam.magnification.title)  MAGNIFIED")
+                        .rotationEffect(uiAngle)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 10)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 Color.white.opacity(flash ? 0.85 : 0).allowsHitTesting(false)
             }
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipped()
             .overlay {
                 // The crop for 3:2, 1:1 and 16:9, dimmed outside, so what's just out of frame stays visible.
-                if cam.captureMode == .video {
+                // Not while magnified, where it would mark the wrong part of the picture.
+                if cam.isMagnifying {
+                    EmptyView()
+                } else if cam.captureMode == .video {
                     CropMask(aspect: .sixteenNine)   // video is 16:9 from the 4:3 sensor
                 } else if !cam.aspect.isFullSensor {
                     CropMask(aspect: cam.aspect)
@@ -230,10 +263,22 @@ struct ContentView: View {
             chip("AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
                  on: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
             FocusRail(position: cam.lensPosition, isAutofocus: cam.isAutofocus, angle: uiAngle,
-                      onChange: { cam.setLensPosition($0) })
+                      onChange: { cam.setLensPosition($0) }, onTouch: { cam.focusRailTouched($0) })
             peakingChip
+            if cam.isMagnifierAvailable {
+                chip("MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
+                     on: cam.isMagnifierEnabled) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
+                    .accessibilityHint("When on, focusing with the focus rail magnifies the focus point so you can check focus.")
+            }
         }
         .padding(.trailing, 8)
+    }
+
+    private var viewfinderHint: String {
+        if cam.isMagnifying { return "Touch to switch between actual pixels and double magnification" }
+        return cam.isAutofocus
+            ? "Touch the viewfinder to set the focus point"
+            : "Touch the viewfinder to choose where the magnifier looks. Autofocus is off."
     }
 
     /// PK: tap to turn peaking on and off, touch and hold to choose its sensitivity.
