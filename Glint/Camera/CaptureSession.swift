@@ -205,6 +205,22 @@ actor CaptureSession {
     private func restoreAfterReconfiguration() {
         try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
+        if let d = device { withLockedDevice(d, failure: "Config") { applyToneMapping($0) } }   // a preset can reset it
+    }
+
+    /// Video HDR off and one tone curve for the whole frame. With video HDR, the preview's adaptive tone mapping
+    /// eases into a new exposure over several seconds, so after a big change the viewfinder, histogram and
+    /// zebras kept brightening long after the exposure itself had landed (measured: 1/8 applied in 0.3 s,
+    /// clipping shown seconds later). This also suits a minimal-processing camera. Bayer RAW stills aren't
+    /// tone mapped, so photos are unaffected; video gets a flatter, more literal look. The device must be locked.
+    private func applyToneMapping(_ d: AVCaptureDevice) {
+        if d.activeFormat.isVideoHDRSupported {
+            if d.automaticallyAdjustsVideoHDREnabled { d.automaticallyAdjustsVideoHDREnabled = false }
+            if d.isVideoHDREnabled { d.isVideoHDREnabled = false }
+        }
+        if d.activeFormat.isGlobalToneMappingSupported, !d.isGlobalToneMappingEnabled {
+            d.isGlobalToneMappingEnabled = true
+        }
     }
 
     /// Per-lens setup: distortion correction off, stabilization off. Returns the lens's ranges and aperture.
@@ -213,6 +229,7 @@ actor CaptureSession {
             if d.isGeometricDistortionCorrectionSupported {
                 d.isGeometricDistortionCorrectionEnabled = false
             }
+            applyToneMapping(d)
         }
         movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted   // a new lens rebuilds connections
@@ -691,6 +708,7 @@ actor CaptureSession {
         session.automaticallyConfiguresCaptureDeviceForWideColor = wanted.encoding != .log
         withLockedDevice(d, failure: "Video format") { d in
             d.activeFormat = format
+            applyToneMapping(d)   // a new format starts with its own defaults
             let frame = CMTime(value: 1, timescale: CMTimeScale(wanted.frameRate))
             d.activeVideoMinFrameDuration = frame
             d.activeVideoMaxFrameDuration = frame
