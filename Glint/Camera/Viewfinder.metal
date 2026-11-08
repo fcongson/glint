@@ -21,8 +21,13 @@ kernel void peakingDownscale(texture2d<float, access::read> luma [[texture(0)]],
 
 constant float binomial[3] = { 1, 2, 1 };
 
-// 3×3 binomial blur at p, edges repeating their outermost pixel.
-static float blurred(texture2d<float, access::read> small, int2 p, int2 size) {
+// 2a. 3×3 binomial blur, edges repeating their outermost pixel, so single-pixel noise doesn't count as detail.
+kernel void peakingBlur(texture2d<float, access::read> small [[texture(0)]],
+                        texture2d<float, access::write> blurred [[texture(1)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(small.get_width(), small.get_height());
+    int2 p = int2(gid);
+    if (p.x >= size.x || p.y >= size.y) return;
     float sum = 0;
     for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
@@ -30,22 +35,21 @@ static float blurred(texture2d<float, access::read> small, int2 p, int2 size) {
             sum += binomial[dx + 1] * binomial[dy + 1] * small.read(uint2(q)).r;
         }
     }
-    return sum / 16.0;
+    blurred.write(float4(sum / 16.0), gid);
 }
 
-// 2. Blur, then high-pass with a Laplacian: the response to fine detail. The border stays 0.
-kernel void peakingResponse(texture2d<float, access::read> small [[texture(0)]],
+// 2b. High-pass with a Laplacian: the response to fine detail. The border stays 0.
+kernel void peakingResponse(texture2d<float, access::read> blurred [[texture(0)]],
                             texture2d<float, access::write> response [[texture(1)]],
                             uint2 gid [[thread_position_in_grid]]) {
-    int2 size = int2(small.get_width(), small.get_height());
+    int2 size = int2(blurred.get_width(), blurred.get_height());
     int2 p = int2(gid);
     if (p.x >= size.x || p.y >= size.y) return;
     float value = 0;
     if (p.x >= 1 && p.y >= 1 && p.x < size.x - 1 && p.y < size.y - 1) {
-        float centre = blurred(small, p, size);
-        value = abs(4 * centre
-                    - blurred(small, p + int2(1, 0), size) - blurred(small, p - int2(1, 0), size)
-                    - blurred(small, p + int2(0, 1), size) - blurred(small, p - int2(0, 1), size));
+        value = abs(4 * blurred.read(gid).r
+                    - blurred.read(uint2(p + int2(1, 0))).r - blurred.read(uint2(p - int2(1, 0))).r
+                    - blurred.read(uint2(p + int2(0, 1))).r - blurred.read(uint2(p - int2(0, 1))).r);
     }
     response.write(float4(value), gid);
 }
@@ -103,6 +107,23 @@ kernel void peakingMask(texture2d<float, access::read> edges [[texture(0)]],
         if (neighbours >= 2) marked = 1;
     }
     mask.write(float4(marked), gid);
+}
+
+// 4b. Shrink the mask to about screen resolution, keeping any mark in each block, so lines drawn from it are as
+//     bold on screen as they're meant to be however large the frame.
+kernel void peakingPool(texture2d<float, access::read> mask [[texture(0)]],
+                        texture2d<float, access::write> pooled [[texture(1)]],
+                        constant uint &factor [[buffer(0)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= pooled.get_width() || gid.y >= pooled.get_height()) return;
+    uint2 limit = uint2(mask.get_width(), mask.get_height()) - 1;
+    float marked = 0;
+    for (uint dy = 0; dy < factor; dy++) {
+        for (uint dx = 0; dx < factor; dx++) {
+            marked = max(marked, mask.read(min(gid * factor + uint2(dx, dy), limit)).r);
+        }
+    }
+    pooled.write(float4(marked), gid);
 }
 
 // 5. Draw the frame upright and fitted, with the outlines over it.

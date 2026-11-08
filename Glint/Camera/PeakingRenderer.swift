@@ -14,9 +14,10 @@ import UIKit
 /// first frame is drawn, or if frames stop (some ProRes configurations can't run alongside a video data output).
 ///
 /// Per frame, all on the GPU (Viewfinder.metal), the way cameras peak:
-/// 1. Shrink the frame to about display resolution (long side ≤ 2048) by averaging blocks, as cameras peak on
-///    their monitor feed. Averaging also takes the edge off sensor noise.
-/// 2. Blur lightly (3×3 binomial) and high-pass with a Laplacian, which responds to the finest detail and falls
+/// 1. Analyse at full resolution, up to a long side of 4096 (12 MP frames as they are; 48 MP ones shrunk by
+///    averaging 2×2 blocks). Shrinking a frame shrinks its blur too, so a slightly soft edge would look crisp;
+///    at full size the test matches what you'll see zoomed into the photo.
+/// 2. Blur lightly (3×3 binomial, its own pass to keep reads down at full resolution) and high-pass with a Laplacian, which responds to the finest detail and falls
 ///    away fast as an edge blurs, where a gradient filter like Sobel keeps responding to big, soft edges.
 /// 3. Average that response over 3×3, so outlines run as lines rather than breaking into dots, and noise spikes
 ///    are diluted.
@@ -24,7 +25,8 @@ import UIKit
 ///    `relativeFloor` times the mean (in a frame with little detail, the mean is mostly noise), with at least two
 ///    marked neighbours. The statistics come back from the GPU after each frame and set the next frame's
 ///    threshold, eased over frames (`PeakingThreshold`) so outlines don't flicker.
-/// 5. Draw the frame upright and fitted like the preview, with the outlines in the chosen colour and weight.
+/// 5. Shrink the mask to about screen resolution, keeping every mark, and draw the frame upright and fitted like
+///    the preview, with the outlines in the chosen colour and weight.
 ///
 /// `render` is called on the analysis queue, one frame at a time. The target layer is set from the main thread
 /// and the threshold from Metal's completion handlers, so both sit behind `lock`.
@@ -35,7 +37,7 @@ final class PeakingRenderer: @unchecked Sendable {
     /// have little else in them.
     static let relativeFloor = 2.5
     /// Frames are shrunk until their long side is at most this.
-    static let targetSize = 2048
+    static let targetSize = 4096
     private static let framesInFlight = 3
 
     /// The threshold a frame's statistics call for, before easing.
@@ -52,7 +54,9 @@ final class PeakingRenderer: @unchecked Sendable {
     private let commandQueue: any MTLCommandQueue
     private let textureCache: CVMetalTextureCache
     private let downscalePipeline: any MTLComputePipelineState
+    private let blurPipeline: any MTLComputePipelineState
     private let responsePipeline: any MTLComputePipelineState
+    private let poolPipeline: any MTLComputePipelineState
     private let edgesPipeline: any MTLComputePipelineState
     private let maskPipeline: any MTLComputePipelineState
     private let drawPipeline: any MTLRenderPipelineState
@@ -68,12 +72,14 @@ final class PeakingRenderer: @unchecked Sendable {
     private var work: Work?
     private var slot = 0
     private var colorSpaceName: CFString?
+    private var pooled: (factor: Int, texture: any MTLTexture)?
 
     /// Scratch textures for one frame size, and a ring of buffers for the statistics coming back.
     private struct Work {
         let frameWidth: Int, frameHeight: Int
         let factor: Int
-        let small: any MTLTexture, response: any MTLTexture, edges: any MTLTexture, mask: any MTLTexture
+        let small: any MTLTexture, blurred: any MTLTexture, response: any MTLTexture, edges: any MTLTexture
+        let mask: any MTLTexture
         let groups: MTLSize
         let partials: [any MTLBuffer]
     }
@@ -120,7 +126,9 @@ final class PeakingRenderer: @unchecked Sendable {
         commandQueue = queue
         textureCache = cache
         downscalePipeline = try device.makeComputePipelineState(function: try function("peakingDownscale"))
+        blurPipeline = try device.makeComputePipelineState(function: try function("peakingBlur"))
         responsePipeline = try device.makeComputePipelineState(function: try function("peakingResponse"))
+        poolPipeline = try device.makeComputePipelineState(function: try function("peakingPool"))
         edgesPipeline = try device.makeComputePipelineState(function: try function("peakingEdges"))
         maskPipeline = try device.makeComputePipelineState(function: try function("peakingMask"))
         drawPipeline = try device.makeRenderPipelineState(descriptor: draw)
@@ -168,6 +176,10 @@ final class PeakingRenderer: @unchecked Sendable {
         let partials = work.partials[slot]
         slot = (slot + 1) % work.partials.count
         encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level)
+        let scale = Self.fitScale(frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
+                                  viewSize: target.size)
+        let outlineMask = encodePool(commandBuffer, work: work,
+                                     pictureWidthOnScreen: Float(target.size.width) * scale.x)
 
         updateColorSpace(of: target.layer, for: pixelBuffer)
         if let drawable = target.layer.nextDrawable() {
@@ -178,15 +190,14 @@ final class PeakingRenderer: @unchecked Sendable {
             pass.colorAttachments[0].storeAction = .store
             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
                 var uniforms = Uniforms(
-                    scale: Self.fitScale(frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
-                                         viewSize: target.size),
+                    scale: scale,
                     matrix: Self.matrix(for: pixelBuffer),
                     color: SIMD4(appearance.color.rgb, 1),
-                    lines: SIMD4(1 / Float(work.mask.width), 1 / Float(work.mask.height), appearance.lines.reach, 0))
+                    lines: SIMD4(1 / Float(outlineMask.width), 1 / Float(outlineMask.height), appearance.lines.reach, 0))
                 encoder.setRenderPipelineState(drawPipeline)
                 encoder.setFragmentTexture(lumaTexture, index: 0)
                 encoder.setFragmentTexture(chromaTexture, index: 1)
-                encoder.setFragmentTexture(work.mask, index: 2)
+                encoder.setFragmentTexture(outlineMask, index: 2)
                 encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
                 encoder.endEncoding()
@@ -239,8 +250,13 @@ final class PeakingRenderer: @unchecked Sendable {
         encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
-        encoder.setComputePipelineState(responsePipeline)
+        encoder.setComputePipelineState(blurPipeline)
         encoder.setTexture(work.small, index: 0)
+        encoder.setTexture(work.blurred, index: 1)
+        encoder.dispatchThreads(size, threadsPerThreadgroup: group)
+
+        encoder.setComputePipelineState(responsePipeline)
+        encoder.setTexture(work.blurred, index: 0)
         encoder.setTexture(work.response, index: 1)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
@@ -285,14 +301,45 @@ final class PeakingRenderer: @unchecked Sendable {
         let partials = (0..<Self.framesInFlight).compactMap { _ in
             device.makeBuffer(length: partialsLength, options: .storageModeShared)
         }
-        guard let small = make(.r16Float), let response = make(.r16Float), let edges = make(.r16Float),
+        guard let small = make(.r16Float), let blurred = make(.r16Float), let response = make(.r16Float),
+              let edges = make(.r16Float),
               let mask = make(.r8Unorm),
               partials.count == Self.framesInFlight else { return nil }
-        let new = Work(frameWidth: width, frameHeight: height, factor: factor, small: small, response: response,
-                       edges: edges, mask: mask, groups: groups, partials: partials)
+        let new = Work(frameWidth: width, frameHeight: height, factor: factor, small: small, blurred: blurred,
+                       response: response, edges: edges, mask: mask, groups: groups, partials: partials)
         work = new
         slot = 0
         return new
+    }
+
+    /// Step 5's shrink: pools the mask by the number of mask texels per screen pixel (rounded up), so outlines keep
+    /// their weight on screen. Returns the mask to draw from.
+    private func encodePool(_ commandBuffer: any MTLCommandBuffer, work: Work,
+                            pictureWidthOnScreen: Float) -> any MTLTexture {
+        let perPixel = Float(work.mask.height) / max(1, pictureWidthOnScreen)   // the mask's upright width
+        let factor = max(1, Int(perPixel.rounded(.up)))
+        guard factor > 1 else { return work.mask }
+        let w = (work.mask.width + factor - 1) / factor, h = (work.mask.height + factor - 1) / factor
+        if pooled == nil || pooled?.factor != factor || pooled?.texture.width != w || pooled?.texture.height != h {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: w, height: h,
+                                                             mipmapped: false)
+            d.usage = [.shaderRead, .shaderWrite]
+            d.storageMode = .private
+            guard let texture = device.makeTexture(descriptor: d) else { return work.mask }
+            pooled = (factor, texture)
+        }
+        guard let texture = pooled?.texture, let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            return work.mask
+        }
+        var poolFactor = UInt32(factor)
+        encoder.setComputePipelineState(poolPipeline)
+        encoder.setTexture(work.mask, index: 0)
+        encoder.setTexture(texture, index: 1)
+        encoder.setBytes(&poolFactor, length: MemoryLayout<UInt32>.size, index: 0)
+        encoder.dispatchThreads(MTLSize(width: w, height: h, depth: 1),
+                                threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+        encoder.endEncoding()
+        return texture
     }
 
     private static func statistics(_ frame: InFlight) -> (mean: Double, deviation: Double) {
