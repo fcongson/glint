@@ -65,8 +65,8 @@ struct Histogram: Sendable {
 
 /// Receives preview frames from `output` on its own queue for whichever of the histogram and the GPU viewfinder
 /// (focus peaking, the magnifier) is wanted: the histogram about five times a second, and every frame to
-/// `peaking`, which draws the viewfinder. Frames only arrive while `output` is attached to the session, which is only
-/// while one is wanted.
+/// `peaking`, which draws the viewfinder. `output` stays attached to the session, with its connection enabled only
+/// while one is wanted, so frames only arrive then.
 ///
 /// Owned by `CaptureSession` and never shared. `wants` is set from the session's actor and read on `queue`, so
 /// it sits behind a lock; `lastHistogram` is only touched by the delegate callback, which AVFoundation always
@@ -104,6 +104,9 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// known, clean scale rather than whatever the preview scaler did. The caller wraps this in a session configuration,
     /// since it changes the output's buffers.
     /// Whether `new` changes the output's frame size, which has to happen inside a session configuration.
+    /// Whether anything wants frames right now.
+    var isWanted: Bool { wants.withLock { $0.any } }
+
     /// Screen-sized frames unless the GPU viewfinder needs full resolution (peaking, magnifying).
     private static func previewSized(_ wants: Wants) -> Bool {
         wants.viewfinder?.needsFullResolution != true

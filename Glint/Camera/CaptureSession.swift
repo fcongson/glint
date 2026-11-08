@@ -169,12 +169,19 @@ actor CaptureSession {
                 movieOutput.isDeferredStartEnabled = false
             }
         }
-        // The analysis output (histogram, peaking) is attached separately, only while one of them is on.
+        // The preview-frame output (histogram, GPU viewfinder) is attached once, with its frames switched off
+        // until something wants them: adding or removing it later reconfigures the session, which stalls the
+        // preview for a moment every time HIST or ZEB is switched.
+        let analysisOutput = analyzer.output
+        if session.canAddOutput(analysisOutput) {
+            session.addOutput(analysisOutput)
+            analysisOutput.connection(with: .video)?.isEnabled = false
+        }
         session.commitConfiguration()
 
         let info = applyDeviceSettings(wide)
         session.startRunning()
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
         subjectAreaObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: nil, queue: nil) { [weak self] _ in
             self?.enqueue { $0.resumeContinuousFocus() }
@@ -184,10 +191,12 @@ actor CaptureSession {
         emit.yield(.videoCapabilities(videoCapabilities(wide)))
     }
 
-    /// The mic input puts the audio session in record mode, which silences the Taptic Engine by default.
-    /// Session reconfiguration can reset this, so call it again after every `commitConfiguration()`.
-    private func allowHapticsDuringRecording() {
+    /// What a session reconfiguration can reset, so call it after every `commitConfiguration()`: the mic input
+    /// puts the audio session in record mode, which silences the Taptic Engine by default; and rebuilt connections
+    /// come back enabled, so preview frames would flow to the analysis output when nothing wants them.
+    private func restoreAfterReconfiguration() {
         try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+        analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
     }
 
     /// Per-lens setup: distortion correction off, stabilization off. Returns the lens's ranges and aperture.
@@ -198,6 +207,7 @@ actor CaptureSession {
             }
         }
         movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
+        analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted   // a new lens rebuilds connections
         observeMeterAndLens(d)
         return DeviceInfo(lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
                           aperture: d.lensAperture)
@@ -263,7 +273,7 @@ actor CaptureSession {
             session.addInput(old)   // roll back
         }
         session.commitConfiguration()
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
 
         guard let current = device else { return }
         if isVideo { configureVideoFormat(current) }   // each lens has its own formats
@@ -442,22 +452,30 @@ actor CaptureSession {
     func setAnalysis(histogram: Bool, viewfinder: ViewfinderSettings?) {
         let wants = FrameAnalyzer.Wants(histogram: histogram, viewfinder: viewfinder)
         let output = analyzer.output
-        let attached = session.outputs.contains(output)
-        // Settings that only change how frames are drawn (magnifier point, colour, …) needn't touch the session;
-        // reconfiguring it on every tap would stall the preview.
-        guard wants.any != attached || analyzer.needsReconfiguration(for: wants) else {
+        // Normally attached since setup; then frames are just switched on or off, which is immediate. Only a change
+        // of frame size (peaking or magnifying, which need full resolution) reconfigures the session.
+        if session.outputs.contains(output) {
+            if analyzer.needsReconfiguration(for: wants) {
+                session.beginConfiguration()
+                analyzer.set(wants)
+                session.commitConfiguration()
+                restoreAfterReconfiguration()
+            } else {
+                analyzer.set(wants)
+            }
+            output.connection(with: .video)?.isEnabled = wants.any
+            return
+        }
+        // Couldn't be attached at setup: attach it now that something wants frames.
+        guard wants.any else {
             analyzer.set(wants)
             return
         }
         session.beginConfiguration()
-        analyzer.set(wants)   // may change the output's frame size
-        if wants.any {
-            if !attached, session.canAddOutput(output) { session.addOutput(output) }
-        } else if attached {
-            session.removeOutput(output)
-        }
+        analyzer.set(wants)
+        if session.canAddOutput(output) { session.addOutput(output) }
         session.commitConfiguration()
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
     }
 
     // MARK: Focus
@@ -575,7 +593,7 @@ actor CaptureSession {
             session.sessionPreset = .photo
             session.commitConfiguration()
         }
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
         let info = applyDeviceSettings(d)
         emit.yield(.videoCapabilities(videoCapabilities(d)))
         emit.yield(.formatChanged(info))
