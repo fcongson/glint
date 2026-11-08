@@ -97,6 +97,9 @@ actor CaptureSession {
     private var isVideo = false                  // PHOTO · VIDEO: video uses a video device format
     private var videoFormat = VideoFormat()
     private var exposureFrozen = false           // video's "exposure while recording: locked"
+    // Custom exposure changes go to the camera one at a time, latest wins (see `requestExposure`).
+    private var exposureInFlight: (sentAt: CFAbsoluteTime, seconds: Double)?
+    private var pendingExposure: (duration: CMTime, iso: Float)?
     private var audioMeterTask: Task<Void, Never>?
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
@@ -208,6 +211,8 @@ actor CaptureSession {
         }
         movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted   // a new lens rebuilds connections
+        pendingExposure = nil   // meant for the previous lens
+        exposureInFlight = nil
         observeMeterAndLens(d)
         return DeviceInfo(lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
                           aperture: d.lensAperture)
@@ -300,6 +305,8 @@ actor CaptureSession {
         isManual = manual
         autoSettings = auto
         exposureFrozen = false
+        pendingExposure = nil   // superseded by what's set here
+        exposureInFlight = nil
         withLockedDevice(d, failure: "Config") { d in
             guard manual else {
                 if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
@@ -342,11 +349,49 @@ actor CaptureSession {
         guard let d = device, d.isExposureModeSupported(.custom), !autoSettings.isProgram, !exposureFrozen else { return }
         let auto = autoSettings
         let shutterDenominator = isVideo ? max(shutterDenominator, videoFormat.slowestShutterDenominator) : shutterDenominator
-        withLockedDevice(d, failure: "Config") { d in
-            let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
-            let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
-            d.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
+        let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
+        let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
+        requestExposure(duration: duration, iso: isoValue)
+    }
+
+    /// Sends a custom exposure to the camera, latest wins. The camera applies changes in order, a frame or more
+    /// each, and at slow shutter speeds a frame is long: a quick slide across the ruler (30 steps from 1/8000 to
+    /// 1/8) queued every step, and the picture, histogram and zebras took seconds to catch up. Now, while one
+    /// change is being applied, newer ones wait in a single slot and only the latest is sent when it lands. If the
+    /// camera never confirms (the lens changed, say), the slot only holds things up briefly.
+    private func requestExposure(duration: CMTime, iso: Float) {
+        if let flight = exposureInFlight,
+           CFAbsoluteTimeGetCurrent() - flight.sentAt < max(0.3, flight.seconds * 4) {
+            pendingExposure = (duration, iso)
+            return
         }
+        sendExposure(duration: duration, iso: iso)
+    }
+
+    private func sendExposure(duration: CMTime, iso: Float) {
+        pendingExposure = nil
+        guard let d = device, d.isExposureModeSupported(.custom) else {
+            exposureInFlight = nil
+            return
+        }
+        let seconds = duration == AVCaptureDevice.currentExposureDuration ? d.exposureDuration.seconds : duration.seconds
+        exposureInFlight = (CFAbsoluteTimeGetCurrent(), seconds)
+        withLockedDevice(d, failure: "Config") { d in
+            d.setExposureModeCustom(duration: duration, iso: iso) { [weak self] _ in
+                Task { await self?.exposureApplied() }
+            }
+        }
+    }
+
+    /// The last change has reached the frames: send the latest one waiting, if exposure is still custom.
+    private func exposureApplied() {
+        exposureInFlight = nil
+        guard let next = pendingExposure else { return }
+        guard isManual, !autoSettings.isProgram, !exposureFrozen else {
+            pendingExposure = nil
+            return
+        }
+        sendExposure(duration: next.duration, iso: next.iso)
     }
 
     /// Exposure compensation, in stops.
@@ -370,16 +415,12 @@ actor CaptureSession {
             let format = d.activeFormat
             if auto.iso, let next = PriorityExposure.nextISO(current: d.iso, offset: offset,
                                                              min: format.minISO, max: format.maxISO) {
-                withLockedDevice(d, failure: "Config") { d in
-                    d.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration, iso: next, completionHandler: nil)
-                }
+                requestExposure(duration: AVCaptureDevice.currentExposureDuration, iso: next)
             } else if auto.shutter, let next = PriorityExposure.nextDuration(
                 current: d.exposureDuration.seconds, offset: offset,
                 min: format.minExposureDuration.seconds, max: format.maxExposureDuration.seconds) {
-                withLockedDevice(d, failure: "Config") { d in
-                    d.setExposureModeCustom(duration: CMTime(seconds: next, preferredTimescale: 1_000_000),
-                                            iso: AVCaptureDevice.currentISO, completionHandler: nil)
-                }
+                requestExposure(duration: CMTime(seconds: next, preferredTimescale: 1_000_000),
+                                iso: AVCaptureDevice.currentISO)
             }
         }
         emit.yield(.autoValues(iso: auto.iso ? d.iso : nil, shutterSeconds: auto.shutter ? d.exposureDuration.seconds : nil))
