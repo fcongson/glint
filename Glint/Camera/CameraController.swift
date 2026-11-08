@@ -195,6 +195,12 @@ final class CameraController {
             Task.detached(priority: .utility) { MediaLibrary.saveVideo(at: url, report: report) }
         case .status(let message):
             post(message)
+        case .debugReadout(let text):
+            #if DEBUG
+            timing = text
+            #else
+            _ = text
+            #endif
         }
     }
 

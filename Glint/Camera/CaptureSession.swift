@@ -55,6 +55,7 @@ enum CaptureEvent: Sendable {
     case recordingStarted
     case recordingFinished(URL)
     case status(String)
+    case debugReadout(String)   // dev-only timing readout
 }
 
 /// Owns the AVCaptureSession, its inputs and outputs, and the active camera device.
@@ -100,6 +101,10 @@ actor CaptureSession {
     // Custom exposure changes go to the camera one at a time, latest wins (see `requestExposure`).
     private var exposureInFlight: (sentAt: CFAbsoluteTime, seconds: Double)?
     private var pendingExposure: (duration: CMTime, iso: Float)?
+    #if DEBUG
+    private var lastManualRequestAt: CFAbsoluteTime = 0   // for the dev readout: when the ruler last asked
+    private var priorityCorrections = 0                   // and how many auto corrections since
+    #endif
     private var audioMeterTask: Task<Void, Never>?
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
@@ -351,7 +356,7 @@ actor CaptureSession {
         let shutterDenominator = isVideo ? max(shutterDenominator, videoFormat.slowestShutterDenominator) : shutterDenominator
         let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
         let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
-        requestExposure(duration: duration, iso: isoValue)
+        requestExposure(duration: duration, iso: isoValue, fromRuler: true)
     }
 
     /// Sends a custom exposure to the camera, latest wins. The camera applies changes in order, a frame or more
@@ -359,7 +364,15 @@ actor CaptureSession {
     /// 1/8) queued every step, and the picture, histogram and zebras took seconds to catch up. Now, while one
     /// change is being applied, newer ones wait in a single slot and only the latest is sent when it lands. If the
     /// camera never confirms (the lens changed, say), the slot only holds things up briefly.
-    private func requestExposure(duration: CMTime, iso: Float) {
+    private func requestExposure(duration: CMTime, iso: Float, fromRuler: Bool = false) {
+        #if DEBUG
+        if fromRuler {
+            lastManualRequestAt = CFAbsoluteTimeGetCurrent()
+            priorityCorrections = 0
+        } else {
+            priorityCorrections += 1
+        }
+        #endif
         if let flight = exposureInFlight,
            CFAbsoluteTimeGetCurrent() - flight.sentAt < max(0.3, flight.seconds * 4) {
             pendingExposure = (duration, iso)
@@ -386,6 +399,17 @@ actor CaptureSession {
     /// The last change has reached the frames: send the latest one waiting, if exposure is still custom.
     private func exposureApplied() {
         exposureInFlight = nil
+        #if DEBUG
+        if pendingExposure == nil, let d = device {
+            // What the camera is actually doing once the last change landed, and how long after the ruler asked.
+            let since = CFAbsoluteTimeGetCurrent() - lastManualRequestAt
+            let shutter = d.exposureDuration.seconds
+            let frame = d.activeVideoMaxFrameDuration.seconds
+            emit.yield(.debugReadout(String(
+                format: "exp   1/%.0f in %.2fs\nframe 1/%.0f max\niso   %.0f, auto ×%d",
+                shutter > 0 ? 1 / shutter : 0, since, frame > 0 ? 1 / frame : 0, d.iso, priorityCorrections)))
+        }
+        #endif
         guard let next = pendingExposure else { return }
         guard isManual, !autoSettings.isProgram, !exposureFrozen else {
             pendingExposure = nil
