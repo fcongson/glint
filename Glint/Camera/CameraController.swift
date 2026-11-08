@@ -55,6 +55,18 @@ final class CameraController {
     /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
     private var pausedForLowPower = (histogram: false, peaking: false)
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
+
+    // Focus magnifier (see Magnifier.swift). The point is where the viewfinder punches in: in manual focus a tap
+    // moves it, in autofocus it follows the tapped focus point.
+    private(set) var magnifyPoint = CGPoint(x: 0.5, y: 0.5)   // 0…1 across and down the viewfinder
+    private(set) var magnification = Magnification.actual
+    private(set) var isMagnifierLocked = false                // MAG: stays on until switched off
+    private(set) var isRailHeld = false                       // on while the focus rail is touched, and a moment after
+    @ObservationIgnored private var railReleaseTask: Task<Void, Never>?
+    var isMagnifierAvailable: Bool { peakingRenderer != nil }
+    var isMagnifying: Bool { isMagnifierAvailable && (isMagnifierLocked || isRailHeld) }
+    /// Whether the GPU viewfinder draws, for outlines or magnifying.
+    var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying }
     private(set) var timing = ""
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
@@ -314,6 +326,43 @@ final class CameraController {
         sendAnalysis()
     }
 
+    /// The focus rail was touched or let go. Touching it punches in; letting go zooms back out a second later,
+    /// so a pause between turns doesn't bounce the view in and out.
+    func focusRailTouched(_ touching: Bool) {
+        railReleaseTask?.cancel()
+        if touching {
+            guard !isRailHeld else { return }
+            isRailHeld = true
+            sendAnalysis()
+        } else {
+            railReleaseTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled else { return }
+                isRailHeld = false
+                sendAnalysis()
+            }
+        }
+    }
+
+    func setMagnifierLocked(_ on: Bool) {
+        guard on != isMagnifierLocked, !on || isMagnifierAvailable else { return }
+        isMagnifierLocked = on
+        if !on { magnification = .actual }
+        sendAnalysis()
+    }
+
+    /// Moves the point the magnifier punches in on.
+    func setMagnifyPoint(_ point: CGPoint) {
+        magnifyPoint = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
+        sendAnalysis()
+    }
+
+    /// 1:1, then 2:1, then back.
+    func stepMagnification() {
+        magnification = magnification.next
+        sendAnalysis()
+    }
+
     func setPeakingMode(_ mode: PeakingMode) {
         guard mode != peakingMode else { return }
         peakingMode = mode
@@ -366,12 +415,13 @@ final class CameraController {
 
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
-        let histogram = isHistogramEnabled, peaking = isPeakingShown, sensitivity = peakingSensitivity
-        let appearance = peakingAppearance, mode = peakingMode
-        capture.enqueue {
-            $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity, appearance: appearance,
-                           mode: mode)
-        }
+        let histogram = isHistogramEnabled
+        let viewfinder: ViewfinderSettings? = isViewfinderDrawn
+            ? ViewfinderSettings(outlines: isPeakingShown, sensitivity: peakingSensitivity,
+                                 appearance: peakingAppearance, mode: peakingMode,
+                                 magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil)
+            : nil
+        capture.enqueue { $0.setAnalysis(histogram: histogram, viewfinder: viewfinder) }
     }
 
     // MARK: Focus

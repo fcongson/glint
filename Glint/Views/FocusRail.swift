@@ -10,6 +10,7 @@ struct FocusRail: View {
     let isAutofocus: Bool
     let angle: Angle
     let onChange: (Float) -> Void
+    var onTouch: (Bool) -> Void = { _ in }   // touched (true) and let go (false), for the focus magnifier
 
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var dragStart: Float?
@@ -61,12 +62,14 @@ struct FocusRail: View {
                     if dragStart == nil {
                         dragStart = position
                         wake(hold: true)
+                        onTouch(true)
                     }
                     onChange(FocusScale.dragged(from: dragStart ?? position, by: g.translation.height, over: travel))
                 }
                 .onEnded { _ in
                     dragStart = nil
                     wake()
+                    onTouch(false)
                 }
         )
         .accessibilityElement()

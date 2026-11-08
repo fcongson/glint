@@ -1,8 +1,9 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// The viewfinder while focus peaking is on: each camera frame is drawn with its own peaking outlines, so they
-// can't lag behind the picture. See PeakingRenderer.swift for the steps and why.
+// The viewfinder while focus peaking or the focus magnifier is on: each camera frame is drawn with its own
+// peaking outlines, so they can't lag behind the picture, and magnified from the full-resolution frame. See
+// PeakingRenderer.swift for the steps and why.
 
 // 1. Shrink the luma plane by a whole factor, averaging each block. Output is luma in 0…255.
 kernel void peakingDownscale(texture2d<float, access::read> luma [[texture(0)]],
@@ -155,6 +156,7 @@ struct ViewfinderUniforms {
     float4 color;    // the outlines'
     float4 lines;    // xy: one mask texel in frame coordinates; z: how many texels to thicken by (0 = fine);
                      // w: 1 to draw outlines, 0 for none
+    float4 magnify;  // xy: centre of the magnified region in picture coordinates; z: zoom (1 = not magnified)
 };
 
 struct ViewfinderVertex {
@@ -178,6 +180,7 @@ fragment float4 viewfinderFragment(ViewfinderVertex in [[stage_in]],
     constexpr sampler linear(filter::linear, address::clamp_to_edge);
     float2 p = (in.view - 0.5) / u.scale + 0.5;
     if (any(p < 0) || any(p > 1)) return float4(0, 0, 0, 1);
+    if (u.magnify.z > 1) p = u.magnify.xy + (p - 0.5) / u.magnify.z;   // the focus magnifier
     float2 uv = float2(p.y, 1 - p.x);   // frames arrive landscape: turn a quarter clockwise for portrait
     float y = luma.sample(linear, uv).r;
     float2 c = chroma.sample(linear, uv).rg - 0.5;   // Cb, Cr
