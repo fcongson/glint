@@ -50,6 +50,8 @@ final class CameraController {
     private(set) var peakingSensitivity = PeakingSensitivity.medium
     private(set) var peakingAppearance = PeakingAppearance()
     private(set) var peakingMode = PeakingMode.standard
+    @ObservationIgnored private var photosProcessing = 0
+    @ObservationIgnored private var processingTimeout: Task<Void, Never>?
     /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
     private var pausedForLowPower = (histogram: false, peaking: false)
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
@@ -454,6 +456,7 @@ final class CameraController {
     // MARK: Stills
 
     func capturePhoto() {
+        photoProcessing(started: true)
         let fileType = fileType, aspect = aspect
         let whiteBalance: WhiteBalanceSetting = manual && !auto.whiteBalance ? .kelvin(Int(whiteBalanceKelvin)) : .auto
         let requestedAt = CFAbsoluteTimeGetCurrent()
@@ -506,6 +509,22 @@ final class CameraController {
         }
     }
 
+    /// Peaking's analysis pauses while photos are developed and their review images drawn, so the GPU is theirs
+    /// (see `PeakingRenderer.setAnalysisPaused`). Counted, for shots taken in quick succession; a capture that
+    /// never arrives can't leave it paused for more than a few seconds.
+    private func photoProcessing(started: Bool) {
+        photosProcessing = max(0, photosProcessing + (started ? 1 : -1))
+        peakingRenderer?.setAnalysisPaused(photosProcessing > 0)
+        processingTimeout?.cancel()
+        guard photosProcessing > 0 else { return }
+        processingTimeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard let self, !Task.isCancelled else { return }
+            photosProcessing = 0
+            peakingRenderer?.setAnalysisPaused(false)
+        }
+    }
+
     /// The pixel size after cropping to `aspect`, from the capture's size.
     nonisolated private static func savedSize(width: Int?, height: Int?, aspect: AspectRatio) -> (width: Int, height: Int)? {
         guard let width, let height else { return nil }
@@ -521,6 +540,7 @@ final class CameraController {
             if shots.count > maxShots { shots.removeFirst(shots.count - maxShots) }
             if let location { resolvePlace(for: shot.id, at: location) }
         }
+        photoProcessing(started: false)
         #if DEBUG
         var lines = [String(format: "shot    %.1fs", shotTime)]
         if developTime > 0 { lines.append(String(format: "develop %.1fs", developTime)) }

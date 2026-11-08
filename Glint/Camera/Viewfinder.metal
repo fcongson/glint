@@ -23,8 +23,11 @@ kernel void peakingDownscale(texture2d<float, access::read> luma [[texture(0)]],
 constant float binomial[3] = { 1, 2, 1 };
 
 // 2a. 3×3 binomial blur, edges repeating their outermost pixel, so single-pixel noise doesn't count as detail.
+//     Reads the shrunk frame (luma in 0…255, scale 1) or, at full resolution, the camera's luma plane directly
+//     (0…1, scale 255), which saves a full-size copy every frame.
 kernel void peakingBlur(texture2d<float, access::read> small [[texture(0)]],
                         texture2d<float, access::write> blurred [[texture(1)]],
+                        constant float &lumaScale [[buffer(0)]],
                         uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(small.get_width(), small.get_height());
     int2 p = int2(gid);
@@ -36,7 +39,7 @@ kernel void peakingBlur(texture2d<float, access::read> small [[texture(0)]],
             sum += binomial[dx + 1] * binomial[dy + 1] * small.read(uint2(q)).r;
         }
     }
-    blurred.write(float4(sum / 16.0), gid);
+    blurred.write(float4(sum * lumaScale / 16.0), gid);
 }
 
 // 2b. High-pass with a Laplacian: the response to fine detail. The border stays 0.
@@ -63,6 +66,7 @@ kernel void peakingEdges(texture2d<float, access::read> response [[texture(0)]],
                          texture2d<float, access::write> edges [[texture(1)]],
                          texture2d<float, access::read> small [[texture(2)]],
                          device float4 *partials [[buffer(0)]],
+                         constant float &lumaScale [[buffer(1)]],
                          uint2 gid [[thread_position_in_grid]],
                          uint2 lid [[thread_position_in_threadgroup]],
                          uint2 group [[threadgroup_position_in_grid]],
@@ -71,7 +75,7 @@ kernel void peakingEdges(texture2d<float, access::read> response [[texture(0)]],
     int2 p = int2(gid);
     float value = 0, brightness = 0;
     if (p.x < size.x && p.y < size.y) {
-        brightness = small.read(gid).r;
+        brightness = small.read(gid).r * lumaScale;
         if (p.x >= 1 && p.y >= 1 && p.x < size.x - 1 && p.y < size.y - 1) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dx = -1; dx <= 1; dx++) value += response.read(uint2(p + int2(dx, dy))).r;

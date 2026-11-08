@@ -69,6 +69,7 @@ final class PeakingRenderer: @unchecked Sendable {
     private var thresholdGeneration = 0                         // behind `lock`; bumped when it starts over
     private var sweep = SweepTracker()                          // behind `lock`
     private var latestVerdicts: (any MTLBuffer)?                // behind `lock`: the last tile verdicts worked out
+    private var analysisPaused = false                          // behind `lock`
 
     // Only touched by whoever is rendering (the analysis queue, or a test).
     private var sensitivity = PeakingSensitivity.medium
@@ -161,6 +162,13 @@ final class PeakingRenderer: @unchecked Sendable {
         }
     }
 
+    /// While a photo is being developed and its review image drawn, peaking's per-frame analysis (the bulk of
+    /// the GPU work here, at full resolution) would hold them up, so frames are drawn without outlines until it's
+    /// resumed. Cameras black out their viewfinders around a capture for the same reason.
+    func setAnalysisPaused(_ paused: Bool) {
+        lock.withLock { analysisPaused = paused }
+    }
+
     // MARK: Rendering
 
     /// Draws one camera frame (420YpCbCr8 full range) with its peaking outlines. Does nothing while no view is
@@ -169,7 +177,8 @@ final class PeakingRenderer: @unchecked Sendable {
         guard let target = lock.withLock({ self.target }), target.size.width > 0, target.size.height > 0 else { return }
         let sensitivity = settings.sensitivity, appearance = settings.appearance
         let mode = settings.mode
-        let level = settings.outlines ? prepare(sensitivity, mode: mode) : nil
+        let outlines = settings.outlines && !lock.withLock({ analysisPaused })
+        let level = outlines ? prepare(sensitivity, mode: mode) : nil
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
@@ -185,7 +194,7 @@ final class PeakingRenderer: @unchecked Sendable {
         let scale = Self.fitScale(frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
                                   viewSize: target.size)
         var outlineMask = work.mask
-        if settings.outlines {
+        if outlines {
             // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
             let verdicts = mode == .sweep ? lock.withLock({ latestVerdicts }) : nil
             encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
@@ -219,7 +228,7 @@ final class PeakingRenderer: @unchecked Sendable {
                     matrix: Self.matrix(for: pixelBuffer),
                     color: SIMD4(appearance.color.rgb, 1),
                     lines: SIMD4(1 / Float(outlineMask.width), 1 / Float(outlineMask.height), reach,
-                                 settings.outlines ? 1 : 0),
+                                 outlines ? 1 : 0),
                     magnify: magnify)
                 encoder.setRenderPipelineState(drawPipeline)
                 encoder.setFragmentTexture(lumaTexture, index: 0)
@@ -236,7 +245,6 @@ final class PeakingRenderer: @unchecked Sendable {
                              groupCount: work.groups.width * work.groups.height,
                              pixelCount: work.small.width * work.small.height)
         let generation = lock.withLock { thresholdGeneration }
-        let outlines = settings.outlines
         let sweeping = mode == .sweep
         let verdictsOut = UncheckedBuffer(ownVerdicts)
         commandBuffer.addCompletedHandler { [self] _ in
@@ -289,16 +297,27 @@ final class PeakingRenderer: @unchecked Sendable {
         let size = MTLSize(width: work.small.width, height: work.small.height, depth: 1)
         let group = MTLSize(width: 16, height: 16, depth: 1)
 
-        var factor = UInt32(work.factor)
-        encoder.setComputePipelineState(downscalePipeline)
-        encoder.setTexture(luma, index: 0)
-        encoder.setTexture(work.small, index: 1)
-        encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
-        encoder.dispatchThreads(size, threadsPerThreadgroup: group)
+        // At full resolution, read the camera's luma plane directly rather than copying it first.
+        let source: any MTLTexture
+        var lumaScale: Float
+        if work.factor > 1 {
+            var factor = UInt32(work.factor)
+            encoder.setComputePipelineState(downscalePipeline)
+            encoder.setTexture(luma, index: 0)
+            encoder.setTexture(work.small, index: 1)
+            encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
+            encoder.dispatchThreads(size, threadsPerThreadgroup: group)
+            source = work.small
+            lumaScale = 1
+        } else {
+            source = luma
+            lumaScale = 255
+        }
 
         encoder.setComputePipelineState(blurPipeline)
-        encoder.setTexture(work.small, index: 0)
+        encoder.setTexture(source, index: 0)
         encoder.setTexture(work.blurred, index: 1)
+        encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 0)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
         encoder.setComputePipelineState(responsePipeline)
@@ -309,8 +328,9 @@ final class PeakingRenderer: @unchecked Sendable {
         encoder.setComputePipelineState(edgesPipeline)
         encoder.setTexture(work.response, index: 0)
         encoder.setTexture(work.edges, index: 1)
-        encoder.setTexture(work.small, index: 2)
+        encoder.setTexture(source, index: 2)
         encoder.setBuffer(partials, offset: 0, index: 0)
+        encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 1)
         encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)   // whole groups, for the sums
 
         var params = MaskParams(cutoff: level.map { max(Self.minimumStrength, Float($0)) } ?? .infinity,
