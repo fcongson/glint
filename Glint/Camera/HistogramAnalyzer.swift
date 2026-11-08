@@ -77,6 +77,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         var peaking = false
         var sensitivity = PeakingSensitivity.medium
         var appearance = PeakingAppearance()
+        var mode = PeakingMode.standard
         var any: Bool { histogram || peaking }
     }
 
@@ -124,7 +125,8 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             publishHistogram(histogram)
         }
         if doPeaking {
-            peaking?.render(pixelBuffer, sensitivity: current.sensitivity, appearance: current.appearance)
+            peaking?.render(pixelBuffer, sensitivity: current.sensitivity, appearance: current.appearance,
+                            mode: current.mode)
         }
     }
 }

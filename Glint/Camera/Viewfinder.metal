@@ -56,18 +56,21 @@ kernel void peakingResponse(texture2d<float, access::read> blurred [[texture(0)]
 
 // 3. Average the response over 3×3. Along an edge this evens out the pixel-to-pixel wobble that otherwise breaks
 //    outlines into dots; an isolated noise spike is diluted instead. The outer ring stays 0. Each 16×16
-//    threadgroup also sums its values and their squares into `partials`, for the frame's mean and deviation.
+//    threadgroup (a tile) also sums its values, their squares and its brightness into `partials`: the frame's
+//    mean and deviation, and each tile's sharpness and brightness for sweep peaking.
 kernel void peakingEdges(texture2d<float, access::read> response [[texture(0)]],
                          texture2d<float, access::write> edges [[texture(1)]],
-                         device float2 *partials [[buffer(0)]],
+                         texture2d<float, access::read> small [[texture(2)]],
+                         device float4 *partials [[buffer(0)]],
                          uint2 gid [[thread_position_in_grid]],
                          uint2 lid [[thread_position_in_threadgroup]],
                          uint2 group [[threadgroup_position_in_grid]],
                          uint2 groups [[threadgroups_per_grid]]) {
     int2 size = int2(response.get_width(), response.get_height());
     int2 p = int2(gid);
-    float value = 0;
+    float value = 0, brightness = 0;
     if (p.x < size.x && p.y < size.y) {
+        brightness = small.read(gid).r;
         if (p.x >= 1 && p.y >= 1 && p.x < size.x - 1 && p.y < size.y - 1) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dx = -1; dx <= 1; dx++) value += response.read(uint2(p + int2(dx, dy))).r;
@@ -77,9 +80,9 @@ kernel void peakingEdges(texture2d<float, access::read> response [[texture(0)]],
         edges.write(float4(value), gid);
     }
 
-    threadgroup float2 shared[256];
+    threadgroup float4 shared[256];
     uint i = lid.y * 16 + lid.x;
-    shared[i] = float2(value, value * value);
+    shared[i] = float4(value, value * value, brightness, 0);
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (uint stride = 128; stride > 0; stride >>= 1) {
         if (i < stride) shared[i] += shared[i + stride];
@@ -88,14 +91,28 @@ kernel void peakingEdges(texture2d<float, access::read> response [[texture(0)]],
     if (i == 0) partials[group.y * groups.x + group.x] = shared[0];
 }
 
+struct MaskParams {
+    float cutoff;       // the frame's threshold
+    uint tilesAcross;
+    uint sweep;         // 1: use each tile's verdict from `tiles` (see SweepTracker)
+};
+
 // 4. Mark what clears the cutoff and has at least two marked neighbours: edges are lines, stray noise is dots.
+//    In sweep mode a tile's verdict overrides the frame's cutoff: its own cutoff at its sharpest, none past it.
 kernel void peakingMask(texture2d<float, access::read> edges [[texture(0)]],
                         texture2d<float, access::write> mask [[texture(1)]],
-                        constant float &cutoff [[buffer(0)]],
+                        constant MaskParams &params [[buffer(0)]],
+                        device const float *tiles [[buffer(1)]],
                         uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(edges.get_width(), edges.get_height());
     int2 p = int2(gid);
     if (p.x >= size.x || p.y >= size.y) return;
+    float cutoff = params.cutoff;
+    if (params.sweep != 0) {
+        float verdict = tiles[(gid.y / 16) * params.tilesAcross + gid.x / 16];
+        if (verdict < 0) cutoff = INFINITY;
+        else if (verdict > 0) cutoff = verdict;
+    }
     float marked = 0;
     if (p.x >= 1 && p.y >= 1 && p.x < size.x - 1 && p.y < size.y - 1 && edges.read(gid).r > cutoff) {
         int neighbours = 0;

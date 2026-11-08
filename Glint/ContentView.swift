@@ -241,12 +241,17 @@ struct ContentView: View {
         let sensitivity = Binding(get: { cam.peakingSensitivity }, set: { cam.setPeakingSensitivity($0) })
         let color = Binding(get: { cam.peakingAppearance.color }, set: { cam.setPeakingColor($0) })
         let lines = Binding(get: { cam.peakingAppearance.lines }, set: { cam.setPeakingLines($0) })
+        let mode = Binding(get: { cam.peakingMode }, set: { cam.setPeakingMode($0) })
         let look = cam.peakingAppearance
         let value = cam.isPeakingEnabled
-            ? "\(SettingsText.onOff(true)), \(cam.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
+            ? "\(SettingsText.onOff(true)), \(cam.peakingMode.title), \(cam.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
             : SettingsText.onOff(false)
         return Menu {
             // Submenus, each showing its current choice.
+            Picker("Mode", selection: mode) {
+                ForEach(PeakingMode.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
             Picker("Sensitivity", selection: sensitivity) {
                 ForEach(PeakingSensitivity.allCases, id: \.self) { Text($0.title).tag($0) }
             }
@@ -269,6 +274,9 @@ struct ContentView: View {
         .accessibilityLabel("Focus peaking")
         .accessibilityValue(value)
         .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; touch and hold for colour and lines.")
+        .accessibilityAction(named: cam.peakingMode == .sweep ? "Standard mode" : "Sweep mode") {
+            cam.setPeakingMode(cam.peakingMode == .sweep ? .standard : .sweep)
+        }
         .accessibilityAction(named: "Next colour") {
             let all = PeakingColor.allCases
             cam.setPeakingColor(all[(look.color.rawValue + 1) % all.count])

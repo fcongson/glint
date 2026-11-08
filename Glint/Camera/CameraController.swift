@@ -49,6 +49,7 @@ final class CameraController {
     private(set) var isPeakingEnabled = true
     private(set) var peakingSensitivity = PeakingSensitivity.medium
     private(set) var peakingAppearance = PeakingAppearance()
+    private(set) var peakingMode = PeakingMode.standard
     /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
     private var pausedForLowPower = (histogram: false, peaking: false)
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
@@ -305,6 +306,12 @@ final class CameraController {
         sendAnalysis()
     }
 
+    func setPeakingMode(_ mode: PeakingMode) {
+        guard mode != peakingMode else { return }
+        peakingMode = mode
+        sendAnalysis()
+    }
+
     func setPeakingColor(_ color: PeakingColor) {
         guard color != peakingAppearance.color else { return }
         peakingAppearance.color = color
@@ -352,9 +359,10 @@ final class CameraController {
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
         let histogram = isHistogramEnabled, peaking = isPeakingShown, sensitivity = peakingSensitivity
-        let appearance = peakingAppearance
+        let appearance = peakingAppearance, mode = peakingMode
         capture.enqueue {
-            $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity, appearance: appearance)
+            $0.setAnalysis(histogram: histogram, peaking: peaking, sensitivity: sensitivity, appearance: appearance,
+                           mode: mode)
         }
     }
 
