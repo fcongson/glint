@@ -116,7 +116,7 @@ struct ContentView: View {
                     FocusBox().id(focusTapCount).position(p).accessibilityHidden(true)
                 }
                 // In manual focus, where the magnifier will punch in.
-                if !cam.isAutofocus, !cam.isMagnifying, cam.isMagnifierAvailable {
+                if !cam.isAutofocus, !cam.isMagnifying, cam.isMagnifierAvailable, cam.isMagnifierEnabled {
                     GeometryReader { geo in
                         MagnifyFrame()
                             .position(x: cam.magnifyPoint.x * geo.size.width, y: cam.magnifyPoint.y * geo.size.height)
@@ -266,11 +266,9 @@ struct ContentView: View {
                       onChange: { cam.setLensPosition($0) }, onTouch: { cam.focusRailTouched($0) })
             peakingChip
             if cam.isMagnifierAvailable {
-                chip("MAG", label: "Focus magnifier",
-                     value: cam.isMagnifierLocked
-                        ? "\(SettingsText.onOff(true)), \(cam.magnification.spoken)" : SettingsText.onOff(false),
-                     on: cam.isMagnifierLocked) { cam.setMagnifierLocked(!cam.isMagnifierLocked) }
-                    .accessibilityHint("Magnifies the focus point to check focus. It also comes on while you touch the focus rail.")
+                chip("MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
+                     on: cam.isMagnifierEnabled) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
+                    .accessibilityHint("When on, focusing with the focus rail magnifies the focus point so you can check focus.")
             }
         }
         .padding(.trailing, 8)

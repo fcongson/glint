@@ -79,11 +79,13 @@ struct FocusRail: View {
                             : SettingsText.focusPosition(position))
         .accessibilityHint("Swipe up or down to focus by hand. This turns autofocus off.")
         .accessibilityAdjustableAction { direction in
+            onTouch(true)   // a VoiceOver adjustment counts as a touch, so the magnifier comes on for it too
             switch direction {
             case .increment: onChange(FocusScale.stepped(position, by: 1))
             case .decrement: onChange(FocusScale.stepped(position, by: -1))
             @unknown default: break
             }
+            onTouch(false)
         }
     }
 
