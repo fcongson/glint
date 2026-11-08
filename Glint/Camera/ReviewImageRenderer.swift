@@ -18,6 +18,16 @@ actor PhotoDeveloper {
     func develop(_ dng: Data, aspect: AspectRatio) -> Data? {
         renderer.developHEIC(from: dng, aspect: aspect)
     }
+
+    /// The first RAW decode after launch is slow (seconds) while Core Image prepares its RAW pipeline and GPU
+    /// code; every one after is quick. Doing it once at launch on a tiny bundled DNG means the first real shot
+    /// reviews and develops as fast as the rest. Runs here, so a shot taken meanwhile simply queues behind it.
+    func warmUp() {
+        guard let url = Bundle.main.url(forResource: "WarmUp", withExtension: "dng"),
+              let dng = try? Data(contentsOf: url) else { return }
+        _ = renderer.render(dng, isRAW: true)
+        _ = renderer.developHEIC(from: dng, aspect: .fourThree)
+    }
 }
 
 /// Turns captured photo data into the small image shown in review.
