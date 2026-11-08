@@ -104,6 +104,12 @@ final class CameraController {
             let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
             capture.enqueue { $0.configureAndStart(withAudio: micGranted) }
         }
+        // Prepare RAW decoding before the first shot, once the camera has had a moment to start.
+        let developer = developer
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .seconds(1))
+            await developer.warmUp()
+        }
     }
 
     /// The preview layer is now showing the session, so rotation can be tied to it.
