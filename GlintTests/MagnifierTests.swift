@@ -25,7 +25,7 @@ struct MagnifierTests {
     @Test func pointsMapThroughTheFittedPicture() {
         // 16:9 video stands 9:16 in the 3:4 viewfinder: three quarters of the width. A tap at 5/8 across the
         // view is 2/3 across the picture.
-        let centre = Magnifier.pictureCenter(viewCenter: CGPoint(x: 0.625, y: 0.5), scale: SIMD2(0.75, 1), zoom: 1)
+        let centre = Magnifier.pictureCenter(viewCenter: CGPoint(x: 0.625, y: 0.5), scale: SIMD2(0.75, 1), zoom: 4)
         #expect(abs(centre.x - 2.0 / 3.0) < 0.0001 && centre.y == 0.5)
     }
 
