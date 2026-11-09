@@ -245,7 +245,7 @@ struct ContentView: View {
         let photo = cam.captureMode == .photo
         let file = SettingsText.fileType(cam.fileType)
         let title = photo
-            ? (cam.aspect.isFullSensor ? file : "\(file) \(SettingsText.aspect(cam.aspect))")
+            ? "\(file) \(SettingsText.aspect(cam.aspect))"   // always both, so the readout doesn't change shape
             : SettingsText.videoFormat(cam.videoFormat)
         return Button {
             if photo { openSet(on: .fileType) } else { showingVideoFormat = true }
