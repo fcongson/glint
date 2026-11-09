@@ -56,6 +56,9 @@ final class CameraController {
     private(set) var isZebraEnabled = false
     private(set) var zebraLevel = ZebraLevel.hundred
     private var pausedForLowPower = (histogram: false, peaking: false, zebras: false)
+    /// What heat or load switched off, so it can come back when the pressure eases. Cleared by any manual change.
+    private var pausedForPressure = (peaking: false, zebras: false)
+    private(set) var systemPressure = SystemPressure.nominal
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
 
     // Focus magnifier (see Magnifier.swift). The point is where the viewfinder punches in: in manual focus a tap
@@ -200,6 +203,8 @@ final class CameraController {
             photoCaptured(photo)
         case .deferredStartFinished:
             stopTimer("outputs", appending: true)   // under launch's line: preview first, then everything else
+        case .systemPressure(let level):
+            systemPressureChanged(level)
         case .resumed:
             stopTimer("resume")
         case .recordingStarted:
@@ -359,6 +364,7 @@ final class CameraController {
         guard on != isPeakingEnabled, !on || peakingRenderer != nil else { return }
         isPeakingEnabled = on
         pausedForLowPower.peaking = false   // the user's choice now
+        pausedForPressure.peaking = false
         sendAnalysis()
     }
 
@@ -446,10 +452,48 @@ final class CameraController {
         }
     }
 
+    /// Heat or load on the camera changed. Glint gives things up in order (see `SystemPressure`): peaking analyses
+    /// every other frame, then peaking and zebras go off, then PHOTO's preview drops to 15 fps. Each comes back as
+    /// the pressure eases, unless Low Power Mode has come on meanwhile, which then keeps them off until it ends.
+    private func systemPressureChanged(_ level: SystemPressure) {
+        let old = systemPressure
+        guard level != old else { return }
+        systemPressure = level
+        #if DEBUG
+        post("System pressure: \(level)")   // a message below, if any, replaces it
+        #endif
+        peakingRenderer?.setAnalysisInterval(level.peakingInterval)
+        if level.reducesFrameRate != old.reducesFrameRate {
+            let reduced = level.reducesFrameRate
+            capture.enqueue { $0.setFrameRateReduced(reduced) }
+        }
+        if level.pausesViewfinderAids, !old.pausesViewfinderAids, isPeakingEnabled || isZebraEnabled {
+            pausedForPressure = (isPeakingEnabled, isZebraEnabled)
+            isPeakingEnabled = false
+            isZebraEnabled = false
+            sendAnalysis()
+            post("iPhone is hot: peaking and zebras off for now")
+        } else if !level.pausesViewfinderAids, old.pausesViewfinderAids,
+                  pausedForPressure.peaking || pausedForPressure.zebras {
+            if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                // Low Power Mode still wants them off: hand them over, to come back when it ends.
+                pausedForLowPower.peaking = pausedForLowPower.peaking || pausedForPressure.peaking
+                pausedForLowPower.zebras = pausedForLowPower.zebras || pausedForPressure.zebras
+            } else {
+                if pausedForPressure.peaking { isPeakingEnabled = true }
+                if pausedForPressure.zebras { isZebraEnabled = true }
+                sendAnalysis()
+                post("Cooler again: peaking and zebras back on")
+            }
+            pausedForPressure = (false, false)
+        }
+    }
+
     func setZebraEnabled(_ on: Bool) {
         guard on != isZebraEnabled, !on || peakingRenderer != nil else { return }
         isZebraEnabled = on
         pausedForLowPower.zebras = false   // the user's choice now
+        pausedForPressure.zebras = false
         sendAnalysis()
     }
 

@@ -70,12 +70,14 @@ final class PeakingRenderer: @unchecked Sendable {
     private var sweep = SweepTracker()                          // behind `lock`
     private var latestVerdicts: (any MTLBuffer)?                // behind `lock`: the last tile verdicts worked out
     private var analysisPaused = false                          // behind `lock`
+    private var analysisInterval = 1                            // behind `lock`: analyse every nth frame
 
     // Only touched by whoever is rendering (the analysis queue, or a test).
     private var sensitivity = PeakingSensitivity.medium
     private var mode = PeakingMode.standard
     private var work: Work?
     private var slot = 0
+    private var frameIndex = 0
     private var colorSpaceName: CFString?
     private var pooled: (factor: Int, texture: any MTLTexture)?
 
@@ -169,6 +171,12 @@ final class PeakingRenderer: @unchecked Sendable {
         lock.withLock { analysisPaused = paused }
     }
 
+    /// Under thermal or system pressure, peaking analyses every `interval`th frame and draws the others with the
+    /// last outlines, roughly halving its GPU work at 2. The picture itself still updates every frame.
+    func setAnalysisInterval(_ interval: Int) {
+        lock.withLock { analysisInterval = max(1, interval) }
+    }
+
     // MARK: Rendering
 
     /// Draws one camera frame (420YpCbCr8 full range) with its peaking outlines. Does nothing while no view is
@@ -178,6 +186,9 @@ final class PeakingRenderer: @unchecked Sendable {
         let sensitivity = settings.sensitivity, appearance = settings.appearance
         let mode = settings.mode
         let outlines = settings.outlines && !lock.withLock({ analysisPaused })
+        let interval = lock.withLock { analysisInterval }
+        frameIndex &+= 1
+        let analyse = outlines && (interval == 1 || frameIndex % interval == 0)   // otherwise reuse the last outlines
         let level = outlines ? prepare(sensitivity, mode: mode) : nil
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -194,7 +205,9 @@ final class PeakingRenderer: @unchecked Sendable {
         let scale = Self.fitScale(frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
                                   viewSize: target.size)
         var outlineMask = work.mask
-        if outlines {
+        if outlines && !analyse, settings.magnifier == nil, let last = pooled?.texture {
+            outlineMask = last
+        } else if analyse {
             // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
             let verdicts = mode == .sweep ? lock.withLock({ latestVerdicts }) : nil
             encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
@@ -250,7 +263,7 @@ final class PeakingRenderer: @unchecked Sendable {
         let sweeping = mode == .sweep
         let verdictsOut = UncheckedBuffer(ownVerdicts)
         commandBuffer.addCompletedHandler { [self] _ in
-            guard outlines else {
+            guard analyse else {
                 inFlight.signal()
                 return
             }

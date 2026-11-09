@@ -57,6 +57,8 @@ enum CaptureEvent: Sendable {
     case photoCaptured(CapturedPhoto)
     /// Every output deferred at launch has started (iOS 26+), so all of the camera is ready, not just the preview.
     case deferredStartFinished
+    /// Heat or load on the camera changed (`AVCaptureDevice.systemPressureState`).
+    case systemPressure(SystemPressure)
     /// The camera is running again after the review screen closed.
     case resumed
     case recordingStarted
@@ -109,6 +111,8 @@ actor CaptureSession {
     private var pendingExposure: (duration: CMTime, iso: Float)?
     private var audioMeterTask: Task<Void, Never>?
     private var micInput: AVCaptureDeviceInput?   // attached only in VIDEO, see `setMicrophone`
+    private var frameRateReduced = false          // critical system pressure, PHOTO only; see `setFrameRateReduced`
+    private var raisedMaxFrameDuration = false    // whether reducing the frame rate also lengthened the longest frame
     private var deferredStartObserver: NSObject?  // the session's deferred start delegate (iOS 26+), kept alive here
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
@@ -284,6 +288,7 @@ actor CaptureSession {
         pendingExposure = nil   // meant for the previous lens
         exposureInFlight = nil
         observeMeterAndLens(d)
+        if frameRateReduced { applyFrameRateLimit(d) }   // a new lens starts at its format's default
         return DeviceInfo(lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
                           aperture: d.lensAperture)
     }
@@ -308,7 +313,43 @@ actor CaptureSession {
             d.observe(\.deviceWhiteBalanceGains, options: [.new]) { d, _ in
                 temperature.send(d.temperatureAndTintValues(for: d.deviceWhiteBalanceGains).temperature)
             },
+            d.observe(\.systemPressureState, options: [.initial, .new]) { [emit] d, _ in
+                emit.yield(.systemPressure(SystemPressure(d.systemPressureState.level)))
+            },
         ]
+    }
+
+    // MARK: System pressure
+
+    /// Under critical system pressure the preview drops to `SystemPressure.reducedFrameRate` in PHOTO, the last step
+    /// before the system would stop the camera. VIDEO keeps its frame rate: it's the recording's.
+    func setFrameRateReduced(_ reduced: Bool) {
+        guard reduced != frameRateReduced else { return }
+        frameRateReduced = reduced
+        if let d = device { applyFrameRateLimit(d) }
+    }
+
+    /// Caps the frame rate by setting the shortest frame (`activeVideoMinFrameDuration`). The longest frame is only
+    /// lengthened if it has to be, so a manual exposure longer than the reduced frame isn't cut short; restoring
+    /// puts back only what was changed.
+    private func applyFrameRateLimit(_ d: AVCaptureDevice) {
+        guard !isVideo else { return }
+        let rate = SystemPressure.reducedFrameRate
+        withLockedDevice(d, failure: "Frame rate") { d in
+            if frameRateReduced {
+                guard d.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= Double(rate) }) else { return }
+                let frame = CMTime(value: 1, timescale: rate)
+                if CMTimeCompare(d.activeVideoMaxFrameDuration, frame) < 0 {
+                    d.activeVideoMaxFrameDuration = frame
+                    raisedMaxFrameDuration = true
+                }
+                d.activeVideoMinFrameDuration = frame
+            } else {
+                d.activeVideoMinFrameDuration = .invalid   // the format's default
+                if raisedMaxFrameDuration { d.activeVideoMaxFrameDuration = .invalid }
+                raisedMaxFrameDuration = false
+            }
+        }
     }
 
     // MARK: Rotation
@@ -742,6 +783,11 @@ actor CaptureSession {
         }
         updateResponsiveCapture()
         session.commitConfiguration()
+        if !video {
+            raisedMaxFrameDuration = false   // the preset put the format's defaults back
+            if frameRateReduced { applyFrameRateLimit(d) }
+        }
+        if video { checkHardwareCost() }
         restoreAfterReconfiguration()
         let info = applyDeviceSettings(d)
         emit.yield(.videoCapabilities(videoCapabilities(d)))
@@ -773,9 +819,18 @@ actor CaptureSession {
         videoFormat = format
         guard isVideo, needsDeviceFormat else { return }
         configureVideoFormat(d)
+        checkHardwareCost()
         let info = applyDeviceSettings(d)
         emit.yield(.videoCapabilities(videoCapabilities(d)))
         emit.yield(.formatChanged(info))
+    }
+
+    /// Apple: after committing a configuration, check `hardwareCost` is at or below 1; above it, the camera hardware
+    /// can't run it. Glint's formats come from what the lens reports, so this shouldn't fire; if it does, say so.
+    private func checkHardwareCost() {
+        if session.hardwareCost > 1 {
+            emit.yield(.status("This video format is more than this iPhone can sustain"))
+        }
     }
 
     /// Picks and activates the device format for `videoFormat`, settling on the nearest one the lens has.
