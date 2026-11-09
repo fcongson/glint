@@ -113,6 +113,7 @@ actor CaptureSession {
     private var micInput: AVCaptureDeviceInput?   // attached only in VIDEO, see `setMicrophone`
     private var frameRateReduced = false          // critical system pressure, PHOTO only; see `setFrameRateReduced`
     private var raisedMaxFrameDuration = false    // whether reducing the frame rate also lengthened the longest frame
+    private var preparePending = false            // a photo preparation is queued; see `schedulePhotoPreparation`
     private var deferredStartObserver: NSObject?  // the session's deferred start delegate (iOS 26+), kept alive here
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
@@ -265,7 +266,7 @@ actor CaptureSession {
         // waits for the new pipeline (measured 0.1–0.25 s each on a lens switch), so it's done once, not twice.
         // Queued rather than done here, so it runs after the command that reconfigured has finished and reported
         // the new lens or mode: preparing (with #10's preview image) can take a moment, and shouldn't delay that.
-        enqueue { $0.preparePhotoSettings() }
+        schedulePhotoPreparation()
     }
 
     /// Where clipped white sits depends on the lens and the format's processing, so it's learned for each.
@@ -612,6 +613,7 @@ actor CaptureSession {
             if !session.isRunning {
                 session.startRunning()   // blocks until frames are flowing
                 emit.yield(.resumed)
+                schedulePhotoPreparation()   // skipped while it was stopped
             }
         } else if session.isRunning, !movieOutput.isRecording {
             session.stopRunning()
@@ -772,11 +774,25 @@ actor CaptureSession {
     /// Has the photo output set up its buffers for the next shot now, rather than after the shutter press, as Apple
     /// recommends as soon as a mode is active. A reconfiguration (lens, format, preset) can undo it, so this runs
     /// after each one. Nothing to prepare in VIDEO.
+    ///
+    /// Several reconfigurations in a row (PK on, then a lens) queue one prepare, not several: a new prepare cancels
+    /// the one in progress, which then reports a failure. A failure is harmless anyway (the shot is prepared when the
+    /// shutter is pressed instead), so it's only shown in debug builds.
     private func preparePhotoSettings() {
-        guard !isVideo, session.outputs.contains(photoOutput) else { return }
+        preparePending = false
+        guard !isVideo, session.isRunning, session.outputs.contains(photoOutput) else { return }
         photoOutput.setPreparedPhotoSettingsArray([makePhotoSettings().0]) { [emit] prepared, error in
-            if !prepared, let error { emit.yield(.status("Couldn't prepare the camera: \(error.localizedDescription)")) }
+            #if DEBUG
+            if !prepared, let error { emit.yield(.status("Prepare failed (harmless): \(error.localizedDescription)")) }
+            #endif
         }
+    }
+
+    /// Queues `preparePhotoSettings` to run after the current command, once however many reconfigurations ask.
+    private func schedulePhotoPreparation() {
+        guard !preparePending else { return }
+        preparePending = true
+        enqueue { $0.preparePhotoSettings() }
     }
 
     // MARK: Video formats
