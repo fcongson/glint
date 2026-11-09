@@ -3,8 +3,12 @@ import UIKit
 
 struct ContentView: View {
     @State private var cam = CameraController()
-    @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
-    @State private var showingFormat = false
+    /// How the phone is held, as an angle. Controls don't turn with it, as on a camera; only the focus rail moves to
+    /// stay on your chosen side (see `railAlignment`), and review turns photos upright.
+    @State private var uiAngle: Angle = .zero
+    @AppStorage("focusRailSide") private var railSide: RailSide = .right
+    @State private var showingSet = false   // the SET panel over the picture
+    @State private var setTile: SetMenu.Tile = .peakingMode   // the tile SET opens on
     @State private var showingVideoFormat = false
     @State private var selected: ManualParam = .shutter   // kept here so MANUAL comes back to the same ruler
     @State private var flash = false
@@ -26,15 +30,6 @@ struct ContentView: View {
             VideoFormatSheet(format: cam.videoFormat, capabilities: cam.videoCapabilities,
                              onChange: { cam.setVideoFormat($0) }, onDone: { showingVideoFormat = false })
                 .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(Color(white: 0.1))
-                .preferredColorScheme(.dark)
-        }
-        .sheet(isPresented: $showingFormat) {
-            PhotoFormatSheet(fileType: cam.fileType, aspect: cam.aspect,
-                             onFileType: { cam.setFileType($0) }, onAspect: { cam.setAspect($0) },
-                             onDone: { showingFormat = false })
-                .presentationDetents([.height(340)])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color(white: 0.1))
                 .preferredColorScheme(.dark)
@@ -103,7 +98,6 @@ struct ContentView: View {
                 }
                 if cam.isMagnifying {
                     overlayLabel("\(cam.magnification.title)  MAGNIFIED")
-                        .rotationEffect(uiAngle)
                         .frame(maxHeight: .infinity, alignment: .top)
                         .padding(.top, 10)
                         .allowsHitTesting(false)
@@ -129,32 +123,24 @@ struct ContentView: View {
                     // Reserve the rotated footprint so it stays inside the corner.
                     let size = HistogramView.size
                     HistogramContainer(model: cam.histogramModel)
-                        .rotationEffect(uiAngle)
-                        .frame(width: uiAngle.isQuarterTurn ? size.height : size.width,
-                               height: uiAngle.isQuarterTurn ? size.width : size.height)
+                        .frame(width: size.width, height: size.height)
                         .padding(8)
                         .allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .trailing) {
-                // Focus lives on the viewfinder's edge, where the thumb can reach it while framing. It's there in
-                // AUTO too: exposure and focus are separate, as on a camera.
-                focusControls.shownWhenReady(cam.isCameraReady)
-            }
-            .overlay(alignment: .leading) {
-                // Exposure aids on the opposite edge, mirroring focus: grouped by purpose, as on a camera, and
-                // clear of the Dynamic Island. Centred, below the histogram and above the status messages.
-                exposureAids.shownWhenReady(cam.isCameraReady)
-            }
-            .overlay(alignment: .bottom) {
-                // Lens buttons sit over the bottom of the preview, as in the system Camera, so the controls below
-                // fit without shrinking the preview.
-                if cam.lenses.count > 1 {
-                    lensPicker
-                        .padding(4)
-                        .background(Color.black.opacity(0.45), in: Capsule())
-                        .padding(.bottom, 10)
-                }
+            .overlay(alignment: railAlignment) {
+                // The focus rail stays on the viewfinder's edge, where the thumb reaches it while you look at the
+                // subject. It's there in AUTO too: exposure and focus are separate, as on a camera. Everything else
+                // is in the tool row below, off the picture. Held sideways, it moves to the edge that's now on your
+                // chosen side and turns with the phone, so ∞ is still up and the drag still runs up and down.
+                let sideways = uiAngle.isQuarterTurn
+                focusControls
+                    .frame(width: Self.railColumn.width, height: Self.railColumn.height)
+                    .rotationEffect(railAngle)
+                    .frame(width: sideways ? Self.railColumn.height : Self.railColumn.width,
+                           height: sideways ? Self.railColumn.width : Self.railColumn.height)
+                    .animation(.easeInOut(duration: 0.3), value: railAlignment)
+                    .shownWhenReady(cam.isCameraReady)
             }
             .overlay(alignment: .bottomLeading) {
                 // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
@@ -163,16 +149,54 @@ struct ContentView: View {
                     if !cam.status.isEmpty { overlayLabel(cam.status) }
                     if !cam.timing.isEmpty { overlayLabel(cam.timing) }
                 }
-                .rotationEffect(uiAngle)
                 .padding(8)
-                .padding(.bottom, cam.lenses.count > 1 ? 48 : 0)   // clear of the lens buttons
                 .allowsHitTesting(false)
             }
-            Spacer(minLength: 0)
+            .overlay {
+                if showingSet {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                            .onTapGesture { showingSet = false }
+                            .accessibilityHidden(true)
+                        SetMenu(cam: cam, angle: .zero, selected: $setTile, onDone: { showingSet = false })
+                    }
+                    .transition(.opacity)
+                }
+            }
+            // On a shorter screen the picture gives way first (a little narrower), not the controls.
+            .layoutPriority(-1)
+            toolRow.shownWhenReady(cam.isCameraReady)
+            Spacer(minLength: 0).layoutPriority(-2)
             controls
         }
         .ignoresSafeArea(edges: .top)
     }
+
+    /// AF over the focus rail, laid out upright, before it's turned for landscape.
+    private static let railColumn = CGSize(width: 64, height: FocusRail.trackHeight + 100)
+
+    /// The phone's orientation as quarter turns clockwise: 0 portrait, 1 landscape left (top of the phone on the
+    /// left), 2 upside down, 3 landscape right.
+    private var quarterTurns: Int {
+        let q = Int((uiAngle.degrees / 90).rounded()) % 4
+        return q < 0 ? q + 4 : q
+    }
+
+    /// Which edge of the picture is on the chosen side, the way the phone is held. Landscape left puts the
+    /// picture's bottom edge on your right; landscape right, its top edge.
+    private var railAlignment: Alignment {
+        let right = railSide == .right
+        switch quarterTurns {
+        case 1: return right ? .bottom : .top
+        case 2: return right ? .leading : .trailing
+        case 3: return right ? .top : .bottom
+        default: return right ? .trailing : .leading
+        }
+    }
+
+    /// The rail turned to match the phone, so ∞ is at the top as you hold it. The running angle rather than the
+    /// quarter turns, so it turns the short way round.
+    private var railAngle: Angle { uiAngle }
 
     /// The interface is locked to portrait; like the system Camera, only the contents rotate with the device.
     private func updateAngle(for orientation: UIDeviceOrientation) {
@@ -192,26 +216,23 @@ struct ContentView: View {
 
     // MARK: Top bar
 
-    /// Chips sit either side of the Dynamic Island, so the middle of the bar is left clear. The settings themselves
-    /// are shown by the controls at the bottom, so the bar holds only the format, the histogram switch and the meter.
+    /// SET and the format on the left of the Dynamic Island, the meter on the right: like a camera's info display,
+    /// the format is a readout rather than a chip. Tapping it opens where it's changed: SET's file tile in PHOTO,
+    /// the video format panel in VIDEO.
     private func topBar(topPadding: CGFloat) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             if cam.isRecording {
-                RecordingTimer(cam: cam, angle: uiAngle)
-            } else if cam.captureMode == .photo {
-                // Opens the photo format panel; the chip shows the file type and, when cropped, the aspect.
-                let file = SettingsText.fileType(cam.fileType)
-                let title = cam.aspect.isFullSensor ? file : "\(file) \(SettingsText.aspect(cam.aspect))"
-                chip(title, label: "Photo format", value: "\(file), \(SettingsText.aspectSpoken(cam.aspect))",
-                     on: false) { showingFormat = true }
-                    .accessibilityHint("Opens file type and aspect ratio")
+                RecordingTimer(cam: cam, angle: .zero)
             } else {
-                let title = SettingsText.videoFormat(cam.videoFormat)
-                chip(title, label: "Video format", value: title, on: false) { showingVideoFormat = true }
-                    .accessibilityHint("Opens resolution, frame rate, codec and exposure lock")
+                Button { openSet(on: setTile) } label: { chipLabel("SET") }
+                    .buttonStyle(ChipStyle(isOn: showingSet, angle: .zero, outlined: true))
+                    .accessibilityLabel("Settings")
+                    .accessibilityValue(showingSet ? "Open" : "Closed")
+                    .accessibilityHint("Peaking, zebra level, file type and aspect ratio")
+                formatReadout
             }
-            Spacer(minLength: 140)   // the Dynamic Island
-            LiveExposureMeter(cam: cam, angle: uiAngle)
+            Spacer(minLength: 100)   // the Dynamic Island
+            LiveExposureMeter(cam: cam, angle: .zero)
         }
         .shownWhenReady(cam.isCameraReady)
         .padding(.horizontal, 16)
@@ -219,18 +240,41 @@ struct ContentView: View {
         .padding(.bottom, 10)
     }
 
+    /// The photo or video format, as plain text.
+    private var formatReadout: some View {
+        let photo = cam.captureMode == .photo
+        let file = SettingsText.fileType(cam.fileType)
+        let title = photo
+            ? "\(file) \(SettingsText.aspect(cam.aspect))"   // always both, so the readout doesn't change shape
+            : SettingsText.videoFormat(cam.videoFormat)
+        return Button {
+            if photo { openSet(on: .fileType) } else { showingVideoFormat = true }
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(photo ? "Photo format" : "Video format")
+        .accessibilityValue(photo ? "\(file), \(SettingsText.aspectSpoken(cam.aspect))" : title)
+        .accessibilityHint(photo ? "Opens file type and aspect ratio in Settings" : "Opens resolution, frame rate, codec and exposure lock")
+    }
+
+    private func openSet(on tile: SetMenu.Tile) {
+        if showingSet && tile == setTile { withAnimation(.easeOut(duration: 0.15)) { showingSet = false }; return }
+        setTile = tile
+        withAnimation(.easeOut(duration: 0.15)) { showingSet = true }
+    }
+
     /// AF on top of the focus rail. Turning AF off, or touching the rail, locks the lens where autofocus left it.
     private var focusControls: some View {
         VStack(spacing: 10) {
             chip("AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
                  on: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
-            LiveFocusRail(cam: cam, angle: uiAngle)
-            peakingChip
-            if cam.isMagnifierAvailable {
-                chip("MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
-                     on: cam.isMagnifierEnabled) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
-                    .accessibilityHint("When on, focusing with the focus rail magnifies the focus point so you can check focus.")
-            }
+            LiveFocusRail(cam: cam, angle: .zero)
         }
         .padding(.trailing, 8)
     }
@@ -242,92 +286,59 @@ struct ContentView: View {
             : "Touch the viewfinder to choose where the magnifier looks. Autofocus is off."
     }
 
-    private var exposureAids: some View {
-        VStack(spacing: 10) {
-            chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
-                 on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
-            if cam.peakingRenderer != nil { zebraChip }
+    // MARK: Tool row
+
+    /// Under the picture, so nothing but the focus rail covers it: exposure aids · lenses · focus aids, grouped
+    /// by purpose as on a camera. Every chip has the same dark pill on or off, so it reads over any scene.
+    private var toolRow: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
+                     on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+                if cam.peakingRenderer != nil { zebraChip }
+            }
+            Spacer(minLength: 6)
+            if cam.lenses.count > 1 { lensPicker }
+            Spacer(minLength: 6)
+            HStack(spacing: 6) {
+                if cam.peakingRenderer != nil { peakingChip }
+                if cam.isMagnifierAvailable {
+                    chip("MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
+                         on: cam.isMagnifierEnabled) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
+                        .accessibilityHint("When on, focusing with the focus rail magnifies the focus point so you can check focus.")
+                }
+            }
         }
-        .padding(.leading, 8)
+        .frame(height: 44)
+        .padding(.horizontal, 10)
     }
 
-    /// ZEB: tap for zebras on and off, touch and hold for the level they start at.
+    /// ZEB: zebras on and off. The level they start at is in SET.
     private var zebraChip: some View {
-        let level = Binding(get: { cam.zebraLevel }, set: { cam.setZebraLevel($0) })
-        return Menu {
-            Picker("Level", selection: level) {
-                ForEach(ZebraLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+        chip("ZEB", label: "Zebras",
+             value: cam.isZebraEnabled ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent" : SettingsText.onOff(false),
+             on: cam.isZebraEnabled) { cam.setZebraEnabled(!cam.isZebraEnabled) }
+            .accessibilityHint("Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level.")
+            .accessibilityAdjustableAction { direction in
+                let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
+                switch direction {
+                case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
+                case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
+                @unknown default: break
+                }
             }
-        } label: {
-            chipLabel("ZEB")
-        } primaryAction: {
-            cam.setZebraEnabled(!cam.isZebraEnabled)
-        }
-        .menuStyle(.button)
-        .buttonStyle(ChipStyle(isOn: cam.isZebraEnabled, angle: uiAngle))
-        .accessibilityLabel("Zebras")
-        .accessibilityValue(cam.isZebraEnabled
-                            ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent"
-                            : SettingsText.onOff(false))
-        .accessibilityHint("Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level.")
-        .accessibilityAdjustableAction { direction in
-            let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
-            switch direction {
-            case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
-            case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
-            @unknown default: break
-            }
-        }
     }
 
-    /// PK: tap to turn peaking on and off, touch and hold to choose its sensitivity.
+    /// PK: peaking on and off. Mode, sensitivity, colour and lines are in SET.
     private var peakingChip: some View {
-        let sensitivity = Binding(get: { cam.peakingSensitivity }, set: { cam.setPeakingSensitivity($0) })
-        let color = Binding(get: { cam.peakingAppearance.color }, set: { cam.setPeakingColor($0) })
-        let lines = Binding(get: { cam.peakingAppearance.lines }, set: { cam.setPeakingLines($0) })
-        let mode = Binding(get: { cam.peakingMode }, set: { cam.setPeakingMode($0) })
         let look = cam.peakingAppearance
         let value = cam.isPeakingEnabled
             ? "\(SettingsText.onOff(true)), \(cam.peakingMode.title), \(cam.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
             : SettingsText.onOff(false)
-        return Menu {
-            // Submenus, each showing its current choice.
-            Picker("Mode", selection: mode) {
-                ForEach(PeakingMode.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-            Picker("Sensitivity", selection: sensitivity) {
-                ForEach(PeakingSensitivity.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-            Picker("Colour", selection: color) {
-                ForEach(PeakingColor.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-            Picker("Lines", selection: lines) {
-                ForEach(PeakingLines.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-        } label: {
-            chipLabel("PK")
-        } primaryAction: {
+        return chip("PK", label: "Focus peaking", value: value, on: cam.isPeakingEnabled) {
             cam.setPeakingEnabled(!cam.isPeakingEnabled)
         }
-        .menuStyle(.button)
-        .buttonStyle(ChipStyle(isOn: cam.isPeakingEnabled, angle: uiAngle))
-        .accessibilityLabel("Focus peaking")
-        .accessibilityValue(value)
-        .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; touch and hold for colour and lines.")
-        .accessibilityAction(named: cam.peakingMode == .sweep ? "Standard mode" : "Sweep mode") {
-            cam.setPeakingMode(cam.peakingMode == .sweep ? .standard : .sweep)
-        }
-        .accessibilityAction(named: "Next colour") {
-            let all = PeakingColor.allCases
-            cam.setPeakingColor(all[(look.color.rawValue + 1) % all.count])
-        }
-        .accessibilityAction(named: look.lines == .bold ? "Fine lines" : "Bold lines") {
-            cam.setPeakingLines(look.lines == .bold ? .fine : .bold)
-        }
+        .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; more in Settings.")
         .accessibilityAdjustableAction { direction in
             let all = PeakingSensitivity.allCases, i = cam.peakingSensitivity.rawValue
             switch direction {
@@ -361,7 +372,7 @@ struct ContentView: View {
     private func chip(_ title: String, label: String, value: String, on: Bool,
                       action: @escaping () -> Void) -> some View {
         Button(action: action) { chipLabel(title) }
-        .buttonStyle(ChipStyle(isOn: on, angle: uiAngle))
+        .buttonStyle(ChipStyle(isOn: on, angle: .zero))
         .accessibilityLabel(label)
         .accessibilityValue(value)
     }
@@ -369,22 +380,32 @@ struct ContentView: View {
     // MARK: Bottom controls
 
     private var controls: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             if cam.manual {
-                ManualControls(cam: cam, selected: $selected, angle: uiAngle)
+                ManualControls(cam: cam, selected: $selected, angle: .zero)
             }
 
-            // AUTO | MANUAL and the last shot either side of the capture button, PHOTO · VIDEO under it.
-            // Neither switch can change mid-recording.
+            // Left of the shutter, exposure mode over capture mode, like a Sony's mode dial with the photo/video
+            // collar under it; the last shot on the right. Side by side with the shutter rather than under it, so
+            // the picture keeps its full width in MANUAL. Neither can change mid-recording.
             ZStack {
                 HStack {
-                    SegmentedSwitch(label: "Exposure mode",
-                                    options: [SwitchOption(title: "AUTO", value: false),
-                                              SwitchOption(title: "MANUAL", value: true)],
-                                    selection: cam.manual,
-                                    onSelect: { cam.setManual($0) })
-                        .disabled(cam.isRecording)
-                        .opacity(cam.isRecording ? 0.4 : 1)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SegmentedSwitch(label: "Exposure mode",
+                                        options: [SwitchOption(title: "AUTO", value: false),
+                                                  SwitchOption(title: "MANUAL", value: true)],
+                                        selection: cam.manual,
+                                        onSelect: { cam.setManual($0) },
+                                        height: 40)
+                        SegmentedSwitch(label: "Capture mode",
+                                        options: [SwitchOption(title: "PHOTO", value: CaptureMode.photo),
+                                                  SwitchOption(title: "VIDEO", value: CaptureMode.video)],
+                                        selection: cam.captureMode,
+                                        onSelect: { cam.setCaptureMode($0) },
+                                        height: 40)
+                    }
+                    .disabled(cam.isRecording)
+                    .opacity(cam.isRecording ? 0.4 : 1)
                     Spacer()
                     thumbnailButton
                 }
@@ -392,17 +413,8 @@ struct ContentView: View {
                 captureButton   // there from the start: a shot taken early is buffered by responsive capture
             }
             .padding(.horizontal, 16)
-
-            ModeStrip(label: "Capture mode",
-                      options: [SwitchOption(title: "PHOTO", value: CaptureMode.photo),
-                                SwitchOption(title: "VIDEO", value: CaptureMode.video)],
-                      selection: cam.captureMode,
-                      onSelect: { cam.setCaptureMode($0) })
-                .disabled(cam.isRecording)
-                .opacity(cam.isRecording ? 0.4 : 1)
-                .shownWhenReady(cam.isCameraReady)
         }
-        .padding(.top, 8)
+        .padding(.top, 2)
         .padding(.bottom, 4)
     }
 
@@ -414,18 +426,26 @@ struct ContentView: View {
         }
     }
 
+    /// The lenses as one segmented control in the tool row.
     private var lensPicker: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 2) {
             ForEach(cam.lenses) { lens in
                 Button { cam.switchLens(to: lens) } label: {
                     Text(lens.label)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .frame(width: 44, height: 32)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(minWidth: 36, minHeight: 30)
+                        .padding(.horizontal, 2)
                 }
-                .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: uiAngle))
+                .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: .zero, plain: true))
                 .accessibilityAddTraits(cam.currentLensID == lens.id ? .isSelected : [])
             }
         }
+        .padding(2)
+        .background(Color(white: 0.11), in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Lens")
     }
 
     private var shutterButton: some View {
@@ -458,6 +478,7 @@ struct ContentView: View {
             }
             .frame(width: 48, height: 48)
             .clipped()
+            // Only the photo turns with the phone, so a landscape shot reads upright; its frame stays put.
             .rotationEffect(uiAngle)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
