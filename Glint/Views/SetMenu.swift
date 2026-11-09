@@ -13,9 +13,10 @@ struct SetMenu: View {
     enum Tile: CaseIterable {
         case peakingMode, sensitivity, colour, lines, zebras, railSide, fileType, aspect
 
+        /// The tile's label, under its section's heading.
         var title: String {
             switch self {
-            case .peakingMode: "PEAKING"
+            case .peakingMode: "MODE"
             case .sensitivity: "SENSITIVITY"
             case .colour: "COLOUR"
             case .lines: "LINES"
@@ -23,6 +24,14 @@ struct SetMenu: View {
             case .railSide: "FOCUS RAIL"
             case .fileType: "FILE"
             case .aspect: "ASPECT"
+            }
+        }
+
+        var section: Section {
+            switch self {
+            case .peakingMode, .sensitivity, .colour, .lines: .peaking
+            case .zebras, .railSide: .viewfinder
+            case .fileType, .aspect: .photo
             }
         }
 
@@ -40,7 +49,20 @@ struct SetMenu: View {
             }
         }
 
-        var isPhotoOnly: Bool { self == .fileType || self == .aspect }
+        var isPhotoOnly: Bool { section == .photo }
+    }
+
+    /// Settings grouped under a heading, so it's clear which feature each belongs to.
+    enum Section: CaseIterable {
+        case peaking, viewfinder, photo
+
+        var title: String {
+            switch self {
+            case .peaking: "FOCUS PEAKING"
+            case .viewfinder: "VIEWFINDER"
+            case .photo: "PHOTO"
+            }
+        }
     }
 
     private var tiles: [Tile] {
@@ -60,9 +82,20 @@ struct SetMenu: View {
                     .foregroundStyle(Color.white)
                     .frame(minWidth: 44, minHeight: 44)
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                ForEach(tiles, id: \.self) { tile in
-                    tileButton(tile)
+            ForEach(Section.allCases, id: \.self) { section in
+                let sectionTiles = tiles.filter { $0.section == section }
+                if !sectionTiles.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(section.title)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Color.amber)
+                            .accessibilityAddTraits(.isHeader)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
+                            ForEach(sectionTiles, id: \.self) { tile in
+                                tileButton(tile)
+                            }
+                        }
+                    }
                 }
             }
             choices(for: selected)
@@ -85,8 +118,10 @@ struct SetMenu: View {
         return Button { selected = tile } label: {
             VStack(alignment: .leading, spacing: 0) {
                 Text(tile.title)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.white.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Spacer(minLength: 4)
                 Text(value(of: tile))
                     .font(.system(size: 14, weight: .semibold, design: .monospaced))
@@ -94,8 +129,8 @@ struct SetMenu: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .padding(8)
             .background(Color(white: 0.11).opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(isSelected ? Color.amber : Color.white.opacity(0.15), lineWidth: isSelected ? 2 : 1))
@@ -124,19 +159,19 @@ struct SetMenu: View {
     private func choices(for tile: Tile) -> some View {
         switch tile {
         case .peakingMode:
-            FormatOptionRow(title: "PEAKING", groupLabel: tile.name,
+            FormatOptionRow(title: "FOCUS PEAKING · MODE", groupLabel: tile.name,
                             options: PeakingMode.allCases.map { FormatOption(title: $0.title, value: $0) },
                             selection: cam.peakingMode, onSelect: { cam.setPeakingMode($0) })
         case .sensitivity:
-            FormatOptionRow(title: "SENSITIVITY", groupLabel: tile.name,
+            FormatOptionRow(title: "FOCUS PEAKING · SENSITIVITY", groupLabel: tile.name,
                             options: PeakingSensitivity.allCases.map { FormatOption(title: $0.title, value: $0) },
                             selection: cam.peakingSensitivity, onSelect: { cam.setPeakingSensitivity($0) })
         case .colour:
-            FormatOptionRow(title: "COLOUR", groupLabel: tile.name,
+            FormatOptionRow(title: "FOCUS PEAKING · COLOUR", groupLabel: tile.name,
                             options: PeakingColor.allCases.map { FormatOption(title: $0.title, value: $0) },
                             selection: cam.peakingAppearance.color, onSelect: { cam.setPeakingColor($0) })
         case .lines:
-            FormatOptionRow(title: "LINES", groupLabel: tile.name,
+            FormatOptionRow(title: "FOCUS PEAKING · LINES", groupLabel: tile.name,
                             options: PeakingLines.allCases.map { FormatOption(title: $0.title, value: $0) },
                             selection: cam.peakingAppearance.lines, onSelect: { cam.setPeakingLines($0) })
         case .zebras:
