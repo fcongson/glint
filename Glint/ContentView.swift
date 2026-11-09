@@ -353,17 +353,27 @@ struct ContentView: View {
                 ManualControls(cam: cam, selected: $selected, angle: uiAngle)
             }
 
-            // AUTO | MANUAL and the last shot either side of the capture button, PHOTO · VIDEO under it.
-            // Neither switch can change mid-recording.
+            // Left of the shutter, exposure mode over capture mode, like a Sony's mode dial with the photo/video
+            // collar under it; the last shot on the right. Side by side with the shutter rather than under it, so
+            // the picture keeps its full width in MANUAL. Neither can change mid-recording.
             ZStack {
                 HStack {
-                    SegmentedSwitch(label: "Exposure mode",
-                                    options: [SwitchOption(title: "AUTO", value: false),
-                                              SwitchOption(title: "MANUAL", value: true)],
-                                    selection: cam.manual,
-                                    onSelect: { cam.setManual($0) })
-                        .disabled(cam.isRecording)
-                        .opacity(cam.isRecording ? 0.4 : 1)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SegmentedSwitch(label: "Exposure mode",
+                                        options: [SwitchOption(title: "AUTO", value: false),
+                                                  SwitchOption(title: "MANUAL", value: true)],
+                                        selection: cam.manual,
+                                        onSelect: { cam.setManual($0) },
+                                        height: 40)
+                        SegmentedSwitch(label: "Capture mode",
+                                        options: [SwitchOption(title: "PHOTO", value: CaptureMode.photo),
+                                                  SwitchOption(title: "VIDEO", value: CaptureMode.video)],
+                                        selection: cam.captureMode,
+                                        onSelect: { cam.setCaptureMode($0) },
+                                        height: 40)
+                    }
+                    .disabled(cam.isRecording)
+                    .opacity(cam.isRecording ? 0.4 : 1)
                     Spacer()
                     thumbnailButton
                 }
@@ -371,15 +381,6 @@ struct ContentView: View {
                 captureButton   // there from the start: a shot taken early is buffered by responsive capture
             }
             .padding(.horizontal, 16)
-
-            ModeStrip(label: "Capture mode",
-                      options: [SwitchOption(title: "PHOTO", value: CaptureMode.photo),
-                                SwitchOption(title: "VIDEO", value: CaptureMode.video)],
-                      selection: cam.captureMode,
-                      onSelect: { cam.setCaptureMode($0) })
-                .disabled(cam.isRecording)
-                .opacity(cam.isRecording ? 0.4 : 1)
-                .shownWhenReady(cam.isCameraReady)
         }
         .padding(.top, 2)
         .padding(.bottom, 4)

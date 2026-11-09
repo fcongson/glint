@@ -120,6 +120,7 @@ struct SegmentedSwitch<Value: Hashable>: View {
     let options: [SwitchOption<Value>]
     let selection: Value
     let onSelect: (Value) -> Void
+    var height: CGFloat = 44   // 40 when two are stacked beside the shutter
 
     var body: some View {
         HStack(spacing: 0) {
@@ -129,7 +130,7 @@ struct SegmentedSwitch<Value: Hashable>: View {
                     Text(option.title)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(selected ? Color.black : Color.white)
-                        .frame(width: 62, height: 44)
+                        .frame(width: 62, height: height)
                         .background(selected ? Color.amber : Color.clear, in: Capsule())
                 }
                 .buttonStyle(.plain)
