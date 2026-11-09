@@ -250,7 +250,9 @@ actor CaptureSession {
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
         if let d = device { analyzer.setWhiteKey(whiteKey(for: d)) }   // the format may have changed
         if let d = device { withLockedDevice(d, failure: "Config") { applyToneMapping($0) } }   // a preset can reset it
-        preparePhotoSettings()
+        // Queued rather than done here, so it runs after the command that reconfigured has finished and reported
+        // the new lens or mode: preparing (with #10's preview image) can take a moment, and shouldn't delay that.
+        enqueue { $0.preparePhotoSettings() }
     }
 
     /// Where clipped white sits depends on the lens and the format's processing, so it's learned for each.
@@ -379,6 +381,9 @@ actor CaptureSession {
     func switchLens(to lensID: String) {
         guard let newDev = lensDevices[lensID], newDev != device,
               let newInput = try? AVCaptureDeviceInput(device: newDev) else { return }
+        #if DEBUG
+        let t0 = CFAbsoluteTimeGetCurrent()
+        #endif
         session.beginConfiguration()
         if let old = videoInput { session.removeInput(old) }
         if session.canAddInput(newInput) {
@@ -390,6 +395,9 @@ actor CaptureSession {
         }
         updateResponsiveCapture()
         session.commitConfiguration()
+        #if DEBUG
+        let t1 = CFAbsoluteTimeGetCurrent()
+        #endif
         restoreAfterReconfiguration()
 
         guard let current = device else { return }
@@ -397,6 +405,11 @@ actor CaptureSession {
         let info = applyDeviceSettings(current)
         updateRotationCoordinator()
         emit.yield(.videoCapabilities(videoCapabilities(current)))
+        #if DEBUG
+        // Where a slow switch spends its time: the session rebuild, or the device settings after it.
+        let t2 = CFAbsoluteTimeGetCurrent()
+        emit.yield(.status(String(format: "lens: rebuild %.2fs, settings %.2fs", t1 - t0, t2 - t1)))
+        #endif
         emit.yield(.lensChanged(info))
     }
 
