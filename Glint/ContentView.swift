@@ -478,6 +478,8 @@ struct ContentView: View {
             }
             .frame(width: 48, height: 48)
             .clipped()
+            // Only the photo turns with the phone, so a landscape shot reads upright; its frame stays put.
+            .rotationEffect(uiAngle)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }
