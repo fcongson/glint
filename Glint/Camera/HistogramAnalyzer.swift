@@ -42,6 +42,11 @@ struct Histogram: Sendable {
     let clipsHighlights: Bool
     let clipsShadows: Bool
     let whiteLevel: Int?       // where clipped highlights sit in this frame, if any are
+    #if DEBUG
+    /// Dev-only, for measuring where black sits (cover the lens): the darkest level present, then the share of
+    /// pixels in each pair of levels from 0 up to 23, and the share at or below `shadowLuma`.
+    let shadowSummary: String
+    #endif
 
     /// Samples every `step`th pixel in each direction. Returns nil if the buffer has no readable luma plane.
     init?(lumaOf pixelBuffer: CVPixelBuffer, step: Int = 8) {
@@ -72,6 +77,14 @@ struct Histogram: Sendable {
         let lo = levels[0...Self.shadowLuma].reduce(0, +)
         clipsShadows = Float(lo) / Float(total) > Self.shadowClipFraction
 
+        #if DEBUG
+        let darkest = levels.firstIndex(where: { $0 > 0 }) ?? 0
+        let pairs = stride(from: 0, to: 24, by: 2).map {
+            String(format: "%.0f", Double(levels[$0] + levels[$0 + 1]) * 100 / Double(total))
+        }
+        shadowSummary = String(format: "min %d  ≤%d: %.0f%%\n0–23: %@", darkest, Self.shadowLuma,
+                               Double(lo) * 100 / Double(total), pairs.joined(separator: ","))
+        #endif
         let white = Self.clippedWhite(levels, total: total)
         whiteLevel = white
         let hi = white.map { levels[($0 - 1)...].reduce(0, +) } ?? 0
@@ -116,9 +129,35 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private let publishHistogram: @Sendable (Histogram) -> Void
     private let peaking: PeakingRenderer?
 
-    /// The level clipped white was last seen at (see `Histogram.whiteLevel`). Until clipping is first seen, full
-    /// scale, so zebras at 100% don't mark bright areas that aren't clipped. Only touched on `queue`.
+    /// The level clipped white was last seen at (see `Histogram.whiteLevel`), remembered per lens and format
+    /// (`setWhiteKey`) so zebras are right from the first frame. With nothing remembered yet, full scale, so zebras
+    /// at 100% don't mark bright areas that aren't clipped. Only touched on `queue`.
     private var whiteLevel = 255
+    private var whiteKey: String?                       // only touched on `queue`
+    private let nextWhiteKey = OSAllocatedUnfairLock<String?>(initialState: nil)
+    private static let whiteLevelsKey = "whiteLevels"   // UserDefaults: [lens and format: level]
+
+    /// Which lens and format frames now come from; the next frame picks up the white level learned for it.
+    func setWhiteKey(_ key: String) {
+        nextWhiteKey.withLock { $0 = key }
+    }
+
+    /// On `queue`: switch to the white level remembered for the current lens and format, if that changed.
+    private func followWhiteKey() {
+        guard let key = nextWhiteKey.withLock({ $0 }), key != whiteKey else { return }
+        whiteKey = key
+        let saved = UserDefaults.standard.dictionary(forKey: Self.whiteLevelsKey) as? [String: Int]
+        whiteLevel = saved?[key] ?? 255
+    }
+
+    private func learnWhite(_ white: Int) {
+        guard white != whiteLevel else { return }
+        whiteLevel = white
+        guard let whiteKey else { return }
+        var saved = UserDefaults.standard.dictionary(forKey: Self.whiteLevelsKey) as? [String: Int] ?? [:]
+        saved[whiteKey] = white
+        UserDefaults.standard.set(saved, forKey: Self.whiteLevelsKey)
+    }
 
     init(histogram: @escaping @Sendable (Histogram) -> Void, peaking: PeakingRenderer?) {
         publishHistogram = histogram
@@ -166,9 +205,10 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         let doHistogram = (current.histogram || current.viewfinder?.zebras != nil) && t - lastHistogram > 0.2
         let doPeaking = current.viewfinder != nil && peaking != nil
         guard doHistogram || doPeaking, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        followWhiteKey()
         if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
             lastHistogram = t
-            if let white = histogram.whiteLevel { whiteLevel = white }
+            if let white = histogram.whiteLevel { learnWhite(white) }
             if current.histogram { publishHistogram(histogram) }
         }
         if doPeaking, var settings = current.viewfinder {

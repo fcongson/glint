@@ -200,7 +200,14 @@ actor CaptureSession {
     private func restoreAfterReconfiguration() {
         try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
+        if let d = device { analyzer.setWhiteKey(whiteKey(for: d)) }   // the format may have changed
         if let d = device { withLockedDevice(d, failure: "Config") { applyToneMapping($0) } }   // a preset can reset it
+    }
+
+    /// Where clipped white sits depends on the lens and the format's processing, so it's learned for each.
+    private func whiteKey(for d: AVCaptureDevice) -> String {
+        let size = CMVideoFormatDescriptionGetDimensions(d.activeFormat.formatDescription)
+        return "\(d.uniqueID) \(size.width)x\(size.height) \(isVideo ? "video" : "photo")"
     }
 
     /// Video HDR off and one tone curve for the whole frame. With video HDR, the preview's adaptive tone mapping
@@ -228,6 +235,7 @@ actor CaptureSession {
         }
         movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted   // a new lens rebuilds connections
+        analyzer.setWhiteKey(whiteKey(for: d))
         pendingExposure = nil   // meant for the previous lens
         exposureInFlight = nil
         observeMeterAndLens(d)

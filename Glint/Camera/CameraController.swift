@@ -180,6 +180,9 @@ final class CameraController {
             }
         case .histogram(let histogram):
             if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
+            #if DEBUG
+            if isHistogramEnabled { timing = histogram.shadowSummary }   // dev: where black sits (lens-cap test)
+            #endif
         case .photoCaptured(let photo):
             photoCaptured(photo)
         case .recordingStarted:
