@@ -7,11 +7,12 @@ struct SetMenu: View {
     let cam: CameraController
     let angle: Angle
     @AppStorage("focusRailSide") private var railSide: RailSide = .right
+    @AppStorage(DebugInfo.key) private var debugInfo = false
     @Binding var selected: Tile   // kept by the caller, so SET reopens where it was, or on a tile it asks for
     let onDone: () -> Void
 
     enum Tile: CaseIterable {
-        case peakingMode, sensitivity, colour, lines, zebras, railSide, fileType, aspect
+        case peakingMode, sensitivity, colour, lines, zebras, railSide, fileType, aspect, debugInfo
 
         /// The tile's label, under its section's heading.
         var title: String {
@@ -24,6 +25,7 @@ struct SetMenu: View {
             case .railSide: "FOCUS RAIL"
             case .fileType: "FILE"
             case .aspect: "ASPECT"
+            case .debugInfo: "DEBUG INFO"
             }
         }
 
@@ -32,6 +34,7 @@ struct SetMenu: View {
             case .peakingMode, .sensitivity, .colour, .lines: .peaking
             case .zebras, .railSide: .viewfinder
             case .fileType, .aspect: .photo
+            case .debugInfo: .developer
             }
         }
 
@@ -46,6 +49,7 @@ struct SetMenu: View {
             case .railSide: "Focus rail side"
             case .fileType: "File type"
             case .aspect: "Aspect ratio"
+            case .debugInfo: "Debug info"
             }
         }
 
@@ -54,19 +58,22 @@ struct SetMenu: View {
 
     /// Settings grouped under a heading, so it's clear which feature each belongs to.
     enum Section: CaseIterable {
-        case peaking, viewfinder, photo
+        case peaking, viewfinder, photo, developer
 
         var title: String {
             switch self {
             case .peaking: "FOCUS PEAKING"
             case .viewfinder: "VIEWFINDER"
             case .photo: "PHOTO"
+            case .developer: "DEVELOPER"
             }
         }
     }
 
     private var tiles: [Tile] {
-        Tile.allCases.filter { !$0.isPhotoOnly || cam.captureMode == .photo }
+        Tile.allCases.filter {
+            (!$0.isPhotoOnly || cam.captureMode == .photo) && ($0.section != .developer || DebugInfo.isAvailable)
+        }
     }
 
     var body: some View {
@@ -152,6 +159,7 @@ struct SetMenu: View {
         case .railSide: railSide.title
         case .fileType: SettingsText.fileType(cam.fileType)
         case .aspect: SettingsText.aspect(cam.aspect)
+        case .debugInfo: SettingsText.onOff(debugInfo)
         }
     }
 
@@ -182,6 +190,10 @@ struct SetMenu: View {
             FormatOptionRow(title: "FOCUS RAIL: THE SIDE IT'S ON, HOWEVER YOU HOLD THE PHONE", groupLabel: tile.name,
                             options: RailSide.allCases.map { FormatOption(title: $0.title, value: $0) },
                             selection: railSide, onSelect: { railSide = $0 })
+        case .debugInfo:
+            FormatOptionRow(title: "DEVELOPER · TIMINGS AND DEBUG MESSAGES OVER THE PICTURE", groupLabel: tile.name,
+                            options: [FormatOption(title: "On", value: true), FormatOption(title: "Off", value: false)],
+                            selection: debugInfo, onSelect: { debugInfo = $0 })
         case .fileType:
             FormatOptionRow(title: "FILE", groupLabel: tile.name,
                             options: PhotoFileType.allCases.map { FormatOption(title: SettingsText.fileType($0), value: $0) },
@@ -206,4 +218,21 @@ enum RailSide: String, CaseIterable {
         case .right: "Right"
         }
     }
+}
+
+/// The developer readout over the picture: timings (launch, lens, shot…) and debug messages. Switched on and off
+/// with DEBUG INFO in SET's DEVELOPER section, which only debug builds have; release builds never show it.
+enum DebugInfo {
+    static let key = "showDebugInfo"
+
+    static var isAvailable: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// Off until switched on.
+    static var isOn: Bool { isAvailable && UserDefaults.standard.bool(forKey: key) }
 }

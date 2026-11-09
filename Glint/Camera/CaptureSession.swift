@@ -57,6 +57,8 @@ enum CaptureEvent: Sendable {
     case photoCaptured(CapturedPhoto)
     /// Every output deferred at launch has started (iOS 26+), so all of the camera is ready, not just the preview.
     case deferredStartFinished
+    /// A developer message (debug builds only), shown when DEBUG INFO is on in SET.
+    case debug(String)
     /// Heat or load on the camera changed (`AVCaptureDevice.systemPressureState`).
     case systemPressure(SystemPressure)
     /// The camera is running again after the review screen closed.
@@ -199,7 +201,7 @@ actor CaptureSession {
         updateRotationCoordinator()
         #if DEBUG
         // Whether Bayer RAW on this lens supports it isn't documented, so say once in debug builds.
-        emit.yield(.status("Responsive capture \(photoOutput.isResponsiveCaptureEnabled ? "on" : "not supported")"))
+        emit.yield(.debug("Responsive capture \(photoOutput.isResponsiveCaptureEnabled ? "on" : "not supported")"))
         #endif
         emit.yield(.ready(lenses: lenses, device: info))
         emit.yield(.videoCapabilities(videoCapabilities(wide)))
@@ -783,7 +785,7 @@ actor CaptureSession {
         guard !isVideo, session.isRunning, session.outputs.contains(photoOutput) else { return }
         photoOutput.setPreparedPhotoSettingsArray([makePhotoSettings().0]) { [emit] prepared, error in
             #if DEBUG
-            if !prepared, let error { emit.yield(.status("Prepare failed (harmless): \(error.localizedDescription)")) }
+            if !prepared, let error { emit.yield(.debug("Prepare failed (harmless): \(error.localizedDescription)")) }
             #endif
         }
     }
