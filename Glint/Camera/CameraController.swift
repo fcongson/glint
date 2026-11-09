@@ -203,6 +203,8 @@ final class CameraController {
             photoCaptured(photo)
         case .deferredStartFinished:
             stopTimer("outputs", appending: true)   // under launch's line: preview first, then everything else
+        case .debug(let message):
+            if DebugInfo.isOn { post(message) }
         case .systemPressure(let level):
             systemPressureChanged(level)
         case .resumed:
@@ -460,7 +462,7 @@ final class CameraController {
         guard level != old else { return }
         systemPressure = level
         #if DEBUG
-        post("System pressure: \(level)")   // a message below, if any, replaces it
+        if DebugInfo.isOn { post("System pressure: \(level)") }   // a message below, if any, replaces it
         #endif
         peakingRenderer?.setAnalysisInterval(level.peakingInterval)
         if level.reducesFrameRate != old.reducesFrameRate {

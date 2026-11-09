@@ -7,6 +7,7 @@ struct ContentView: View {
     /// stay on your chosen side (see `railAlignment`), and review turns photos upright.
     @State private var uiAngle: Angle = .zero
     @AppStorage("focusRailSide") private var railSide: RailSide = .right
+    @AppStorage(DebugInfo.key) private var debugInfoSetting = false   // see `DebugInfo`
     @State private var showingSet = false   // the SET panel over the picture
     @State private var setTile: SetMenu.Tile = .peakingMode   // the tile SET opens on
     @State private var showingVideoFormat = false
@@ -147,7 +148,7 @@ struct ContentView: View {
                 // there's room to read them; the top bar has no space to spare beside the Dynamic Island.
                 VStack(alignment: .leading, spacing: 6) {
                     if !cam.status.isEmpty { overlayLabel(cam.status) }
-                    if !cam.timing.isEmpty { overlayLabel(cam.timing) }
+                    if DebugInfo.isAvailable, debugInfoSetting, !cam.timing.isEmpty { overlayLabel(cam.timing) }
                 }
                 .padding(8)
                 .allowsHitTesting(false)
