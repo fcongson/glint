@@ -3,7 +3,10 @@ import UIKit
 
 struct ContentView: View {
     @State private var cam = CameraController()
-    @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
+    /// How the phone is held, as an angle. Controls don't turn with it, as on a camera; only the focus rail moves to
+    /// stay on your chosen side (see `railAlignment`), and review turns photos upright.
+    @State private var uiAngle: Angle = .zero
+    @AppStorage("focusRailSide") private var railSide: RailSide = .right
     @State private var showingSet = false   // the SET panel over the picture
     @State private var setTile: SetMenu.Tile = .peakingMode   // the tile SET opens on
     @State private var showingVideoFormat = false
@@ -95,7 +98,6 @@ struct ContentView: View {
                 }
                 if cam.isMagnifying {
                     overlayLabel("\(cam.magnification.title)  MAGNIFIED")
-                        .rotationEffect(uiAngle)
                         .frame(maxHeight: .infinity, alignment: .top)
                         .padding(.top, 10)
                         .allowsHitTesting(false)
@@ -121,18 +123,24 @@ struct ContentView: View {
                     // Reserve the rotated footprint so it stays inside the corner.
                     let size = HistogramView.size
                     HistogramContainer(model: cam.histogramModel)
-                        .rotationEffect(uiAngle)
-                        .frame(width: uiAngle.isQuarterTurn ? size.height : size.width,
-                               height: uiAngle.isQuarterTurn ? size.width : size.height)
+                        .frame(width: size.width, height: size.height)
                         .padding(8)
                         .allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .trailing) {
+            .overlay(alignment: railAlignment) {
                 // The focus rail stays on the viewfinder's edge, where the thumb reaches it while you look at the
                 // subject. It's there in AUTO too: exposure and focus are separate, as on a camera. Everything else
-                // is in the tool row below, off the picture.
-                focusControls.shownWhenReady(cam.isCameraReady)
+                // is in the tool row below, off the picture. Held sideways, it moves to the edge that's now on your
+                // chosen side and turns with the phone, so ∞ is still up and the drag still runs up and down.
+                let sideways = uiAngle.isQuarterTurn
+                focusControls
+                    .frame(width: Self.railColumn.width, height: Self.railColumn.height)
+                    .rotationEffect(railAngle)
+                    .frame(width: sideways ? Self.railColumn.height : Self.railColumn.width,
+                           height: sideways ? Self.railColumn.width : Self.railColumn.height)
+                    .animation(.easeInOut(duration: 0.3), value: railAlignment)
+                    .shownWhenReady(cam.isCameraReady)
             }
             .overlay(alignment: .bottomLeading) {
                 // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
@@ -141,7 +149,6 @@ struct ContentView: View {
                     if !cam.status.isEmpty { overlayLabel(cam.status) }
                     if !cam.timing.isEmpty { overlayLabel(cam.timing) }
                 }
-                .rotationEffect(uiAngle)
                 .padding(8)
                 .allowsHitTesting(false)
             }
@@ -151,7 +158,7 @@ struct ContentView: View {
                         Color.black.opacity(0.6)
                             .onTapGesture { showingSet = false }
                             .accessibilityHidden(true)
-                        SetMenu(cam: cam, angle: uiAngle, selected: $setTile, onDone: { showingSet = false })
+                        SetMenu(cam: cam, angle: .zero, selected: $setTile, onDone: { showingSet = false })
                     }
                     .transition(.opacity)
                 }
@@ -164,6 +171,32 @@ struct ContentView: View {
         }
         .ignoresSafeArea(edges: .top)
     }
+
+    /// AF over the focus rail, laid out upright, before it's turned for landscape.
+    private static let railColumn = CGSize(width: 64, height: FocusRail.trackHeight + 100)
+
+    /// The phone's orientation as quarter turns clockwise: 0 portrait, 1 landscape left (top of the phone on the
+    /// left), 2 upside down, 3 landscape right.
+    private var quarterTurns: Int {
+        let q = Int((uiAngle.degrees / 90).rounded()) % 4
+        return q < 0 ? q + 4 : q
+    }
+
+    /// Which edge of the picture is on the chosen side, the way the phone is held. Landscape left puts the
+    /// picture's bottom edge on your right; landscape right, its top edge.
+    private var railAlignment: Alignment {
+        let right = railSide == .right
+        switch quarterTurns {
+        case 1: return right ? .bottom : .top
+        case 2: return right ? .leading : .trailing
+        case 3: return right ? .top : .bottom
+        default: return right ? .trailing : .leading
+        }
+    }
+
+    /// The rail turned to match the phone, so ∞ is at the top as you hold it. The running angle rather than the
+    /// quarter turns, so it turns the short way round.
+    private var railAngle: Angle { uiAngle }
 
     /// The interface is locked to portrait; like the system Camera, only the contents rotate with the device.
     private func updateAngle(for orientation: UIDeviceOrientation) {
@@ -189,17 +222,17 @@ struct ContentView: View {
     private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 12) {
             if cam.isRecording {
-                RecordingTimer(cam: cam, angle: uiAngle)
+                RecordingTimer(cam: cam, angle: .zero)
             } else {
                 Button { openSet(on: setTile) } label: { chipLabel("SET") }
-                    .buttonStyle(ChipStyle(isOn: showingSet, angle: uiAngle, outlined: true))
+                    .buttonStyle(ChipStyle(isOn: showingSet, angle: .zero, outlined: true))
                     .accessibilityLabel("Settings")
                     .accessibilityValue(showingSet ? "Open" : "Closed")
                     .accessibilityHint("Peaking, zebra level, file type and aspect ratio")
                 formatReadout
             }
             Spacer(minLength: 100)   // the Dynamic Island
-            LiveExposureMeter(cam: cam, angle: uiAngle)
+            LiveExposureMeter(cam: cam, angle: .zero)
         }
         .shownWhenReady(cam.isCameraReady)
         .padding(.horizontal, 16)
@@ -223,7 +256,6 @@ struct ContentView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .frame(minHeight: 44)
-                .rotationEffect(uiAngle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(photo ? "Photo format" : "Video format")
@@ -242,7 +274,7 @@ struct ContentView: View {
         VStack(spacing: 10) {
             chip("AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
                  on: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
-            LiveFocusRail(cam: cam, angle: uiAngle)
+            LiveFocusRail(cam: cam, angle: .zero)
         }
         .padding(.trailing, 8)
     }
@@ -340,7 +372,7 @@ struct ContentView: View {
     private func chip(_ title: String, label: String, value: String, on: Bool,
                       action: @escaping () -> Void) -> some View {
         Button(action: action) { chipLabel(title) }
-        .buttonStyle(ChipStyle(isOn: on, angle: uiAngle))
+        .buttonStyle(ChipStyle(isOn: on, angle: .zero))
         .accessibilityLabel(label)
         .accessibilityValue(value)
     }
@@ -350,7 +382,7 @@ struct ContentView: View {
     private var controls: some View {
         VStack(spacing: 8) {
             if cam.manual {
-                ManualControls(cam: cam, selected: $selected, angle: uiAngle)
+                ManualControls(cam: cam, selected: $selected, angle: .zero)
             }
 
             // Left of the shutter, exposure mode over capture mode, like a Sony's mode dial with the photo/video
@@ -406,7 +438,7 @@ struct ContentView: View {
                         .frame(minWidth: 36, minHeight: 30)
                         .padding(.horizontal, 2)
                 }
-                .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: uiAngle, plain: true))
+                .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: .zero, plain: true))
                 .accessibilityAddTraits(cam.currentLensID == lens.id ? .isSelected : [])
             }
         }
@@ -446,7 +478,6 @@ struct ContentView: View {
             }
             .frame(width: 48, height: 48)
             .clipped()
-            .rotationEffect(uiAngle)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }

@@ -6,11 +6,12 @@ import SwiftUI
 struct SetMenu: View {
     let cam: CameraController
     let angle: Angle
+    @AppStorage("focusRailSide") private var railSide: RailSide = .right
     @Binding var selected: Tile   // kept by the caller, so SET reopens where it was, or on a tile it asks for
     let onDone: () -> Void
 
     enum Tile: CaseIterable {
-        case peakingMode, sensitivity, colour, lines, zebras, fileType, aspect
+        case peakingMode, sensitivity, colour, lines, zebras, railSide, fileType, aspect
 
         var title: String {
             switch self {
@@ -19,6 +20,7 @@ struct SetMenu: View {
             case .colour: "COLOUR"
             case .lines: "LINES"
             case .zebras: "ZEBRAS"
+            case .railSide: "FOCUS RAIL"
             case .fileType: "FILE"
             case .aspect: "ASPECT"
             }
@@ -32,6 +34,7 @@ struct SetMenu: View {
             case .colour: "Peaking colour"
             case .lines: "Peaking lines"
             case .zebras: "Zebra level"
+            case .railSide: "Focus rail side"
             case .fileType: "File type"
             case .aspect: "Aspect ratio"
             }
@@ -111,6 +114,7 @@ struct SetMenu: View {
         case .colour: cam.peakingAppearance.color.title
         case .lines: cam.peakingAppearance.lines.title
         case .zebras: cam.zebraLevel.title
+        case .railSide: railSide.title
         case .fileType: SettingsText.fileType(cam.fileType)
         case .aspect: SettingsText.aspect(cam.aspect)
         }
@@ -139,6 +143,10 @@ struct SetMenu: View {
             FormatOptionRow(title: "ZEBRAS: STRIPES AT OR ABOVE", groupLabel: tile.name,
                             options: ZebraLevel.allCases.map { FormatOption(title: $0.title, value: $0) },
                             selection: cam.zebraLevel, onSelect: { cam.setZebraLevel($0) })
+        case .railSide:
+            FormatOptionRow(title: "FOCUS RAIL: THE SIDE IT'S ON, HOWEVER YOU HOLD THE PHONE", groupLabel: tile.name,
+                            options: RailSide.allCases.map { FormatOption(title: $0.title, value: $0) },
+                            selection: railSide, onSelect: { railSide = $0 })
         case .fileType:
             FormatOptionRow(title: "FILE", groupLabel: tile.name,
                             options: PhotoFileType.allCases.map { FormatOption(title: SettingsText.fileType($0), value: $0) },
@@ -149,6 +157,18 @@ struct SetMenu: View {
                                 FormatOption(title: SettingsText.aspect($0), spoken: SettingsText.aspectSpoken($0), value: $0)
                             },
                             selection: cam.aspect, onSelect: { cam.setAspect($0) })
+        }
+    }
+}
+
+/// Which side of the picture the focus rail sits on, as you hold the phone. Right by default, under the right thumb.
+enum RailSide: String, CaseIterable {
+    case left, right
+
+    var title: String {
+        switch self {
+        case .left: "Left"
+        case .right: "Right"
         }
     }
 }
