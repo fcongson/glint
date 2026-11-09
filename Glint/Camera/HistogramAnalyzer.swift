@@ -30,7 +30,7 @@ final class HistogramModel {
 /// white (`whiteLevel`), which zebras use too.
 struct Histogram: Sendable {
     static let binCount = 64
-    static let shadowLuma = 5               // at or below: near black
+    static let shadowLuma = 5               // at or below: near black (measured: a covered lens reads 0)
     static let minimumWhite = 200           // a spike lower than this is a uniform subject, not clipped white
     static let spikeFraction: Float = 0.002 // at least this share of pixels within a level of the peak…
     static let spikeSharpness: Float = 4    // …at this many times the density of the five levels below it…
@@ -42,11 +42,6 @@ struct Histogram: Sendable {
     let clipsHighlights: Bool
     let clipsShadows: Bool
     let whiteLevel: Int?       // where clipped highlights sit in this frame, if any are
-    #if DEBUG
-    /// Dev-only, for measuring where black sits (cover the lens): the darkest level present, then the share of
-    /// pixels in each pair of levels from 0 up to 23, and the share at or below `shadowLuma`.
-    let shadowSummary: String
-    #endif
 
     /// Samples every `step`th pixel in each direction. Returns nil if the buffer has no readable luma plane.
     init?(lumaOf pixelBuffer: CVPixelBuffer, step: Int = 8) {
@@ -77,14 +72,6 @@ struct Histogram: Sendable {
         let lo = levels[0...Self.shadowLuma].reduce(0, +)
         clipsShadows = Float(lo) / Float(total) > Self.shadowClipFraction
 
-        #if DEBUG
-        let darkest = levels.firstIndex(where: { $0 > 0 }) ?? 0
-        let pairs = stride(from: 0, to: 24, by: 2).map {
-            String(format: "%.0f", Double(levels[$0] + levels[$0 + 1]) * 100 / Double(total))
-        }
-        shadowSummary = String(format: "min %d  ≤%d: %.0f%%\n0–23: %@", darkest, Self.shadowLuma,
-                               Double(lo) * 100 / Double(total), pairs.joined(separator: ","))
-        #endif
         let white = Self.clippedWhite(levels, total: total)
         whiteLevel = white
         let hi = white.map { levels[($0 - 1)...].reduce(0, +) } ?? 0
