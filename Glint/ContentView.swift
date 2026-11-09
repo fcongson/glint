@@ -139,12 +139,12 @@ struct ContentView: View {
             .overlay(alignment: .trailing) {
                 // Focus lives on the viewfinder's edge, where the thumb can reach it while framing. It's there in
                 // AUTO too: exposure and focus are separate, as on a camera.
-                focusControls
+                focusControls.shownWhenReady(cam.isCameraReady)
             }
             .overlay(alignment: .leading) {
                 // Exposure aids on the opposite edge, mirroring focus: grouped by purpose, as on a camera, and
                 // clear of the Dynamic Island. Centred, below the histogram and above the status messages.
-                exposureAids
+                exposureAids.shownWhenReady(cam.isCameraReady)
             }
             .overlay(alignment: .bottom) {
                 // Lens buttons sit over the bottom of the preview, as in the system Camera, so the controls below
@@ -213,6 +213,7 @@ struct ContentView: View {
             Spacer(minLength: 140)   // the Dynamic Island
             LiveExposureMeter(cam: cam, angle: uiAngle)
         }
+        .shownWhenReady(cam.isCameraReady)
         .padding(.horizontal, 16)
         .padding(.top, topPadding)
         .padding(.bottom, 10)
@@ -387,7 +388,8 @@ struct ContentView: View {
                     Spacer()
                     thumbnailButton
                 }
-                captureButton
+                .shownWhenReady(cam.isCameraReady)
+                captureButton   // there from the start: a shot taken early is buffered by responsive capture
             }
             .padding(.horizontal, 16)
 
@@ -398,6 +400,7 @@ struct ContentView: View {
                       onSelect: { cam.setCaptureMode($0) })
                 .disabled(cam.isRecording)
                 .opacity(cam.isRecording ? 0.4 : 1)
+                .shownWhenReady(cam.isCameraReady)
         }
         .padding(.top, 8)
         .padding(.bottom, 4)
@@ -478,5 +481,16 @@ struct ContentView: View {
         }
         .buttonStyle(PressScaleStyle())
         .accessibilityLabel(cam.isRecording ? "Stop recording" : "Record video")
+    }
+}
+
+private extension View {
+    /// At launch the preview and the shutter come first and the other controls fade in once the camera is running,
+    /// as Apple recommends for a fast launch. Until then they're hidden from touch and VoiceOver too.
+    func shownWhenReady(_ ready: Bool) -> some View {
+        opacity(ready ? 1 : 0)
+            .allowsHitTesting(ready)
+            .accessibilityHidden(!ready)
+            .animation(.easeOut(duration: 0.25), value: ready)
     }
 }

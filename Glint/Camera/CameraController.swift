@@ -71,6 +71,7 @@ final class CameraController {
     var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying || isZebraShown }
     var isZebraShown: Bool { isZebraEnabled && peakingRenderer != nil }
     private(set) var timing = ""
+    private(set) var isCameraReady = false   // the preview is running; secondary controls fade in then
     @ObservationIgnored private var timers: [String: CFAbsoluteTime] = [:]   // dev-only, see `startTimer`
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
@@ -107,6 +108,7 @@ final class CameraController {
         guard !hasStarted else { return }
         hasStarted = true
         startTimer("launch")
+        startTimer("outputs")
         locationProvider.start()
         Task {
             for await event in capture.events { handle(event) }
@@ -142,7 +144,8 @@ final class CameraController {
     private func handle(_ event: CaptureEvent) {
         switch event {
         case .ready(let lenses, let device):
-            stopTimer("launch")
+            stopTimer("launch", appending: true)   // the deferred outputs can finish first
+            isCameraReady = true
             self.lenses = lenses
             apply(device)
         case .lensChanged(let device), .formatChanged(let device):
@@ -189,6 +192,8 @@ final class CameraController {
             if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
         case .photoCaptured(let photo):
             photoCaptured(photo)
+        case .deferredStartFinished:
+            stopTimer("outputs", appending: true)   // under launch's line: preview first, then everything else
         case .resumed:
             stopTimer("resume")
         case .recordingStarted:
@@ -598,20 +603,22 @@ final class CameraController {
         #endif
     }
 
-    /// Dev-only timings for the readout over the viewfinder, in debug builds: from launch to the camera running, a
-    /// lens or PHOTO · VIDEO tap to the new lens or format being live, and closing review to the camera running
-    /// again. (Launch includes the camera permission prompt, the first time.) The latest one replaces the last.
+    /// Dev-only timings for the readout over the viewfinder, in debug builds: from launch to the preview running and
+    /// to every deferred output having started, a lens or PHOTO · VIDEO tap to the new lens or format being live,
+    /// and closing review to the camera running again. (Launch includes the camera permission prompt, the first
+    /// time.) The latest one replaces the last, unless it's appended to it.
     private func startTimer(_ name: String) {
         #if DEBUG
         timers[name] = CFAbsoluteTimeGetCurrent()
         #endif
     }
 
-    private func stopTimer(_ name: String) {
+    private func stopTimer(_ name: String, appending: Bool = false) {
         #if DEBUG
         guard let started = timers.removeValue(forKey: name) else { return }
-        timing = String(format: "%@ %.2fs", name.padding(toLength: 7, withPad: " ", startingAt: 0),
-                         CFAbsoluteTimeGetCurrent() - started)
+        let line = String(format: "%@ %.2fs", name.padding(toLength: 7, withPad: " ", startingAt: 0),
+                          CFAbsoluteTimeGetCurrent() - started)
+        timing = appending && !timing.isEmpty ? timing + "\n" + line : line
         #endif
     }
 
