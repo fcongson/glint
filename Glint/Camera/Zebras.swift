@@ -24,8 +24,8 @@ enum ZebraLevel: Int, CaseIterable, Sendable {
     var title: String { "\(percent)%" }
 
     /// The luma (0…1 of full scale) at which stripes start, given the level clipped white sits at (0…255).
-    /// 100% starts one level under white, so the whole clipping spike is striped.
+    /// 100% starts two levels under white, so the whole clipping plateau is striped.
     func threshold(white: Int) -> Float {
-        self == .hundred ? Float(white - 1) / 255 : Float(percent) / 100 * Float(white) / 255
+        self == .hundred ? Float(white - 2) / 255 : Float(percent) / 100 * Float(white) / 255
     }
 }

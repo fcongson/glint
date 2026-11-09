@@ -75,4 +75,19 @@ struct HistogramTests {
         let h = try #require(Histogram(lumaOf: pixelBuffer { _, _ in 128 }))
         #expect(h.whiteLevel == nil)
     }
+
+    @Test func strayBrightPixelsAboveThePlateauDontHideIt() throws {
+        // As measured: most of the frame clipped at 236, a few sharpening halos up at 248, the rest midtones.
+        let h = try #require(Histogram(lumaOf: pixelBuffer { x, y in
+            x == 0 && y == 0 ? 248 : (x < 40 ? 236 : 120)
+        }))
+        #expect(h.whiteLevel == 236)
+        #expect(h.clipsHighlights)
+    }
+
+    @Test func aBrighterSubjectAboveASpikeMeansItIsntWhite() throws {
+        // A flat grey card at 210 with a lot of real detail brighter than it: the card isn't the ceiling.
+        let h = try #require(Histogram(lumaOf: pixelBuffer { x, y in x < 32 ? 210 : UInt8(220 + (x / 8 + y / 8) % 30) }))
+        #expect(h.whiteLevel == nil)
+    }
 }
