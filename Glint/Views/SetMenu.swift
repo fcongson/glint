@@ -6,8 +6,8 @@ import SwiftUI
 struct SetMenu: View {
     let cam: CameraController
     let angle: Angle
+    @Binding var selected: Tile   // kept by the caller, so SET reopens where it was, or on a tile it asks for
     let onDone: () -> Void
-    @State private var selected: Tile = .peakingMode
 
     enum Tile: CaseIterable {
         case peakingMode, sensitivity, colour, lines, zebras, fileType, aspect
