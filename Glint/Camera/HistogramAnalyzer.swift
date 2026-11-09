@@ -120,11 +120,6 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// scale, so zebras at 100% don't mark bright areas that aren't clipped. Only touched on `queue`.
     private var whiteLevel = 255
 
-    #if DEBUG
-    private var timeline = DebugFrameTimeline()        // only touched on `queue`
-    nonisolated(unsafe) var debugReadout: (@Sendable (String) -> Void)?   // set once, before frames flow
-    #endif
-
     init(histogram: @escaping @Sendable (Histogram) -> Void, peaking: PeakingRenderer?) {
         publishHistogram = histogram
         self.peaking = peaking
@@ -170,11 +165,6 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         // The histogram also finds the frame's white level, which zebras need even with HIST off.
         let doHistogram = (current.histogram || current.viewfinder?.zebras != nil) && t - lastHistogram > 0.2
         let doPeaking = current.viewfinder != nil && peaking != nil
-        #if DEBUG
-        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer), let text = timeline.add(sampleBuffer, pixelBuffer) {
-            debugReadout?(text)
-        }
-        #endif
         guard doHistogram || doPeaking, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
             lastHistogram = t
