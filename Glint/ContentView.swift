@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var cam = CameraController()
     @State private var uiAngle: Angle = .zero   // counter-rotation so labels stay upright while the layout stays portrait
     @State private var showingFormat = false
+    @State private var showingSet = false   // the SET panel over the picture
     @State private var showingVideoFormat = false
     @State private var selected: ManualParam = .shutter   // kept here so MANUAL comes back to the same ruler
     @State private var flash = false
@@ -137,24 +138,10 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .trailing) {
-                // Focus lives on the viewfinder's edge, where the thumb can reach it while framing. It's there in
-                // AUTO too: exposure and focus are separate, as on a camera.
+                // The focus rail stays on the viewfinder's edge, where the thumb reaches it while you look at the
+                // subject. It's there in AUTO too: exposure and focus are separate, as on a camera. Everything else
+                // is in the tool row below, off the picture.
                 focusControls.shownWhenReady(cam.isCameraReady)
-            }
-            .overlay(alignment: .leading) {
-                // Exposure aids on the opposite edge, mirroring focus: grouped by purpose, as on a camera, and
-                // clear of the Dynamic Island. Centred, below the histogram and above the status messages.
-                exposureAids.shownWhenReady(cam.isCameraReady)
-            }
-            .overlay(alignment: .bottom) {
-                // Lens buttons sit over the bottom of the preview, as in the system Camera, so the controls below
-                // fit without shrinking the preview.
-                if cam.lenses.count > 1 {
-                    lensPicker
-                        .padding(4)
-                        .background(Color.black.opacity(0.45), in: Capsule())
-                        .padding(.bottom, 10)
-                }
             }
             .overlay(alignment: .bottomLeading) {
                 // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
@@ -165,10 +152,23 @@ struct ContentView: View {
                 }
                 .rotationEffect(uiAngle)
                 .padding(8)
-                .padding(.bottom, cam.lenses.count > 1 ? 48 : 0)   // clear of the lens buttons
                 .allowsHitTesting(false)
             }
-            Spacer(minLength: 0)
+            .overlay {
+                if showingSet {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                            .onTapGesture { showingSet = false }
+                            .accessibilityHidden(true)
+                        SetMenu(cam: cam, angle: uiAngle, onDone: { showingSet = false })
+                    }
+                    .transition(.opacity)
+                }
+            }
+            // On a shorter screen the picture gives way first (a little narrower), not the controls.
+            .layoutPriority(-1)
+            toolRow.shownWhenReady(cam.isCameraReady)
+            Spacer(minLength: 0).layoutPriority(-2)
             controls
         }
         .ignoresSafeArea(edges: .top)
@@ -225,12 +225,6 @@ struct ContentView: View {
             chip("AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
                  on: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
             LiveFocusRail(cam: cam, angle: uiAngle)
-            peakingChip
-            if cam.isMagnifierAvailable {
-                chip("MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
-                     on: cam.isMagnifierEnabled) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
-                    .accessibilityHint("When on, focusing with the focus rail magnifies the focus point so you can check focus.")
-            }
         }
         .padding(.trailing, 8)
     }
@@ -242,92 +236,65 @@ struct ContentView: View {
             : "Touch the viewfinder to choose where the magnifier looks. Autofocus is off."
     }
 
-    private var exposureAids: some View {
-        VStack(spacing: 10) {
-            chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
-                 on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
-            if cam.peakingRenderer != nil { zebraChip }
+    // MARK: Tool row
+
+    /// Under the picture, so nothing but the focus rail covers it: SET · exposure aids · lenses · focus aids, grouped
+    /// by purpose as on a camera. Every chip has the same dark pill on or off, so it reads over any scene.
+    private var toolRow: some View {
+        HStack(spacing: 0) {
+            Button { withAnimation(.easeOut(duration: 0.15)) { showingSet.toggle() } } label: { chipLabel("SET") }
+                .buttonStyle(ChipStyle(isOn: showingSet, angle: uiAngle, outlined: true))
+                .accessibilityLabel("Settings")
+                .accessibilityValue(showingSet ? "Open" : "Closed")
+                .accessibilityHint("Peaking, zebra level, file type and aspect ratio")
+            Spacer(minLength: 6)
+            HStack(spacing: 6) {
+                chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
+                     on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+                if cam.peakingRenderer != nil { zebraChip }
+            }
+            Spacer(minLength: 6)
+            if cam.lenses.count > 1 { lensPicker }
+            Spacer(minLength: 6)
+            HStack(spacing: 6) {
+                if cam.peakingRenderer != nil { peakingChip }
+                if cam.isMagnifierAvailable {
+                    chip("MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
+                         on: cam.isMagnifierEnabled) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
+                        .accessibilityHint("When on, focusing with the focus rail magnifies the focus point so you can check focus.")
+                }
+            }
         }
-        .padding(.leading, 8)
+        .frame(height: 44)
+        .padding(.horizontal, 10)
     }
 
-    /// ZEB: tap for zebras on and off, touch and hold for the level they start at.
+    /// ZEB: zebras on and off. The level they start at is in SET.
     private var zebraChip: some View {
-        let level = Binding(get: { cam.zebraLevel }, set: { cam.setZebraLevel($0) })
-        return Menu {
-            Picker("Level", selection: level) {
-                ForEach(ZebraLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+        chip("ZEB", label: "Zebras",
+             value: cam.isZebraEnabled ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent" : SettingsText.onOff(false),
+             on: cam.isZebraEnabled) { cam.setZebraEnabled(!cam.isZebraEnabled) }
+            .accessibilityHint("Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level.")
+            .accessibilityAdjustableAction { direction in
+                let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
+                switch direction {
+                case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
+                case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
+                @unknown default: break
+                }
             }
-        } label: {
-            chipLabel("ZEB")
-        } primaryAction: {
-            cam.setZebraEnabled(!cam.isZebraEnabled)
-        }
-        .menuStyle(.button)
-        .buttonStyle(ChipStyle(isOn: cam.isZebraEnabled, angle: uiAngle))
-        .accessibilityLabel("Zebras")
-        .accessibilityValue(cam.isZebraEnabled
-                            ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent"
-                            : SettingsText.onOff(false))
-        .accessibilityHint("Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level.")
-        .accessibilityAdjustableAction { direction in
-            let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
-            switch direction {
-            case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
-            case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
-            @unknown default: break
-            }
-        }
     }
 
-    /// PK: tap to turn peaking on and off, touch and hold to choose its sensitivity.
+    /// PK: peaking on and off. Mode, sensitivity, colour and lines are in SET.
     private var peakingChip: some View {
-        let sensitivity = Binding(get: { cam.peakingSensitivity }, set: { cam.setPeakingSensitivity($0) })
-        let color = Binding(get: { cam.peakingAppearance.color }, set: { cam.setPeakingColor($0) })
-        let lines = Binding(get: { cam.peakingAppearance.lines }, set: { cam.setPeakingLines($0) })
-        let mode = Binding(get: { cam.peakingMode }, set: { cam.setPeakingMode($0) })
         let look = cam.peakingAppearance
         let value = cam.isPeakingEnabled
             ? "\(SettingsText.onOff(true)), \(cam.peakingMode.title), \(cam.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
             : SettingsText.onOff(false)
-        return Menu {
-            // Submenus, each showing its current choice.
-            Picker("Mode", selection: mode) {
-                ForEach(PeakingMode.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-            Picker("Sensitivity", selection: sensitivity) {
-                ForEach(PeakingSensitivity.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-            Picker("Colour", selection: color) {
-                ForEach(PeakingColor.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-            Picker("Lines", selection: lines) {
-                ForEach(PeakingLines.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.menu)
-        } label: {
-            chipLabel("PK")
-        } primaryAction: {
+        return chip("PK", label: "Focus peaking", value: value, on: cam.isPeakingEnabled) {
             cam.setPeakingEnabled(!cam.isPeakingEnabled)
         }
-        .menuStyle(.button)
-        .buttonStyle(ChipStyle(isOn: cam.isPeakingEnabled, angle: uiAngle))
-        .accessibilityLabel("Focus peaking")
-        .accessibilityValue(value)
-        .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; touch and hold for colour and lines.")
-        .accessibilityAction(named: cam.peakingMode == .sweep ? "Standard mode" : "Sweep mode") {
-            cam.setPeakingMode(cam.peakingMode == .sweep ? .standard : .sweep)
-        }
-        .accessibilityAction(named: "Next colour") {
-            let all = PeakingColor.allCases
-            cam.setPeakingColor(all[(look.color.rawValue + 1) % all.count])
-        }
-        .accessibilityAction(named: look.lines == .bold ? "Fine lines" : "Bold lines") {
-            cam.setPeakingLines(look.lines == .bold ? .fine : .bold)
-        }
+        .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; more in Settings.")
         .accessibilityAdjustableAction { direction in
             let all = PeakingSensitivity.allCases, i = cam.peakingSensitivity.rawValue
             switch direction {
@@ -369,7 +336,7 @@ struct ContentView: View {
     // MARK: Bottom controls
 
     private var controls: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             if cam.manual {
                 ManualControls(cam: cam, selected: $selected, angle: uiAngle)
             }
@@ -402,7 +369,7 @@ struct ContentView: View {
                 .opacity(cam.isRecording ? 0.4 : 1)
                 .shownWhenReady(cam.isCameraReady)
         }
-        .padding(.top, 8)
+        .padding(.top, 2)
         .padding(.bottom, 4)
     }
 
@@ -414,18 +381,26 @@ struct ContentView: View {
         }
     }
 
+    /// The lenses as one segmented control in the tool row.
     private var lensPicker: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 2) {
             ForEach(cam.lenses) { lens in
                 Button { cam.switchLens(to: lens) } label: {
                     Text(lens.label)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .frame(width: 44, height: 32)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(minWidth: 36, minHeight: 30)
+                        .padding(.horizontal, 2)
                 }
-                .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: uiAngle))
+                .buttonStyle(ChipStyle(isOn: cam.currentLensID == lens.id, angle: uiAngle, plain: true))
                 .accessibilityAddTraits(cam.currentLensID == lens.id ? .isSelected : [])
             }
         }
+        .padding(2)
+        .background(Color(white: 0.11), in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Lens")
     }
 
     private var shutterButton: some View {

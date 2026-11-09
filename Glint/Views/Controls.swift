@@ -14,11 +14,17 @@ struct PressScaleStyle: ButtonStyle {
 struct ChipStyle: ButtonStyle {
     let isOn: Bool
     let angle: Angle
+    /// Amber outline and text when off, for a chip that opens something (SET) rather than switching it on.
+    var outlined = false
+    /// No pill when off, for a segment inside a control that has its own background (the lens picker).
+    var plain = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(isOn ? Color.black : Color.white)
-            .background(isOn ? Color.amber : Color.white.opacity(0.15), in: Capsule())
+            .foregroundStyle(isOn ? Color.black : (outlined ? Color.amber : Color.white))
+            // Off is a dark pill, not a light tint, so it reads over a bright scene as well as on black.
+            .background(isOn ? Color.amber : (plain ? Color.clear : Color(white: 0.16).opacity(0.9)), in: Capsule())
+            .overlay(Capsule().strokeBorder(outlined && !isOn ? Color.amber : Color.clear, lineWidth: 1))
             .rotationEffect(angle)
             .opacity(configuration.isPressed ? 0.6 : 1)
     }
