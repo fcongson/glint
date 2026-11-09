@@ -50,8 +50,9 @@ enum CaptureEvent: Sendable {
     /// Microphone level while recording, 0 (silence) … 1 (full scale).
     case audioLevel(Float)
     case histogram(Histogram)
-    /// Where the preview frame is in focus.
     case photoCaptured(CapturedPhoto)
+    /// The camera is running again after the review screen closed.
+    case resumed
     case recordingStarted
     case recordingFinished(URL)
     case status(String)
@@ -101,6 +102,7 @@ actor CaptureSession {
     private var exposureInFlight: (sentAt: CFAbsoluteTime, seconds: Double)?
     private var pendingExposure: (duration: CMTime, iso: Float)?
     private var audioMeterTask: Task<Void, Never>?
+    private var micInput: AVCaptureDeviceInput?   // attached only in VIDEO, see `setMicrophone`
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
@@ -131,7 +133,8 @@ actor CaptureSession {
     // MARK: Setup
 
     /// Builds the session around the main (1×) camera and starts it. Emits `.ready`, or a status if there's no camera.
-    func configureAndStart(withAudio: Bool) {
+    /// Launch is in PHOTO, so there's no microphone yet (see `setMicrophone`).
+    func configureAndStart() {
         session.beginConfiguration()
         session.sessionPreset = .photo
 
@@ -157,10 +160,6 @@ actor CaptureSession {
                         mainFieldOfView: wide.activeFormat.videoFieldOfView) }
             .sorted { $0.zoom < $1.zoom }
 
-        if withAudio, let mic = AVCaptureDevice.default(for: .audio),
-           let micInput = try? AVCaptureDeviceInput(device: mic), session.canAddInput(micInput) {
-            session.addInput(micInput)
-        }
         if session.canAddOutput(photoOutput) {
             session.addOutput(photoOutput)
             photoOutput.maxPhotoQualityPrioritization = .speed   // no Deep Fusion / multi-frame fusion
@@ -195,13 +194,15 @@ actor CaptureSession {
     }
 
     /// What a session reconfiguration can reset, so call it after every `commitConfiguration()`: the mic input
-    /// puts the audio session in record mode, which silences the Taptic Engine by default; and rebuilt connections
-    /// come back enabled, so preview frames would flow to the analysis output when nothing wants them.
+    /// puts the audio session in record mode, which silences the Taptic Engine by default; rebuilt connections
+    /// come back enabled, so preview frames would flow to the analysis output when nothing wants them; and the
+    /// photo output's prepared settings may need preparing again.
     private func restoreAfterReconfiguration() {
         try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
         if let d = device { analyzer.setWhiteKey(whiteKey(for: d)) }   // the format may have changed
         if let d = device { withLockedDevice(d, failure: "Config") { applyToneMapping($0) } }   // a preset can reset it
+        preparePhotoSettings()
     }
 
     /// Where clipped white sits depends on the lens and the format's processing, so it's learned for each.
@@ -507,14 +508,17 @@ actor CaptureSession {
     /// on, and starts it again after. Never stops mid-recording.
     func setRunning(_ running: Bool) {
         if running {
-            if !session.isRunning { session.startRunning() }
+            if !session.isRunning {
+                session.startRunning()   // blocks until frames are flowing
+                emit.yield(.resumed)
+            }
         } else if session.isRunning, !movieOutput.isRecording {
             session.stopRunning()
         }
     }
 
-    /// Chooses what the luma analysis stream is for, and attaches it only while something wants it, so it costs
-    /// nothing while the histogram and peaking are both off.
+    /// Chooses what the luma analysis stream is for. Its frames flow only while something wants them, so it costs
+    /// nothing while the histogram, peaking and zebras are all off.
     func setAnalysis(histogram: Bool, viewfinder: ViewfinderSettings?) {
         let wants = FrameAnalyzer.Wants(histogram: histogram, viewfinder: viewfinder)
         let output = analyzer.output
@@ -624,16 +628,8 @@ actor CaptureSession {
     func capturePhoto(fileType: PhotoFileType, aspect: AspectRatio, whiteBalance: WhiteBalanceSetting,
                       requestedAt: CFAbsoluteTime) {
         applyCaptureRotation(to: photoOutput)
-        let settings: AVCapturePhotoSettings
-        // HEIC also shoots Bayer RAW, then develops it into a HEIC with no processing, so it matches the DNG.
-        let bayerFormat = photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) })
-        let plan = CapturePlan(fileType: fileType, bayerRAWAvailable: bayerFormat != nil)
-        if let bayerFormat {
-            settings = AVCapturePhotoSettings(rawPixelFormatType: bayerFormat)   // Bayer DNG only
-        } else {
-            settings = AVCapturePhotoSettings()
-            settings.photoQualityPrioritization = .speed
-        }
+        let (settings, bayerRAW) = makePhotoSettings()
+        let plan = CapturePlan(fileType: fileType, bayerRAWAvailable: bayerRAW)
         if plan.fellBackFromRAW(fileType: fileType) { emit.yield(.status("Bayer RAW unavailable, saving HEIC")) }
         let id = settings.uniqueID
         let delegate = PhotoCaptureDelegate(
@@ -643,26 +639,65 @@ actor CaptureSession {
         photoOutput.capturePhoto(with: settings, delegate: delegate)
     }
 
+    /// The settings every still is shot with. HEIC also shoots Bayer RAW, then develops it into a HEIC with no
+    /// processing, so it matches the DNG. A settings object is good for one capture, so this makes a new one.
+    private func makePhotoSettings() -> (AVCapturePhotoSettings, bayerRAW: Bool) {
+        if let bayer = photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) {
+            return (AVCapturePhotoSettings(rawPixelFormatType: bayer), true)   // Bayer DNG only
+        }
+        let settings = AVCapturePhotoSettings()
+        settings.photoQualityPrioritization = .speed
+        return (settings, false)
+    }
+
+    /// Has the photo output set up its buffers for the next shot now, rather than after the shutter press, as Apple
+    /// recommends as soon as a mode is active. A reconfiguration (lens, format, preset) can undo it, so this runs
+    /// after each one. Nothing to prepare in VIDEO.
+    private func preparePhotoSettings() {
+        guard !isVideo, session.outputs.contains(photoOutput) else { return }
+        photoOutput.setPreparedPhotoSettingsArray([makePhotoSettings().0]) { [emit] prepared, error in
+            if !prepared, let error { emit.yield(.status("Couldn't prepare the camera: \(error.localizedDescription)")) }
+        }
+    }
+
     // MARK: Video formats
 
     /// PHOTO · VIDEO. Video switches the device to a video format for `format`; photo returns to the photo preset
     /// (Bayer RAW stills). Either way the controller re-applies manual settings on `.formatChanged`.
-    func setCaptureMode(video: Bool, format: VideoFormat) {
+    /// `withAudio` attaches the microphone for video (false if access was refused); photo always detaches it.
+    func setCaptureMode(video: Bool, format: VideoFormat, withAudio: Bool) {
         guard let d = device, !movieOutput.isRecording else { return }
         isVideo = video
         videoFormat = format
+        // One configuration for the microphone and the format, so the session is rebuilt once.
+        session.beginConfiguration()
+        setMicrophone(video && withAudio)
         if video {
             configureVideoFormat(d)
         } else {
-            session.beginConfiguration()
             session.automaticallyConfiguresCaptureDeviceForWideColor = true
             session.sessionPreset = .photo
-            session.commitConfiguration()
         }
+        session.commitConfiguration()
         restoreAfterReconfiguration()
         let info = applyDeviceSettings(d)
         emit.yield(.videoCapabilities(videoCapabilities(d)))
         emit.yield(.formatChanged(info))
+    }
+
+    /// The microphone is attached only in VIDEO. While attached it keeps the audio system recording, which costs
+    /// battery, shows the orange indicator and silences haptics unless they're re-allowed; stills never need it.
+    /// Call inside a session configuration.
+    private func setMicrophone(_ on: Bool) {
+        if on {
+            guard micInput == nil, let mic = AVCaptureDevice.default(for: .audio),
+                  let input = try? AVCaptureDeviceInput(device: mic), session.canAddInput(input) else { return }
+            session.addInput(input)
+            micInput = input
+        } else if let input = micInput {
+            session.removeInput(input)
+            micInput = nil
+        }
     }
 
     /// A new choice from the video format panel.

@@ -71,6 +71,7 @@ final class CameraController {
     var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying || isZebraShown }
     var isZebraShown: Bool { isZebraEnabled && peakingRenderer != nil }
     private(set) var timing = ""
+    @ObservationIgnored private var timers: [String: CFAbsoluteTime] = [:]   // dev-only, see `startTimer`
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
     private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
@@ -80,6 +81,7 @@ final class CameraController {
     private let reviewRenderer: ReviewImageRenderer
     private let developer: PhotoDeveloper
     @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var modeGeneration = 0   // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
     @ObservationIgnored private var statusGeneration = 0
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
 
@@ -104,6 +106,7 @@ final class CameraController {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        startTimer("launch")
         locationProvider.start()
         Task {
             for await event in capture.events { handle(event) }
@@ -115,9 +118,10 @@ final class CameraController {
             }
         }
         Task {
+            // Only the camera is asked for at launch, so the preview isn't held up by a second prompt. The
+            // microphone is asked for the first time VIDEO is chosen.
             guard await AVCaptureDevice.requestAccess(for: .video) else { post("Camera access denied"); return }
-            let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
-            capture.enqueue { $0.configureAndStart(withAudio: micGranted) }
+            capture.enqueue { $0.configureAndStart() }
         }
         // Prepare RAW decoding before the first shot, once the camera has had a moment to start.
         let developer = developer
@@ -138,9 +142,12 @@ final class CameraController {
     private func handle(_ event: CaptureEvent) {
         switch event {
         case .ready(let lenses, let device):
+            stopTimer("launch")
             self.lenses = lenses
             apply(device)
         case .lensChanged(let device), .formatChanged(let device):
+            stopTimer("lens")
+            stopTimer("mode")
             apply(device)
             // A new device or format starts in auto, so re-lock exposure/WB if in MANUAL, and focus if by hand.
             if manual || !isAutofocus { sendExposureMode(keepWhiteBalance: true) }
@@ -182,6 +189,8 @@ final class CameraController {
             if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
         case .photoCaptured(let photo):
             photoCaptured(photo)
+        case .resumed:
+            stopTimer("resume")
         case .recordingStarted:
             isRecording = true
             recordingStartedAt = Date()
@@ -211,6 +220,7 @@ final class CameraController {
     func switchLens(to lens: Lens) {
         guard lens.id != currentLensID, !isRecording else { return }
         let id = lens.id
+        startTimer("lens")
         capture.enqueue { $0.switchLens(to: id) }
     }
 
@@ -220,8 +230,20 @@ final class CameraController {
     func setCaptureMode(_ mode: CaptureMode) {
         guard mode != captureMode, !isRecording else { return }
         captureMode = mode
-        let video = mode == .video, format = videoFormat
-        capture.enqueue { $0.setCaptureMode(video: video, format: format) }
+        modeGeneration += 1
+        startTimer("mode")
+        let format = videoFormat
+        guard mode == .video else {
+            capture.enqueue { $0.setCaptureMode(video: false, format: format, withAudio: false) }
+            return
+        }
+        // Asks for the microphone the first time; after that this returns straight away.
+        let generation = modeGeneration
+        Task {
+            let mic = await AVCaptureDevice.requestAccess(for: .audio)
+            guard generation == modeGeneration else { return }   // switched again while the prompt was up
+            capture.enqueue { $0.setCaptureMode(video: true, format: format, withAudio: mic) }
+        }
     }
 
     /// A choice from the video format panel, settled to the nearest one this lens can record.
@@ -429,6 +451,7 @@ final class CameraController {
     /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
     func setReviewing(_ isReviewing: Bool) {
         let running = !isReviewing
+        if running { startTimer("resume") }
         capture.enqueue { $0.setRunning(running) }
     }
 
@@ -572,6 +595,23 @@ final class CameraController {
         if developTime > 0 { lines.append(String(format: "develop %.1fs", developTime)) }
         lines.append(String(format: "render  %.1fs", renderTime))
         timing = lines.joined(separator: "\n")   // dev-only readout
+        #endif
+    }
+
+    /// Dev-only timings for the readout over the viewfinder, in debug builds: from launch to the camera running, a
+    /// lens or PHOTO · VIDEO tap to the new lens or format being live, and closing review to the camera running
+    /// again. (Launch includes the camera permission prompt, the first time.) The latest one replaces the last.
+    private func startTimer(_ name: String) {
+        #if DEBUG
+        timers[name] = CFAbsoluteTimeGetCurrent()
+        #endif
+    }
+
+    private func stopTimer(_ name: String) {
+        #if DEBUG
+        guard let started = timers.removeValue(forKey: name) else { return }
+        timing = String(format: "%@ %.2fs", name.padding(toLength: 7, withPad: " ", startingAt: 0),
+                         CFAbsoluteTimeGetCurrent() - started)
         #endif
     }
 
