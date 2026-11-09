@@ -231,7 +231,7 @@ final class PeakingRenderer: @unchecked Sendable {
                                  outlines ? 1 : 0),
                     magnify: magnify,
                     // Stripes about 7 points wide at the screen's scale (drawable pixels per point ≈ 3).
-                    zebra: SIMD4(settings.zebras?.threshold ?? 2, 21, settings.zebras == nil ? 0 : 1, 0))
+                    zebra: SIMD4(settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1, 0))
                 encoder.setRenderPipelineState(drawPipeline)
                 encoder.setFragmentTexture(lumaTexture, index: 0)
                 encoder.setFragmentTexture(chromaTexture, index: 1)

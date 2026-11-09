@@ -20,16 +20,25 @@ final class HistogramModel {
 }
 
 /// Luma histogram of one frame. A pure value, computed from the Y plane of a 420YpCbCr8 pixel buffer.
+///
+/// Clipped highlights are found by their shape, not a fixed level: where the image processing puts white varies
+/// (measured on an iPhone 15 Pro: about 235 of 255, not 255), so a fixed "250 and over" missed blown-out areas
+/// entirely. Clipping piles pixels up at the very top value, a spike one or two levels wide, because noise can't
+/// push past the ceiling; an evenly lit bright surface spreads over several levels instead. That spike's level is
+/// the frame's white (`whiteLevel`), which zebras use too.
 struct Histogram: Sendable {
     static let binCount = 64
-    static let highlightLuma = 250          // at or above: near white
     static let shadowLuma = 5               // at or below: near black
-    static let highlightClipFraction: Float = 0.01   // warn when more than 1% of pixels are near white
+    static let minimumWhite = 200           // a spike lower than this is a uniform subject, not clipped white
+    static let spikeFraction: Float = 0.002 // at least this share of pixels in the top two levels…
+    static let spikeSharpness: Float = 4    // …at this many times the density of the five levels below
+    static let highlightClipFraction: Float = 0.01   // warn when more than 1% of pixels are clipped white
     static let shadowClipFraction: Float = 0.05      // shadows are allowed more, since deep blacks are often intended
 
     let bins: [Float]          // 0...1, sqrt-scaled so small counts stay visible
     let clipsHighlights: Bool
     let clipsShadows: Bool
+    let whiteLevel: Int?       // where clipped highlights sit in this frame, if any are
 
     /// Samples every `step`th pixel in each direction. Returns nil if the buffer has no readable luma plane.
     init?(lumaOf pixelBuffer: CVPixelBuffer, step: Int = 8) {
@@ -43,23 +52,36 @@ struct Histogram: Sendable {
         let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
         let ptr = base.assumingMemoryBound(to: UInt8.self)
 
-        var counts = [Int](repeating: 0, count: Self.binCount)
-        var total = 0, hi = 0, lo = 0
+        var levels = [Int](repeating: 0, count: 256)
+        var total = 0
         for y in stride(from: 0, to: h, by: step) {
             let row = ptr + y * bytesPerRow
             for x in stride(from: 0, to: w, by: step) {
-                let v = Int(row[x])
-                counts[v * Self.binCount / 256] += 1
+                levels[Int(row[x])] += 1
                 total += 1
-                if v >= Self.highlightLuma { hi += 1 }
-                if v <= Self.shadowLuma { lo += 1 }
             }
         }
         guard total > 0 else { return nil }
+        var counts = [Int](repeating: 0, count: Self.binCount)
+        for (v, n) in levels.enumerated() { counts[v * Self.binCount / 256] += n }
         let peak = Float(max(counts.max() ?? 1, 1))
         bins = counts.map { (Float($0) / peak).squareRoot() }
-        clipsHighlights = Float(hi) / Float(total) > Self.highlightClipFraction
+        let lo = levels[0...Self.shadowLuma].reduce(0, +)
         clipsShadows = Float(lo) / Float(total) > Self.shadowClipFraction
+
+        let white = Self.clippedWhite(levels, total: total)
+        whiteLevel = white
+        let hi = white.map { levels[$0] + levels[$0 - 1] } ?? 0
+        clipsHighlights = Float(hi) / Float(total) > Self.highlightClipFraction
+    }
+
+    /// The level of a clipping spike at the top of `levels`, if there is one.
+    static func clippedWhite(_ levels: [Int], total: Int) -> Int? {
+        guard let top = levels.lastIndex(where: { $0 > 0 }), top >= minimumWhite else { return nil }
+        let spike = Float(levels[top] + levels[top - 1])
+        let below = Float(levels[(top - 6)...(top - 2)].reduce(0, +))
+        guard spike >= Float(total) * spikeFraction, spike / 2 >= spikeSharpness * below / 5 else { return nil }
+        return top
     }
 }
 
@@ -84,6 +106,10 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private var lastHistogram: Double = 0
     private let publishHistogram: @Sendable (Histogram) -> Void
     private let peaking: PeakingRenderer?
+
+    /// The level clipped white was last seen at (see `Histogram.whiteLevel`). Until clipping is first seen, full
+    /// scale, so zebras at 100% don't mark bright areas that aren't clipped. Only touched on `queue`.
+    private var whiteLevel = 255
 
     #if DEBUG
     private var timeline = DebugFrameTimeline()        // only touched on `queue`
@@ -132,7 +158,8 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let current = wants.withLock { $0 }
         let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-        let doHistogram = current.histogram && t - lastHistogram > 0.2
+        // The histogram also finds the frame's white level, which zebras need even with HIST off.
+        let doHistogram = (current.histogram || current.viewfinder?.zebras != nil) && t - lastHistogram > 0.2
         let doPeaking = current.viewfinder != nil && peaking != nil
         #if DEBUG
         if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer), let text = timeline.add(sampleBuffer, pixelBuffer) {
@@ -142,10 +169,12 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         guard doHistogram || doPeaking, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
             lastHistogram = t
-            publishHistogram(histogram)
+            if let white = histogram.whiteLevel { whiteLevel = white }
+            if current.histogram { publishHistogram(histogram) }
         }
-        if doPeaking {
-            if let settings = current.viewfinder { peaking?.render(pixelBuffer, settings: settings) }
+        if doPeaking, var settings = current.viewfinder {
+            settings.zebraWhite = whiteLevel
+            peaking?.render(pixelBuffer, settings: settings)
         }
     }
 }

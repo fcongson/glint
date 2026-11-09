@@ -3,11 +3,12 @@ import Testing
 @testable import Glint
 
 struct ZebraTests {
-    @Test func levelsRiseToJustUnderFullScale() {
-        let thresholds = ZebraLevel.allCases.map(\.threshold)
+    @Test func levelsAreRelativeToWhereWhiteIs() {
+        // White at 235, as the iPhone's processing puts it: 100% stripes the clipping spike, 70% is 70% of white.
+        #expect(ZebraLevel.hundred.threshold(white: 235) == 234 / 255)
+        #expect(abs(ZebraLevel.seventy.threshold(white: 235) - 0.7 * 235 / 255) < 0.0001)
+        let thresholds = ZebraLevel.allCases.map { $0.threshold(white: 235) }
         #expect(thresholds == thresholds.sorted())
-        #expect(ZebraLevel.seventy.threshold == 0.7)
-        #expect(ZebraLevel.hundred.threshold < 1 && ZebraLevel.hundred.threshold > 0.97)
         #expect(ZebraLevel.hundred.title == "100%")
     }
 

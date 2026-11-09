@@ -68,6 +68,7 @@ struct ViewfinderSettings: Equatable, Sendable {
     var mode = PeakingMode.standard
     var magnifier: Magnifier?
     var zebras: ZebraLevel?
+    var zebraWhite = 255   // where clipped white sits in the frames (from the histogram), for zebra levels
 
     /// Peaking and magnifying need full-resolution frames; zebras alone are happy with screen-sized ones.
     var needsFullResolution: Bool { outlines || magnifier != nil }

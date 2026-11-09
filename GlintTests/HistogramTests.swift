@@ -56,4 +56,23 @@ struct HistogramTests {
         #expect(h.bins.max() == 1)
         #expect(h.bins.allSatisfy { (0...1).contains($0) })
     }
+
+    @Test func clippingIsFoundWhereverWhiteIs() throws {
+        // Half the frame blown out at 235 (where the iPhone's processing puts white), the rest midtones.
+        let h = try #require(Histogram(lumaOf: pixelBuffer { x, _ in x < 32 ? 235 : 120 }))
+        #expect(h.whiteLevel == 235)
+        #expect(h.clipsHighlights)
+    }
+
+    @Test func anEvenlyLitBrightSurfaceIsNotClipping() throws {
+        // A bright subject spread over 226...233 (lighting and noise): no spike at the top, so not clipped.
+        let h = try #require(Histogram(lumaOf: pixelBuffer { x, y in UInt8(226 + (x / 8 + y / 8) % 8) }))
+        #expect(h.whiteLevel == nil)
+        #expect(!h.clipsHighlights)
+    }
+
+    @Test func aDimFrameHasNoWhite() throws {
+        let h = try #require(Histogram(lumaOf: pixelBuffer { _, _ in 128 }))
+        #expect(h.whiteLevel == nil)
+    }
 }
