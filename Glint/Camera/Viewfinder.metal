@@ -157,6 +157,7 @@ struct ViewfinderUniforms {
     float4 lines;    // xy: one mask texel in frame coordinates; z: how many texels to thicken by (0 = fine);
                      // w: 1 to draw outlines, 0 for none
     float4 magnify;  // xy: centre of the magnified region in picture coordinates; z: zoom (1 = not magnified)
+    float4 zebra;    // x: luma threshold (0…1); y: stripe period in drawable pixels; z: 1 to draw zebras
 };
 
 struct ViewfinderVertex {
@@ -201,5 +202,11 @@ fragment float4 viewfinderFragment(ViewfinderVertex in [[stage_in]],
             }
         }
     }
-    return float4(mix(saturate(rgb), u.color.rgb, outline * u.lines.w), 1);
+    rgb = saturate(rgb);
+    // Zebras: diagonal black and white stripes, fixed to the screen, over what's at or above the level.
+    if (u.zebra.z > 0 && y >= u.zebra.x) {
+        float phase = fract((in.position.x + in.position.y) / u.zebra.y);
+        rgb = mix(rgb, float3(phase < 0.5 ? 1.0 : 0.0), 0.6);
+    }
+    return float4(mix(rgb, u.color.rgb, outline * u.lines.w), 1);
 }

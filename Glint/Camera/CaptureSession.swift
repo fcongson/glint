@@ -97,6 +97,9 @@ actor CaptureSession {
     private var isVideo = false                  // PHOTO · VIDEO: video uses a video device format
     private var videoFormat = VideoFormat()
     private var exposureFrozen = false           // video's "exposure while recording: locked"
+    // Custom exposure changes go to the camera one at a time, latest wins (see `requestExposure`).
+    private var exposureInFlight: (sentAt: CFAbsoluteTime, seconds: Double)?
+    private var pendingExposure: (duration: CMTime, iso: Float)?
     private var audioMeterTask: Task<Void, Never>?
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
@@ -169,12 +172,19 @@ actor CaptureSession {
                 movieOutput.isDeferredStartEnabled = false
             }
         }
-        // The analysis output (histogram, peaking) is attached separately, only while one of them is on.
+        // The preview-frame output (histogram, GPU viewfinder) is attached once, with its frames switched off
+        // until something wants them: adding or removing it later reconfigures the session, which stalls the
+        // preview for a moment every time HIST or ZEB is switched.
+        let analysisOutput = analyzer.output
+        if session.canAddOutput(analysisOutput) {
+            session.addOutput(analysisOutput)
+            analysisOutput.connection(with: .video)?.isEnabled = false
+        }
         session.commitConfiguration()
 
         let info = applyDeviceSettings(wide)
         session.startRunning()
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
         subjectAreaObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: nil, queue: nil) { [weak self] _ in
             self?.enqueue { $0.resumeContinuousFocus() }
@@ -184,10 +194,35 @@ actor CaptureSession {
         emit.yield(.videoCapabilities(videoCapabilities(wide)))
     }
 
-    /// The mic input puts the audio session in record mode, which silences the Taptic Engine by default.
-    /// Session reconfiguration can reset this, so call it again after every `commitConfiguration()`.
-    private func allowHapticsDuringRecording() {
+    /// What a session reconfiguration can reset, so call it after every `commitConfiguration()`: the mic input
+    /// puts the audio session in record mode, which silences the Taptic Engine by default; and rebuilt connections
+    /// come back enabled, so preview frames would flow to the analysis output when nothing wants them.
+    private func restoreAfterReconfiguration() {
         try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+        analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
+        if let d = device { analyzer.setWhiteKey(whiteKey(for: d)) }   // the format may have changed
+        if let d = device { withLockedDevice(d, failure: "Config") { applyToneMapping($0) } }   // a preset can reset it
+    }
+
+    /// Where clipped white sits depends on the lens and the format's processing, so it's learned for each.
+    private func whiteKey(for d: AVCaptureDevice) -> String {
+        let size = CMVideoFormatDescriptionGetDimensions(d.activeFormat.formatDescription)
+        return "\(d.uniqueID) \(size.width)x\(size.height) \(isVideo ? "video" : "photo")"
+    }
+
+    /// Video HDR off and one tone curve for the whole frame. With video HDR, the preview's adaptive tone mapping
+    /// eases into a new exposure over several seconds, so after a big change the viewfinder, histogram and
+    /// zebras kept brightening long after the exposure itself had landed (measured: 1/8 applied in 0.3 s,
+    /// clipping shown seconds later). This also suits a minimal-processing camera. Bayer RAW stills aren't
+    /// tone mapped, so photos are unaffected; video gets a flatter, more literal look. The device must be locked.
+    private func applyToneMapping(_ d: AVCaptureDevice) {
+        if d.activeFormat.isVideoHDRSupported {
+            if d.automaticallyAdjustsVideoHDREnabled { d.automaticallyAdjustsVideoHDREnabled = false }
+            if d.isVideoHDREnabled { d.isVideoHDREnabled = false }
+        }
+        if d.activeFormat.isGlobalToneMappingSupported, !d.isGlobalToneMappingEnabled {
+            d.isGlobalToneMappingEnabled = true
+        }
     }
 
     /// Per-lens setup: distortion correction off, stabilization off. Returns the lens's ranges and aperture.
@@ -196,8 +231,13 @@ actor CaptureSession {
             if d.isGeometricDistortionCorrectionSupported {
                 d.isGeometricDistortionCorrectionEnabled = false
             }
+            applyToneMapping(d)
         }
         movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
+        analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted   // a new lens rebuilds connections
+        analyzer.setWhiteKey(whiteKey(for: d))
+        pendingExposure = nil   // meant for the previous lens
+        exposureInFlight = nil
         observeMeterAndLens(d)
         return DeviceInfo(lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
                           aperture: d.lensAperture)
@@ -263,7 +303,7 @@ actor CaptureSession {
             session.addInput(old)   // roll back
         }
         session.commitConfiguration()
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
 
         guard let current = device else { return }
         if isVideo { configureVideoFormat(current) }   // each lens has its own formats
@@ -290,6 +330,8 @@ actor CaptureSession {
         isManual = manual
         autoSettings = auto
         exposureFrozen = false
+        pendingExposure = nil   // superseded by what's set here
+        exposureInFlight = nil
         withLockedDevice(d, failure: "Config") { d in
             guard manual else {
                 if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
@@ -332,11 +374,49 @@ actor CaptureSession {
         guard let d = device, d.isExposureModeSupported(.custom), !autoSettings.isProgram, !exposureFrozen else { return }
         let auto = autoSettings
         let shutterDenominator = isVideo ? max(shutterDenominator, videoFormat.slowestShutterDenominator) : shutterDenominator
-        withLockedDevice(d, failure: "Config") { d in
-            let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
-            let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
-            d.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
+        let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
+        let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
+        requestExposure(duration: duration, iso: isoValue)
+    }
+
+    /// Sends a custom exposure to the camera, latest wins. The camera applies changes in order, a frame or more
+    /// each, and at slow shutter speeds a frame is long: a quick slide across the ruler (30 steps from 1/8000 to
+    /// 1/8) queued every step, and the picture, histogram and zebras took seconds to catch up. Now, while one
+    /// change is being applied, newer ones wait in a single slot and only the latest is sent when it lands. If the
+    /// camera never confirms (the lens changed, say), the slot only holds things up briefly.
+    private func requestExposure(duration: CMTime, iso: Float) {
+        if let flight = exposureInFlight,
+           CFAbsoluteTimeGetCurrent() - flight.sentAt < max(0.3, flight.seconds * 4) {
+            pendingExposure = (duration, iso)
+            return
         }
+        sendExposure(duration: duration, iso: iso)
+    }
+
+    private func sendExposure(duration: CMTime, iso: Float) {
+        pendingExposure = nil
+        guard let d = device, d.isExposureModeSupported(.custom) else {
+            exposureInFlight = nil
+            return
+        }
+        let seconds = duration == AVCaptureDevice.currentExposureDuration ? d.exposureDuration.seconds : duration.seconds
+        exposureInFlight = (CFAbsoluteTimeGetCurrent(), seconds)
+        withLockedDevice(d, failure: "Config") { d in
+            d.setExposureModeCustom(duration: duration, iso: iso) { [weak self] _ in
+                Task { await self?.exposureApplied() }
+            }
+        }
+    }
+
+    /// The last change has reached the frames: send the latest one waiting, if exposure is still custom.
+    private func exposureApplied() {
+        exposureInFlight = nil
+        guard let next = pendingExposure else { return }
+        guard isManual, !autoSettings.isProgram, !exposureFrozen else {
+            pendingExposure = nil
+            return
+        }
+        sendExposure(duration: next.duration, iso: next.iso)
     }
 
     /// Exposure compensation, in stops.
@@ -360,16 +440,12 @@ actor CaptureSession {
             let format = d.activeFormat
             if auto.iso, let next = PriorityExposure.nextISO(current: d.iso, offset: offset,
                                                              min: format.minISO, max: format.maxISO) {
-                withLockedDevice(d, failure: "Config") { d in
-                    d.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration, iso: next, completionHandler: nil)
-                }
+                requestExposure(duration: AVCaptureDevice.currentExposureDuration, iso: next)
             } else if auto.shutter, let next = PriorityExposure.nextDuration(
                 current: d.exposureDuration.seconds, offset: offset,
                 min: format.minExposureDuration.seconds, max: format.maxExposureDuration.seconds) {
-                withLockedDevice(d, failure: "Config") { d in
-                    d.setExposureModeCustom(duration: CMTime(seconds: next, preferredTimescale: 1_000_000),
-                                            iso: AVCaptureDevice.currentISO, completionHandler: nil)
-                }
+                requestExposure(duration: CMTime(seconds: next, preferredTimescale: 1_000_000),
+                                iso: AVCaptureDevice.currentISO)
             }
         }
         emit.yield(.autoValues(iso: auto.iso ? d.iso : nil, shutterSeconds: auto.shutter ? d.exposureDuration.seconds : nil))
@@ -442,22 +518,30 @@ actor CaptureSession {
     func setAnalysis(histogram: Bool, viewfinder: ViewfinderSettings?) {
         let wants = FrameAnalyzer.Wants(histogram: histogram, viewfinder: viewfinder)
         let output = analyzer.output
-        let attached = session.outputs.contains(output)
-        // Settings that only change how frames are drawn (magnifier point, colour, …) needn't touch the session;
-        // reconfiguring it on every tap would stall the preview.
-        guard wants.any != attached || analyzer.needsReconfiguration(for: wants) else {
+        // Normally attached since setup; then frames are just switched on or off, which is immediate. Only a change
+        // of frame size (peaking or magnifying, which need full resolution) reconfigures the session.
+        if session.outputs.contains(output) {
+            if analyzer.needsReconfiguration(for: wants) {
+                session.beginConfiguration()
+                analyzer.set(wants)
+                session.commitConfiguration()
+                restoreAfterReconfiguration()
+            } else {
+                analyzer.set(wants)
+            }
+            output.connection(with: .video)?.isEnabled = wants.any
+            return
+        }
+        // Couldn't be attached at setup: attach it now that something wants frames.
+        guard wants.any else {
             analyzer.set(wants)
             return
         }
         session.beginConfiguration()
-        analyzer.set(wants)   // may change the output's frame size
-        if wants.any {
-            if !attached, session.canAddOutput(output) { session.addOutput(output) }
-        } else if attached {
-            session.removeOutput(output)
-        }
+        analyzer.set(wants)
+        if session.canAddOutput(output) { session.addOutput(output) }
         session.commitConfiguration()
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
     }
 
     // MARK: Focus
@@ -575,7 +659,7 @@ actor CaptureSession {
             session.sessionPreset = .photo
             session.commitConfiguration()
         }
-        allowHapticsDuringRecording()
+        restoreAfterReconfiguration()
         let info = applyDeviceSettings(d)
         emit.yield(.videoCapabilities(videoCapabilities(d)))
         emit.yield(.formatChanged(info))
@@ -608,6 +692,7 @@ actor CaptureSession {
         session.automaticallyConfiguresCaptureDeviceForWideColor = wanted.encoding != .log
         withLockedDevice(d, failure: "Video format") { d in
             d.activeFormat = format
+            applyToneMapping(d)   // a new format starts with its own defaults
             let frame = CMTime(value: 1, timescale: CMTimeScale(wanted.frameRate))
             d.activeVideoMinFrameDuration = frame
             d.activeVideoMaxFrameDuration = frame

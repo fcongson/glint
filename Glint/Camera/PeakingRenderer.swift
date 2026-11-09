@@ -229,7 +229,9 @@ final class PeakingRenderer: @unchecked Sendable {
                     color: SIMD4(appearance.color.rgb, 1),
                     lines: SIMD4(1 / Float(outlineMask.width), 1 / Float(outlineMask.height), reach,
                                  outlines ? 1 : 0),
-                    magnify: magnify)
+                    magnify: magnify,
+                    // Stripes about 7 points wide at the screen's scale (drawable pixels per point ≈ 3).
+                    zebra: SIMD4(settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1, 0))
                 encoder.setRenderPipelineState(drawPipeline)
                 encoder.setFragmentTexture(lumaTexture, index: 0)
                 encoder.setFragmentTexture(chromaTexture, index: 1)
@@ -467,6 +469,7 @@ final class PeakingRenderer: @unchecked Sendable {
         var color: SIMD4<Float>
         var lines: SIMD4<Float>
         var magnify: SIMD4<Float>
+        var zebra: SIMD4<Float>
     }
 
     /// The upright picture's size as a fraction of the view when fitted inside it (like `.resizeAspect`).

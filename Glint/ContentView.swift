@@ -104,7 +104,7 @@ struct ContentView: View {
                         if focusTapCount == n { focusPoint = nil }
                     }
                 }, onLayerReady: { cam.attachPreviewLayer($0) })
-                // While peaking or the magnifier is on, the viewfinder is drawn on the GPU over the system
+                // While peaking, magnifying or zebras are on, the viewfinder is drawn on the GPU over the system
                 // preview, so outlines can't lag the picture and magnifying uses the full-resolution frame.
                 // Touches go through to the preview.
                 if cam.isViewfinderDrawn, let renderer = cam.peakingRenderer {
@@ -163,6 +163,11 @@ struct ContentView: View {
                 // Focus lives on the viewfinder's edge, where the thumb can reach it while framing. It's there in
                 // AUTO too: exposure and focus are separate, as on a camera.
                 focusControls
+            }
+            .overlay(alignment: .leading) {
+                // Exposure aids on the opposite edge, mirroring focus: grouped by purpose, as on a camera, and
+                // clear of the Dynamic Island. Centred, below the histogram and above the status messages.
+                exposureAids
             }
             .overlay(alignment: .bottom) {
                 // Lens buttons sit over the bottom of the preview, as in the system Camera, so the controls below
@@ -228,9 +233,7 @@ struct ContentView: View {
                 chip(title, label: "Video format", value: title, on: false) { showingVideoFormat = true }
                     .accessibilityHint("Opens resolution, frame rate, codec and exposure lock")
             }
-            chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
-                 on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
-            Spacer(minLength: 140)
+            Spacer(minLength: 140)   // the Dynamic Island
             ExposureMeterView(meter: ExposureMeter(offset: cam.exposureOffset), angle: uiAngle)
         }
         .padding(.horizontal, 16)
@@ -279,6 +282,44 @@ struct ContentView: View {
         return cam.isAutofocus
             ? "Touch the viewfinder to set the focus point"
             : "Touch the viewfinder to choose where the magnifier looks. Autofocus is off."
+    }
+
+    private var exposureAids: some View {
+        VStack(spacing: 10) {
+            chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
+                 on: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+            if cam.peakingRenderer != nil { zebraChip }
+        }
+        .padding(.leading, 8)
+    }
+
+    /// ZEB: tap for zebras on and off, touch and hold for the level they start at.
+    private var zebraChip: some View {
+        let level = Binding(get: { cam.zebraLevel }, set: { cam.setZebraLevel($0) })
+        return Menu {
+            Picker("Level", selection: level) {
+                ForEach(ZebraLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+        } label: {
+            chipLabel("ZEB")
+        } primaryAction: {
+            cam.setZebraEnabled(!cam.isZebraEnabled)
+        }
+        .menuStyle(.button)
+        .buttonStyle(ChipStyle(isOn: cam.isZebraEnabled, angle: uiAngle))
+        .accessibilityLabel("Zebras")
+        .accessibilityValue(cam.isZebraEnabled
+                            ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent"
+                            : SettingsText.onOff(false))
+        .accessibilityHint("Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level.")
+        .accessibilityAdjustableAction { direction in
+            let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
+            switch direction {
+            case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
+            case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
+            @unknown default: break
+            }
+        }
     }
 
     /// PK: tap to turn peaking on and off, touch and hold to choose its sensitivity.

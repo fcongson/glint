@@ -53,7 +53,9 @@ final class CameraController {
     @ObservationIgnored private var photosProcessing = 0
     @ObservationIgnored private var processingTimeout: Task<Void, Never>?
     /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
-    private var pausedForLowPower = (histogram: false, peaking: false)
+    private(set) var isZebraEnabled = false
+    private(set) var zebraLevel = ZebraLevel.hundred
+    private var pausedForLowPower = (histogram: false, peaking: false, zebras: false)
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
 
     // Focus magnifier (see Magnifier.swift). The point is where the viewfinder punches in: in manual focus a tap
@@ -66,7 +68,8 @@ final class CameraController {
     var isMagnifierAvailable: Bool { peakingRenderer != nil }
     var isMagnifying: Bool { isMagnifierAvailable && isMagnifierEnabled && isRailHeld }
     /// Whether the GPU viewfinder draws, for outlines or magnifying.
-    var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying }
+    var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying || isZebraShown }
+    var isZebraShown: Bool { isZebraEnabled && peakingRenderer != nil }
     private(set) var timing = ""
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
@@ -388,24 +391,39 @@ final class CameraController {
         sendAnalysis()
     }
 
-    /// Low Power Mode turns off the histogram and peaking, the only extra work Glint does on every preview frame.
-    /// Turning either back on keeps it on; whatever was turned off comes back when Low Power Mode ends.
+    /// Low Power Mode turns off the histogram, peaking and zebras, the only extra work Glint does on every preview
+    /// frame. Turning one back on keeps it on; whatever was turned off comes back when Low Power Mode ends.
     private func lowPowerModeChanged(_ isOn: Bool) {
         if isOn {
-            guard isHistogramEnabled || isPeakingEnabled else { return }
-            pausedForLowPower = (isHistogramEnabled, isPeakingEnabled)
+            guard isHistogramEnabled || isPeakingEnabled || isZebraEnabled else { return }
+            pausedForLowPower = (isHistogramEnabled, isPeakingEnabled, isZebraEnabled)
             isHistogramEnabled = false
             isPeakingEnabled = false
+            isZebraEnabled = false
             histogramModel.clear()
             sendAnalysis()
-            post("Low Power Mode: histogram and peaking off")
+            post("Low Power Mode: histogram, peaking and zebras off")
         } else {
-            guard pausedForLowPower.histogram || pausedForLowPower.peaking else { return }
+            guard pausedForLowPower.histogram || pausedForLowPower.peaking || pausedForLowPower.zebras else { return }
             if pausedForLowPower.histogram { isHistogramEnabled = true }
             if pausedForLowPower.peaking { isPeakingEnabled = true }
-            pausedForLowPower = (false, false)
+            if pausedForLowPower.zebras { isZebraEnabled = true }
+            pausedForLowPower = (false, false, false)
             sendAnalysis()
         }
+    }
+
+    func setZebraEnabled(_ on: Bool) {
+        guard on != isZebraEnabled, !on || peakingRenderer != nil else { return }
+        isZebraEnabled = on
+        pausedForLowPower.zebras = false   // the user's choice now
+        sendAnalysis()
+    }
+
+    func setZebraLevel(_ level: ZebraLevel) {
+        guard level != zebraLevel else { return }
+        zebraLevel = level
+        sendAnalysis()
     }
 
     /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
@@ -420,7 +438,8 @@ final class CameraController {
         let viewfinder: ViewfinderSettings? = isViewfinderDrawn
             ? ViewfinderSettings(outlines: isPeakingShown, sensitivity: peakingSensitivity,
                                  appearance: peakingAppearance, mode: peakingMode,
-                                 magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil)
+                                 magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil,
+                                 zebras: isZebraShown ? zebraLevel : nil)
             : nil
         capture.enqueue { $0.setAnalysis(histogram: histogram, viewfinder: viewfinder) }
     }
