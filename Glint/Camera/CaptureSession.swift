@@ -113,8 +113,7 @@ actor CaptureSession {
     private var micInput: AVCaptureDeviceInput?   // attached only in VIDEO, see `setMicrophone`
     private var frameRateReduced = false          // critical system pressure, PHOTO only; see `setFrameRateReduced`
     private var raisedMaxFrameDuration = false    // whether reducing the frame rate also lengthened the longest frame
-    private var deferredStartObserver: NSObject?
-    private var lensSwitchMarks: [(String, CFAbsoluteTime)]?   // debug: the steps of a lens switch, while one runs  // the session's deferred start delegate (iOS 26+), kept alive here
+    private var deferredStartObserver: NSObject?  // the session's deferred start delegate (iOS 26+), kept alive here
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
@@ -394,9 +393,6 @@ actor CaptureSession {
     func switchLens(to lensID: String) {
         guard let newDev = lensDevices[lensID], newDev != device,
               let newInput = try? AVCaptureDeviceInput(device: newDev) else { return }
-        #if DEBUG
-        let t0 = CFAbsoluteTimeGetCurrent()
-        #endif
         session.beginConfiguration()
         if let old = videoInput { session.removeInput(old) }
         if session.canAddInput(newInput) {
@@ -409,35 +405,14 @@ actor CaptureSession {
         updateResponsiveCapture()
         setConnections()   // the new input's connections, set before the commit so they don't wait after it
         session.commitConfiguration()
-        #if DEBUG
-        lensSwitchMarks = [("rebuild", CFAbsoluteTimeGetCurrent())]
-        defer { lensSwitchMarks = nil }
-        #endif
         restoreAfterReconfiguration()
-        markLensSwitch("restore")
 
         guard let current = device else { return }
         if isVideo { configureVideoFormat(current) }   // each lens has its own formats
         let info = applyDeviceSettings(current)
-        markLensSwitch("device")
         updateRotationCoordinator()
-        markLensSwitch("rot")
         emit.yield(.videoCapabilities(videoCapabilities(current)))
-        markLensSwitch("fmt")
-        #if DEBUG
-        // Where a slow switch spends its time, step by step.
-        var previous = t0
-        let steps = (lensSwitchMarks ?? []).map { name, t in defer { previous = t }; return String(format: "%@ %.2f", name, t - previous) }
-        emit.yield(.status("lens: " + steps.joined(separator: ", ")))
-        #endif
         emit.yield(.lensChanged(info))
-    }
-
-    /// Debug: notes when a step of a lens switch finished. Does nothing outside a lens switch or in release builds.
-    private func markLensSwitch(_ name: String) {
-        #if DEBUG
-        lensSwitchMarks?.append((name, CFAbsoluteTimeGetCurrent()))
-        #endif
     }
 
     // MARK: Exposure and white balance
