@@ -51,6 +51,8 @@ enum CaptureEvent: Sendable {
     case audioLevel(Float)
     case histogram(Histogram)
     case photoCaptured(CapturedPhoto)
+    /// Every output deferred at launch has started (iOS 26+), so all of the camera is ready, not just the preview.
+    case deferredStartFinished
     /// The camera is running again after the review screen closed.
     case resumed
     case recordingStarted
@@ -103,6 +105,7 @@ actor CaptureSession {
     private var pendingExposure: (duration: CMTime, iso: Float)?
     private var audioMeterTask: Task<Void, Never>?
     private var micInput: AVCaptureDeviceInput?   // attached only in VIDEO, see `setMicrophone`
+    private var deferredStartObserver: NSObject?  // the session's deferred start delegate (iOS 26+), kept alive here
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
@@ -164,13 +167,7 @@ actor CaptureSession {
             session.addOutput(photoOutput)
             photoOutput.maxPhotoQualityPrioritization = .speed   // no Deep Fusion / multi-frame fusion
         }
-        if session.canAddOutput(movieOutput) {
-            session.addOutput(movieOutput)
-            if #available(iOS 26.0, *), movieOutput.isDeferredStartSupported {
-                // Deferred start can leave the encoder unprepared for the first take (notably ProRes RAW).
-                movieOutput.isDeferredStartEnabled = false
-            }
-        }
+        if session.canAddOutput(movieOutput) { session.addOutput(movieOutput) }
         // The preview-frame output (histogram, GPU viewfinder) is attached once, with its frames switched off
         // until something wants them: adding or removing it later reconfigures the session, which stalls the
         // preview for a moment every time HIST or ZEB is switched.
@@ -179,18 +176,61 @@ actor CaptureSession {
             session.addOutput(analysisOutput)
             analysisOutput.connection(with: .video)?.isEnabled = false
         }
+        updateResponsiveCapture()
+        if #available(iOS 26.0, *) { configureDeferredStart() }
         session.commitConfiguration()
 
         let info = applyDeviceSettings(wide)
-        session.startRunning()
+        session.startRunning()   // returns once the preview is running; deferred outputs follow shortly after
         restoreAfterReconfiguration()
         subjectAreaObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: nil, queue: nil) { [weak self] _ in
             self?.enqueue { $0.resumeContinuousFocus() }
         }
         updateRotationCoordinator()
+        #if DEBUG
+        // Whether Bayer RAW on this lens supports it isn't documented, so say once in debug builds.
+        emit.yield(.status("Responsive capture \(photoOutput.isResponsiveCaptureEnabled ? "on" : "not supported")"))
+        #endif
         emit.yield(.ready(lenses: lenses, device: info))
         emit.yield(.videoCapabilities(videoCapabilities(wide)))
+    }
+
+    /// Launch brings up the preview first and starts everything else a moment later (WWDC26 "Build a responsive
+    /// camera app that launches quickly": in Apple's test, launch about halved). The system preview layer isn't
+    /// deferred (its default); the photo output, the frame output (histogram, GPU viewfinder) and, in PHOTO, the
+    /// movie output are. In automatic mode the session starts them shortly after the preview's first frame. The
+    /// frame output must be deferred too: an undeferred output that streams to the app makes the session wait
+    /// for its first frame, and this one's frames are off until HIST, ZEB, PK or MAG wants them.
+    /// Responsive capture (`updateResponsiveCapture`) covers a shot taken before the photo output has started.
+    @available(iOS 26.0, *)
+    private func configureDeferredStart() {
+        session.automaticallyRunsDeferredStart = true   // the default when built with the iOS 26 SDK; stated here
+        for output in [photoOutput, analyzer.output] as [AVCaptureOutput] where output.isDeferredStartSupported {
+            output.isDeferredStartEnabled = true
+        }
+        setMovieOutputDeferred(!isVideo)
+        let observer = DeferredStartObserver(emit: emit)
+        deferredStartObserver = observer
+        session.setDeferredStartDelegate(observer, deferredStartDelegateCallbackQueue: DispatchQueue(label: "glint.deferredStart"))
+    }
+
+    /// The movie output is deferred in PHOTO, so it doesn't slow launch, and started with the session in VIDEO:
+    /// deferred, its encoder can be unprepared for the first take (notably ProRes RAW, where Apple's advice is to
+    /// turn deferral off). Call inside a session configuration.
+    private func setMovieOutputDeferred(_ deferred: Bool) {
+        guard #available(iOS 26.0, *), movieOutput.isDeferredStartSupported,
+              movieOutput.isDeferredStartEnabled != deferred else { return }
+        movieOutput.isDeferredStartEnabled = deferred
+    }
+
+    /// Responsive capture (WWDC23): the photo output takes a shot while the last one is still processing, and
+    /// buffers one taken before it has started. Whether a lens and format support it can change, so this runs in
+    /// each configuration that changes the lens or the mode (changing it outside one would rebuild the session).
+    /// Fast capture prioritisation isn't used: Glint already shoots at `.speed`.
+    private func updateResponsiveCapture() {
+        let wanted = !isVideo && photoOutput.isResponsiveCaptureSupported
+        if photoOutput.isResponsiveCaptureEnabled != wanted { photoOutput.isResponsiveCaptureEnabled = wanted }
     }
 
     /// What a session reconfiguration can reset, so call it after every `commitConfiguration()`: the mic input
@@ -303,6 +343,7 @@ actor CaptureSession {
         } else if let old = videoInput {
             session.addInput(old)   // roll back
         }
+        updateResponsiveCapture()
         session.commitConfiguration()
         restoreAfterReconfiguration()
 
@@ -672,12 +713,14 @@ actor CaptureSession {
         // One configuration for the microphone and the format, so the session is rebuilt once.
         session.beginConfiguration()
         setMicrophone(video && withAudio)
+        setMovieOutputDeferred(!video)
         if video {
             configureVideoFormat(d)
         } else {
             session.automaticallyConfiguresCaptureDeviceForWideColor = true
             session.sessionPreset = .photo
         }
+        updateResponsiveCapture()
         session.commitConfiguration()
         restoreAfterReconfiguration()
         let info = applyDeviceSettings(d)
@@ -925,5 +968,21 @@ private final class RecordingDelegate: NSObject, AVCaptureFileOutputRecordingDel
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
         emit.yield(.recordingFinished(url))
         finished()
+    }
+}
+
+/// Tells the controller when the outputs deferred at launch have started (iOS 26+).
+@available(iOS 26.0, *)
+private final class DeferredStartObserver: NSObject, AVCaptureSessionDeferredStartDelegate {
+    private let emit: AsyncStream<CaptureEvent>.Continuation
+
+    init(emit: AsyncStream<CaptureEvent>.Continuation) {
+        self.emit = emit
+    }
+
+    func sessionWillRunDeferredStart(_ session: AVCaptureSession) {}
+
+    func sessionDidRunDeferredStart(_ session: AVCaptureSession) {
+        emit.yield(.deferredStartFinished)
     }
 }
