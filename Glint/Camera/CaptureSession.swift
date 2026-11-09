@@ -242,6 +242,16 @@ actor CaptureSession {
         if photoOutput.isResponsiveCaptureEnabled != wanted { photoOutput.isResponsiveCaptureEnabled = wanted }
     }
 
+    /// Rebuilt connections come back enabled and stabilised: the analysis output's frames go off unless something
+    /// wants them, and the movie's stabilisation stays off. Only changes what differs, since a change after a commit
+    /// waits for the pipeline; inside a configuration it lands with the rebuild.
+    private func setConnections() {
+        if let c = analyzer.output.connection(with: .video), c.isEnabled != analyzer.isWanted { c.isEnabled = analyzer.isWanted }
+        if let c = movieOutput.connection(with: .video), c.preferredVideoStabilizationMode != .off {
+            c.preferredVideoStabilizationMode = .off
+        }
+    }
+
     /// What a session reconfiguration can reset, so call it after every `commitConfiguration()`: the mic input
     /// puts the audio session in record mode, which silences the Taptic Engine by default; rebuilt connections
     /// come back enabled, so preview frames would flow to the analysis output when nothing wants them; and the
@@ -250,11 +260,10 @@ actor CaptureSession {
         // Only the microphone silences haptics, and it's attached only in VIDEO (#8). Without it, this call is
         // pointless and can be slow, since it sets up the app's audio session.
         if micInput != nil { try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true) }
-        markLensSwitch("audio")
-        analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
         if let d = device { analyzer.setWhiteKey(whiteKey(for: d)) }   // the format may have changed
-        markLensSwitch("output")
-        if let d = device { withLockedDevice(d, failure: "Config") { applyToneMapping($0) } }   // a preset can reset it
+        // The analysis output's connection and the tone mapping are set by whoever reconfigured: in the configuration
+        // for the connection, and once in `applyDeviceSettings` for the device. Touching either right after a commit
+        // waits for the new pipeline (measured 0.1–0.25 s each on a lens switch), so it's done once, not twice.
         // Queued rather than done here, so it runs after the command that reconfigured has finished and reported
         // the new lens or mode: preparing (with #10's preview image) can take a moment, and shouldn't delay that.
         enqueue { $0.preparePhotoSettings() }
@@ -289,8 +298,7 @@ actor CaptureSession {
             }
             applyToneMapping(d)
         }
-        movieOutput.connection(with: .video)?.preferredVideoStabilizationMode = .off
-        analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted   // a new lens rebuilds connections
+        setConnections()   // a new lens or format rebuilds them; already done if set inside the configuration
         analyzer.setWhiteKey(whiteKey(for: d))
         pendingExposure = nil   // meant for the previous lens
         exposureInFlight = nil
@@ -399,13 +407,14 @@ actor CaptureSession {
             session.addInput(old)   // roll back
         }
         updateResponsiveCapture()
+        setConnections()   // the new input's connections, set before the commit so they don't wait after it
         session.commitConfiguration()
         #if DEBUG
         lensSwitchMarks = [("rebuild", CFAbsoluteTimeGetCurrent())]
         defer { lensSwitchMarks = nil }
         #endif
         restoreAfterReconfiguration()
-        markLensSwitch("tone")   // the rest of restore: tone mapping, which locks the new lens
+        markLensSwitch("restore")
 
         guard let current = device else { return }
         if isVideo { configureVideoFormat(current) }   // each lens has its own formats
@@ -645,6 +654,7 @@ actor CaptureSession {
             if analyzer.needsReconfiguration(for: wants) {
                 session.beginConfiguration()
                 analyzer.set(wants)
+                setConnections()
                 session.commitConfiguration()
                 restoreAfterReconfiguration()
             } else {
@@ -661,6 +671,7 @@ actor CaptureSession {
         session.beginConfiguration()
         analyzer.set(wants)
         if session.canAddOutput(output) { session.addOutput(output) }
+        setConnections()
         session.commitConfiguration()
         restoreAfterReconfiguration()
     }
@@ -813,6 +824,7 @@ actor CaptureSession {
             session.sessionPreset = .photo
         }
         updateResponsiveCapture()
+        setConnections()
         session.commitConfiguration()
         if !video {
             raisedMaxFrameDuration = false   // the preset put the format's defaults back
