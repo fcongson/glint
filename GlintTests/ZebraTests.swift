@@ -5,7 +5,7 @@ import Testing
 struct ZebraTests {
     @Test func levelsAreRelativeToWhereWhiteIs() {
         // White at 235, as the iPhone's processing puts it: 100% stripes the clipping plateau, 70% is 70% of white.
-        #expect(ZebraLevel.hundred.threshold(white: 235) == 233 / 255)
+        #expect(abs(ZebraLevel.hundred.threshold(white: 235) - Float(233) / 255) < 0.0001)
         #expect(abs(ZebraLevel.seventy.threshold(white: 235) - 0.7 * 235 / 255) < 0.0001)
         let thresholds = ZebraLevel.allCases.map { $0.threshold(white: 235) }
         #expect(thresholds == thresholds.sorted())
