@@ -113,7 +113,8 @@ actor CaptureSession {
     private var micInput: AVCaptureDeviceInput?   // attached only in VIDEO, see `setMicrophone`
     private var frameRateReduced = false          // critical system pressure, PHOTO only; see `setFrameRateReduced`
     private var raisedMaxFrameDuration = false    // whether reducing the frame rate also lengthened the longest frame
-    private var deferredStartObserver: NSObject?  // the session's deferred start delegate (iOS 26+), kept alive here
+    private var deferredStartObserver: NSObject?
+    private var lensSwitchMark: ((String) -> Void)?   // debug: times the steps of a lens switch  // the session's deferred start delegate (iOS 26+), kept alive here
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
 
@@ -246,9 +247,13 @@ actor CaptureSession {
     /// come back enabled, so preview frames would flow to the analysis output when nothing wants them; and the
     /// photo output's prepared settings may need preparing again.
     private func restoreAfterReconfiguration() {
-        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+        // Only the microphone silences haptics, and it's attached only in VIDEO (#8). Without it, this call is
+        // pointless and can be slow, since it sets up the app's audio session.
+        if micInput != nil { try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true) }
+        lensSwitchMark?("audio")
         analyzer.output.connection(with: .video)?.isEnabled = analyzer.isWanted
         if let d = device { analyzer.setWhiteKey(whiteKey(for: d)) }   // the format may have changed
+        lensSwitchMark?("output")
         if let d = device { withLockedDevice(d, failure: "Config") { applyToneMapping($0) } }   // a preset can reset it
         // Queued rather than done here, so it runs after the command that reconfigured has finished and reported
         // the new lens or mode: preparing (with #10's preview image) can take a moment, and shouldn't delay that.
@@ -398,11 +403,13 @@ actor CaptureSession {
         #if DEBUG
         var marks = [("rebuild", CFAbsoluteTimeGetCurrent())]
         func mark(_ name: String) { marks.append((name, CFAbsoluteTimeGetCurrent())) }
+        lensSwitchMark = { mark($0) }
+        defer { lensSwitchMark = nil }
         #else
         func mark(_ name: String) {}
         #endif
         restoreAfterReconfiguration()
-        mark("restore")
+        mark("tone")   // the rest of restore: tone mapping, which locks the new lens
 
         guard let current = device else { return }
         if isVideo { configureVideoFormat(current) }   // each lens has its own formats
