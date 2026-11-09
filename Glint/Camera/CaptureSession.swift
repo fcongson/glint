@@ -396,19 +396,27 @@ actor CaptureSession {
         updateResponsiveCapture()
         session.commitConfiguration()
         #if DEBUG
-        let t1 = CFAbsoluteTimeGetCurrent()
+        var marks = [("rebuild", CFAbsoluteTimeGetCurrent())]
+        func mark(_ name: String) { marks.append((name, CFAbsoluteTimeGetCurrent())) }
+        #else
+        func mark(_ name: String) {}
         #endif
         restoreAfterReconfiguration()
+        mark("restore")
 
         guard let current = device else { return }
         if isVideo { configureVideoFormat(current) }   // each lens has its own formats
         let info = applyDeviceSettings(current)
+        mark("device")
         updateRotationCoordinator()
+        mark("rot")
         emit.yield(.videoCapabilities(videoCapabilities(current)))
+        mark("fmt")
         #if DEBUG
-        // Where a slow switch spends its time: the session rebuild, or the device settings after it.
-        let t2 = CFAbsoluteTimeGetCurrent()
-        emit.yield(.status(String(format: "lens: rebuild %.2fs, settings %.2fs", t1 - t0, t2 - t1)))
+        // Where a slow switch spends its time, step by step.
+        var previous = t0
+        let steps = marks.map { name, t in defer { previous = t }; return String(format: "%@ %.2f", name, t - previous) }
+        emit.yield(.status("lens: " + steps.joined(separator: ", ")))
         #endif
         emit.yield(.lensChanged(info))
     }
