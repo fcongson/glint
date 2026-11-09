@@ -1,4 +1,6 @@
 import AVFoundation
+import ImageIO
+import UIKit
 
 /// The active camera's capabilities, reported after setup and after every lens switch.
 struct DeviceInfo: Sendable {
@@ -50,6 +52,8 @@ enum CaptureEvent: Sendable {
     /// Microphone level while recording, 0 (silence) … 1 (full scale).
     case audioLevel(Float)
     case histogram(Histogram)
+    /// A small image of the shot, straight from the capture, for the thumbnail until the review image is ready.
+    case photoPreview(UIImage, requestedAt: CFAbsoluteTime)
     case photoCaptured(CapturedPhoto)
     /// Every output deferred at launch has started (iOS 26+), so all of the camera is ready, not just the preview.
     case deferredStartFinished
@@ -683,13 +687,29 @@ actor CaptureSession {
     /// The settings every still is shot with. HEIC also shoots Bayer RAW, then develops it into a HEIC with no
     /// processing, so it matches the DNG. A settings object is good for one capture, so this makes a new one.
     private func makePhotoSettings() -> (AVCapturePhotoSettings, bayerRAW: Bool) {
+        let settings: AVCapturePhotoSettings
+        let bayerRAW: Bool
         if let bayer = photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) {
-            return (AVCapturePhotoSettings(rawPixelFormatType: bayer), true)   // Bayer DNG only
+            settings = AVCapturePhotoSettings(rawPixelFormatType: bayer)   // Bayer DNG only
+            bayerRAW = true
+        } else {
+            settings = AVCapturePhotoSettings()
+            settings.photoQualityPrioritization = .speed
+            bayerRAW = false
         }
-        let settings = AVCapturePhotoSettings()
-        settings.photoQualityPrioritization = .speed
-        return (settings, false)
+        // A small preview image comes with the capture, so the thumbnail shows straight away instead of after the
+        // RAW decode or the HEIC develop, the way camera apps do it. It's the camera's processed rendering, so the
+        // neutral review image replaces it a moment later. Not in the file: the DNG and HEIC are unchanged.
+        if let format = settings.availablePreviewPhotoPixelFormatTypes.first {
+            settings.previewPhotoFormat = [kCVPixelBufferPixelFormatTypeKey as String: format,
+                                           kCVPixelBufferWidthKey as String: Self.previewPixels,
+                                           kCVPixelBufferHeightKey as String: Self.previewPixels]
+        }
+        return (settings, bayerRAW)
     }
+
+    /// The preview image's longest side: the 48-point thumbnail at 3× with room to spare.
+    private static let previewPixels = 320
 
     /// Has the photo output set up its buffers for the next shot now, rather than after the shutter press, as Apple
     /// recommends as soon as a mode is active. A reconfiguration (lens, format, preset) can undo it, so this runs
@@ -938,11 +958,21 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error { emit.yield(.status("Capture error: \(error.localizedDescription)")); return }
+        if let preview = Self.previewImage(of: photo) { emit.yield(.photoPreview(preview, requestedAt: requestedAt)) }
         guard let data = photo.fileDataRepresentation() else { return }
         let info = PhotoInfo(metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto), whiteBalance: whiteBalance, fileBytes: data.count)
         emit.yield(.photoCaptured(CapturedPhoto(data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
                                                 needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto),
                                                 keepsDNG: plan.keepsDNG(isRawPhoto: photo.isRawPhoto), aspect: aspect)))
+    }
+
+    /// The capture's preview image, upright. Its pixels are as the sensor saw them; the photo's orientation tag
+    /// (set from the capture rotation) says which way up.
+    private static func previewImage(of photo: AVCapturePhoto) -> UIImage? {
+        guard let cg = photo.previewCGImageRepresentation() else { return nil }
+        let raw = (photo.metadata[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value
+        let orientation = raw.flatMap(CGImagePropertyOrientation.init(rawValue:)) ?? .up
+        return UIImage(cgImage: cg, scale: 1, orientation: UIImage.Orientation(orientation))
     }
 
     /// The last callback for a capture, so the session can release this delegate.
@@ -984,5 +1014,21 @@ private final class DeferredStartObserver: NSObject, AVCaptureSessionDeferredSta
 
     func sessionDidRunDeferredStart(_ session: AVCaptureSession) {
         emit.yield(.deferredStartFinished)
+    }
+}
+
+private extension UIImage.Orientation {
+    init(_ orientation: CGImagePropertyOrientation) {
+        switch orientation {
+        case .up: self = .up
+        case .upMirrored: self = .upMirrored
+        case .down: self = .down
+        case .downMirrored: self = .downMirrored
+        case .left: self = .left
+        case .leftMirrored: self = .leftMirrored
+        case .right: self = .right
+        case .rightMirrored: self = .rightMirrored
+        @unknown default: self = .up
+        }
     }
 }

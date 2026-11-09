@@ -73,6 +73,7 @@ final class CameraController {
     private(set) var timing = ""
     private(set) var isCameraReady = false   // the preview is running; secondary controls fade in then
     @ObservationIgnored private var timers: [String: CFAbsoluteTime] = [:]   // dev-only, see `startTimer`
+    @ObservationIgnored private var thumbTime: Double?   // dev-only: shutter to the capture's preview image
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
     private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
@@ -190,6 +191,11 @@ final class CameraController {
             }
         case .histogram(let histogram):
             if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
+        case .photoPreview(let image, let requestedAt):
+            lastThumbnail = image   // the review image replaces it once it's rendered (`addShot`)
+            #if DEBUG
+            thumbTime = CFAbsoluteTimeGetCurrent() - requestedAt
+            #endif
         case .photoCaptured(let photo):
             photoCaptured(photo)
         case .deferredStartFinished:
@@ -597,6 +603,8 @@ final class CameraController {
         photoProcessing(started: false)
         #if DEBUG
         var lines = [String(format: "shot    %.1fs", shotTime)]
+        if let thumbTime { lines.append(String(format: "thumb   %.2fs", thumbTime)) }   // shutter to thumbnail
+        thumbTime = nil
         if developTime > 0 { lines.append(String(format: "develop %.1fs", developTime)) }
         lines.append(String(format: "render  %.1fs", renderTime))
         timing = lines.joined(separator: "\n")   // dev-only readout
