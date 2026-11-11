@@ -3,7 +3,7 @@ import CoreLocation
 import SwiftUI
 
 /// Whether the big capture button takes a photo or records video.
-enum CaptureMode: Sendable { case photo, video }
+enum CaptureMode: Sendable, Codable { case photo, video }
 
 /// The camera screen's state, on the main actor.
 ///
@@ -98,6 +98,60 @@ final class CameraController {
         let renderer = ReviewImageRenderer()
         reviewRenderer = renderer
         developer = PhotoDeveloper(renderer: renderer)   // shares the renderer's CIContext
+        if let saved = SavedSettings.load() { restore(saved) }
+    }
+
+    // MARK: Saved settings
+
+    /// What to remember between launches; see `SavedSettings`.
+    var savedSettings: SavedSettings {
+        SavedSettings(captureMode: captureMode, fileType: fileType, aspect: aspect, manual: manual, iso: iso,
+                      shutterDenominator: shutterDenominator, whiteBalanceKelvin: whiteBalanceKelvin,
+                      hasManualWhiteBalance: hasManualWhiteBalance, auto: auto, exposureBias: exposureBias,
+                      videoFormat: videoFormat, isHistogramEnabled: isHistogramEnabled,
+                      isPeakingEnabled: isPeakingEnabled, peakingSensitivity: peakingSensitivity,
+                      peakingAppearance: peakingAppearance, peakingMode: peakingMode, isZebraEnabled: isZebraEnabled,
+                      zebraLevel: zebraLevel, isMagnifierEnabled: isMagnifierEnabled)
+    }
+
+    /// Called when the app leaves the screen, which is also the last chance before it's quit from the app switcher.
+    func saveSettings() {
+        savedSettings.save()
+    }
+
+    /// Puts saved values in place before the camera starts. The camera picks them up once it's running
+    /// (`applySavedSettingsToCamera`). Settings that need the GPU viewfinder stay off on a phone without one.
+    private func restore(_ saved: SavedSettings) {
+        captureMode = saved.captureMode ?? captureMode
+        fileType = saved.fileType ?? fileType
+        aspect = saved.aspect ?? aspect
+        manual = saved.manual ?? manual
+        iso = saved.iso ?? iso
+        shutterDenominator = saved.shutterDenominator ?? shutterDenominator
+        whiteBalanceKelvin = saved.whiteBalanceKelvin ?? whiteBalanceKelvin
+        hasManualWhiteBalance = saved.hasManualWhiteBalance ?? hasManualWhiteBalance
+        auto = saved.auto ?? auto
+        exposureBias = saved.exposureBias ?? exposureBias
+        videoFormat = saved.videoFormat ?? videoFormat
+        isHistogramEnabled = saved.isHistogramEnabled ?? isHistogramEnabled
+        isPeakingEnabled = peakingRenderer != nil && (saved.isPeakingEnabled ?? isPeakingEnabled)
+        peakingSensitivity = saved.peakingSensitivity ?? peakingSensitivity
+        peakingAppearance = saved.peakingAppearance ?? peakingAppearance
+        peakingMode = saved.peakingMode ?? peakingMode
+        isZebraEnabled = peakingRenderer != nil && (saved.isZebraEnabled ?? isZebraEnabled)
+        zebraLevel = saved.zebraLevel ?? zebraLevel
+        isMagnifierEnabled = saved.isMagnifierEnabled ?? isMagnifierEnabled
+    }
+
+    /// Once the camera is running: the session starts in PHOTO with auto exposure and no analysis, so send what was
+    /// restored. VIDEO goes through the usual switch, which asks for the microphone if it hasn't been yet.
+    private func applySavedSettingsToCamera() {
+        if manual { sendExposureMode(keepWhiteBalance: hasManualWhiteBalance) }
+        sendAnalysis()
+        if captureMode == .video {
+            captureMode = .photo   // what the session is actually in
+            setCaptureMode(.video)
+        }
     }
 
     /// For the preview layer only; configuration goes through `CaptureSession`.
@@ -149,9 +203,11 @@ final class CameraController {
         switch event {
         case .ready(let lenses, let device):
             stopTimer("launch", appending: true)   // the deferred outputs can finish first
+            let firstStart = !isCameraReady
             isCameraReady = true
             self.lenses = lenses
             apply(device)
+            if firstStart { applySavedSettingsToCamera() }
         case .lensChanged(let device), .formatChanged(let device):
             stopTimer("lens")
             stopTimer("mode")

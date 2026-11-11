@@ -1,20 +1,20 @@
 import SwiftUI
 
-/// SET: one panel for the settings you choose once a session rather than toggle while shooting, like a camera's
-/// quick menu (Fuji and Canon's Q, Sony's Fn). Tiles show each setting and its value; tap one and its choices
-/// appear underneath. The toggles themselves (HIST, ZEB, PK, MAG) stay one tap away in the tool row.
+/// SET: the settings you choose once a session rather than toggle while shooting, like a camera's quick menu
+/// (Fuji and Canon's Q, Sony's Fn). One row per setting, with every choice on show and the current one amber, so
+/// there's nothing to select first: tap a choice and it applies. Grouped under headings so it's clear which feature
+/// each belongs to. The toggles themselves (HIST, ZEB, PK, MAG) stay one tap away in the tool row.
 struct SetMenu: View {
     let cam: CameraController
     let angle: Angle
+    let onDone: () -> Void
     @AppStorage("focusRailSide") private var railSide: RailSide = .right
     @AppStorage(DebugInfo.key) private var debugInfo = false
-    @Binding var selected: Tile   // kept by the caller, so SET reopens where it was, or on a tile it asks for
-    let onDone: () -> Void
 
     enum Tile: CaseIterable {
         case peakingMode, sensitivity, colour, lines, zebras, railSide, fileType, aspect, debugInfo
 
-        /// The tile's label, under its section's heading.
+        /// The row's label, under its section's heading.
         var title: String {
             switch self {
             case .peakingMode: "MODE"
@@ -70,14 +70,14 @@ struct SetMenu: View {
         }
     }
 
-    private var tiles: [Tile] {
+    private var rows: [Tile] {
         Tile.allCases.filter {
             (!$0.isPhotoOnly || cam.captureMode == .photo) && ($0.section != .developer || DebugInfo.isAvailable)
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("SET")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -87,124 +87,110 @@ struct SetMenu: View {
                 Button("Done", action: onDone)
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Color.white)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .frame(minWidth: 44, minHeight: 36)
             }
-            ForEach(Section.allCases, id: \.self) { section in
-                let sectionTiles = tiles.filter { $0.section == section }
-                if !sectionTiles.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(section.title)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Color.amber)
-                            .accessibilityAddTraits(.isHeader)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
-                            ForEach(sectionTiles, id: \.self) { tile in
-                                tileButton(tile)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Section.allCases, id: \.self) { section in
+                        let sectionRows = rows.filter { $0.section == section }
+                        if !sectionRows.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(section.title)
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(Color.amber)
+                                    .accessibilityAddTraits(.isHeader)
+                                ForEach(sectionRows, id: \.self) { row($0) }
                             }
                         }
                     }
                 }
             }
-            choices(for: selected)
-                .padding(10)
-                .background(Color(white: 0.11).opacity(0.94), in: RoundedRectangle(cornerRadius: 14))
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(16)
-        .frame(maxWidth: 380)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 400)
         .rotationEffect(angle)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Settings")
         .accessibilityAddTraits(.isModal)
-        .onChange(of: cam.captureMode) { _, _ in
-            if selected.isPhotoOnly && cam.captureMode != .photo { selected = .peakingMode }
-        }
-    }
-
-    private func tileButton(_ tile: Tile) -> some View {
-        let isSelected = tile == selected
-        return Button { selected = tile } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(tile.title)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.7))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 4)
-                Text(value(of: tile))
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(isSelected ? Color.amber : Color.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .padding(8)
-            .background(Color(white: 0.11).opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(isSelected ? Color.amber : Color.white.opacity(0.15), lineWidth: isSelected ? 2 : 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(tile.name)
-        .accessibilityValue(value(of: tile))
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .accessibilityHint("Shows its choices below")
-    }
-
-    private func value(of tile: Tile) -> String {
-        switch tile {
-        case .peakingMode: cam.peakingMode.title
-        case .sensitivity: cam.peakingSensitivity.title
-        case .colour: cam.peakingAppearance.color.title
-        case .lines: cam.peakingAppearance.lines.title
-        case .zebras: cam.zebraLevel.title
-        case .railSide: railSide.title
-        case .fileType: SettingsText.fileType(cam.fileType)
-        case .aspect: SettingsText.aspect(cam.aspect)
-        case .debugInfo: SettingsText.onOff(debugInfo)
-        }
     }
 
     @ViewBuilder
-    private func choices(for tile: Tile) -> some View {
+    private func row(_ tile: Tile) -> some View {
         switch tile {
         case .peakingMode:
-            FormatOptionRow(title: "FOCUS PEAKING · MODE", groupLabel: tile.name,
-                            options: PeakingMode.allCases.map { FormatOption(title: $0.title, value: $0) },
-                            selection: cam.peakingMode, onSelect: { cam.setPeakingMode($0) })
+            SettingRow(tile: tile, options: PeakingMode.allCases.map { (title: $0.title, value: $0) },
+                       selection: cam.peakingMode, onSelect: { cam.setPeakingMode($0) })
         case .sensitivity:
-            FormatOptionRow(title: "FOCUS PEAKING · SENSITIVITY", groupLabel: tile.name,
-                            options: PeakingSensitivity.allCases.map { FormatOption(title: $0.title, value: $0) },
-                            selection: cam.peakingSensitivity, onSelect: { cam.setPeakingSensitivity($0) })
+            SettingRow(tile: tile, options: PeakingSensitivity.allCases.map { (title: $0.title, value: $0) },
+                       selection: cam.peakingSensitivity, onSelect: { cam.setPeakingSensitivity($0) })
         case .colour:
-            FormatOptionRow(title: "FOCUS PEAKING · COLOUR", groupLabel: tile.name,
-                            options: PeakingColor.allCases.map { FormatOption(title: $0.title, value: $0) },
-                            selection: cam.peakingAppearance.color, onSelect: { cam.setPeakingColor($0) })
+            SettingRow(tile: tile, options: PeakingColor.allCases.map { (title: $0.title, value: $0) },
+                       selection: cam.peakingAppearance.color, onSelect: { cam.setPeakingColor($0) })
         case .lines:
-            FormatOptionRow(title: "FOCUS PEAKING · LINES", groupLabel: tile.name,
-                            options: PeakingLines.allCases.map { FormatOption(title: $0.title, value: $0) },
-                            selection: cam.peakingAppearance.lines, onSelect: { cam.setPeakingLines($0) })
+            SettingRow(tile: tile, options: PeakingLines.allCases.map { (title: $0.title, value: $0) },
+                       selection: cam.peakingAppearance.lines, onSelect: { cam.setPeakingLines($0) })
         case .zebras:
-            FormatOptionRow(title: "ZEBRAS: STRIPES AT OR ABOVE", groupLabel: tile.name,
-                            options: ZebraLevel.allCases.map { FormatOption(title: $0.title, value: $0) },
-                            selection: cam.zebraLevel, onSelect: { cam.setZebraLevel($0) })
+            SettingRow(tile: tile, options: ZebraLevel.allCases.map { (title: $0.title, value: $0) },
+                       selection: cam.zebraLevel, onSelect: { cam.setZebraLevel($0) })
         case .railSide:
-            FormatOptionRow(title: "FOCUS RAIL: THE SIDE IT'S ON, HOWEVER YOU HOLD THE PHONE", groupLabel: tile.name,
-                            options: RailSide.allCases.map { FormatOption(title: $0.title, value: $0) },
-                            selection: railSide, onSelect: { railSide = $0 })
-        case .debugInfo:
-            FormatOptionRow(title: "DEVELOPER · TIMINGS AND DEBUG MESSAGES OVER THE PICTURE", groupLabel: tile.name,
-                            options: [FormatOption(title: "On", value: true), FormatOption(title: "Off", value: false)],
-                            selection: debugInfo, onSelect: { debugInfo = $0 })
+            SettingRow(tile: tile, options: RailSide.allCases.map { (title: $0.title, value: $0) },
+                       selection: railSide, onSelect: { railSide = $0 })
         case .fileType:
-            FormatOptionRow(title: "FILE", groupLabel: tile.name,
-                            options: PhotoFileType.allCases.map { FormatOption(title: SettingsText.fileType($0), value: $0) },
-                            selection: cam.fileType, onSelect: { cam.setFileType($0) })
+            SettingRow(tile: tile, options: PhotoFileType.allCases.map { (title: SettingsText.fileType($0), value: $0) },
+                       selection: cam.fileType, onSelect: { cam.setFileType($0) })
         case .aspect:
-            FormatOptionRow(title: "ASPECT", groupLabel: tile.name,
-                            options: AspectRatio.allCases.map {
-                                FormatOption(title: SettingsText.aspect($0), spoken: SettingsText.aspectSpoken($0), value: $0)
-                            },
-                            selection: cam.aspect, onSelect: { cam.setAspect($0) })
+            SettingRow(tile: tile, options: AspectRatio.allCases.map { (title: SettingsText.aspect($0), value: $0) },
+                       selection: cam.aspect, onSelect: { cam.setAspect($0) },
+                       spoken: { SettingsText.aspectSpoken($0) })
+        case .debugInfo:
+            SettingRow(tile: tile, options: [(title: "On", value: true), (title: "Off", value: false)],
+                       selection: debugInfo, onSelect: { debugInfo = $0 })
         }
+    }
+}
+
+/// One SET row: the setting's name, then every choice as a segment, the current one amber.
+private struct SettingRow<Value: Hashable>: View {
+    let tile: SetMenu.Tile
+    let options: [(title: String, value: Value)]
+    let selection: Value
+    let onSelect: (Value) -> Void
+    var spoken: ((Value) -> String)? = nil
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(tile.title)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.75))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: 84, alignment: .leading)
+                .accessibilityHidden(true)
+            HStack(spacing: 2) {
+                ForEach(options, id: \.value) { option in
+                    let isSelected = option.value == selection
+                    Button { onSelect(option.value) } label: {
+                        Text(option.title)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .foregroundStyle(isSelected ? Color.black : Color.white)
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .background(isSelected ? Color.amber : Color.clear, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(spoken?(option.value) ?? option.title)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+            .padding(2)
+            .background(Color(white: 0.16).opacity(0.95), in: Capsule())
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tile.name)
     }
 }
 

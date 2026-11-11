@@ -8,7 +8,7 @@ import Foundation
 
 /// How readily peaking marks detail: how many standard deviations above the frame's mean a pixel's high-pass
 /// response has to be.
-enum PeakingSensitivity: Int, CaseIterable, Sendable {
+enum PeakingSensitivity: Int, CaseIterable, Sendable, Codable {
     case low, medium, high
 
     var deviations: Double {
@@ -45,7 +45,7 @@ struct PeakingThreshold {
 
 /// The outlines' colour. Cameras offer a few, because any one colour disappears against some subjects, and some
 /// are easier to see than others with colour-vision differences.
-enum PeakingColor: Int, CaseIterable, Sendable {
+enum PeakingColor: Int, CaseIterable, Sendable, Codable {
     case amber, red, white, blue
 
     var title: String {
@@ -70,7 +70,7 @@ enum PeakingColor: Int, CaseIterable, Sendable {
 
 /// How heavily outlines are drawn. Bold thickens each line by a texel either side so it stays whole on the
 /// phone's screen; fine draws exactly what was marked.
-enum PeakingLines: Int, CaseIterable, Sendable {
+enum PeakingLines: Int, CaseIterable, Sendable, Codable {
     case bold, fine
 
     var title: String {
@@ -89,7 +89,7 @@ enum PeakingLines: Int, CaseIterable, Sendable {
 }
 
 /// How the outlines look, as opposed to what they mark.
-struct PeakingAppearance: Equatable, Sendable {
+struct PeakingAppearance: Equatable, Sendable, Codable {
     var color = PeakingColor.amber
     var lines = PeakingLines.bold
 }
@@ -98,7 +98,7 @@ struct PeakingAppearance: Equatable, Sendable {
 /// high contrast (a bold edge that's slightly soft can outrank fine detail that's perfectly sharp). Sweep
 /// compares each part of the picture with itself as you focus, and outlines what's at its sharpest now, at any
 /// contrast; it needs focus moved past the subject and back, and falls back to standard until it has.
-enum PeakingMode: Int, CaseIterable, Sendable {
+enum PeakingMode: Int, CaseIterable, Sendable, Codable {
     case standard, sweep
 
     var title: String {

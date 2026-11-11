@@ -1,6 +1,6 @@
 import Foundation
 
-enum VideoResolution: Sendable, CaseIterable {
+enum VideoResolution: Sendable, CaseIterable, Codable {
     case uhd4K, hd1080
 
     /// Landscape pixel size, as device formats report it.
@@ -13,13 +13,13 @@ enum VideoResolution: Sendable, CaseIterable {
     }
 }
 
-enum VideoCodec: Sendable, CaseIterable {
+enum VideoCodec: Sendable, CaseIterable, Codable {
     case hevc
     case proRes      // ProRes 422 HQ where available (Pro iPhones)
     case proResRAW   // sensor data before Apple's processing (iPhone 17 Pro and later, iOS 26)
 }
 
-enum VideoEncoding: Sendable, CaseIterable {
+enum VideoEncoding: Sendable, CaseIterable, Codable {
     case standard
     case log   // Apple Log, with ProRes
 }
@@ -41,7 +41,7 @@ struct VideoCapabilities: Equatable, Sendable {
 }
 
 /// The video format panel's choices.
-struct VideoFormat: Equatable, Sendable {
+struct VideoFormat: Equatable, Sendable, Codable {
     static let frameRates = [24, 25, 30, 60]
 
     var resolution: VideoResolution = .uhd4K

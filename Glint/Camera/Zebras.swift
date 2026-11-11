@@ -8,7 +8,7 @@ import Foundation
 // it.
 
 /// The brightness zebras start at, as a percentage of full scale of the preview's luma.
-enum ZebraLevel: Int, CaseIterable, Sendable {
+enum ZebraLevel: Int, CaseIterable, Sendable, Codable {
     case seventy, eighty, ninety, ninetyFive, hundred
 
     var percent: Int {

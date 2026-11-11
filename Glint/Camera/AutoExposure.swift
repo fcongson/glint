@@ -5,7 +5,7 @@ enum ManualSetting: Sendable { case iso, shutter, whiteBalance }
 
 /// Which manual settings the camera is choosing. With ISO on auto you get shutter priority, with shutter on auto
 /// ISO priority (the aperture is fixed), and with both, program. White balance is independent of exposure.
-struct AutoSettings: Equatable, Sendable {
+struct AutoSettings: Equatable, Sendable, Codable {
     var iso = false
     var shutter = false
     var whiteBalance = false
