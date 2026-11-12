@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// What the photo format panel's FILE row asks for.
-enum PhotoFileType: Sendable, CaseIterable {
+enum PhotoFileType: Sendable, CaseIterable, Codable {
     case raw          // the Bayer DNG as shot
     case heic         // the DNG developed into a neutral HEIC
     case rawAndHEIC   // both, saved to Photos as one asset (HEIC with the DNG as its RAW alternate)
@@ -11,7 +11,7 @@ enum PhotoFileType: Sendable, CaseIterable {
 
 /// The photo format panel's ASPECT row. The sensor is 4:3, so that's the full frame; the others are centred crops,
 /// applied when a HEIC is developed. A DNG always keeps the full sensor.
-enum AspectRatio: Sendable, CaseIterable {
+enum AspectRatio: Sendable, CaseIterable, Codable {
     case fourThree, threeTwo, oneOne, sixteenNine
 
     /// Long side over short side.

@@ -3,13 +3,13 @@ import UIKit
 
 struct ContentView: View {
     @State private var cam = CameraController()
+    @Environment(\.scenePhase) private var scenePhase
     /// How the phone is held, as an angle. Controls don't turn with it, as on a camera; only the focus rail moves to
     /// stay on your chosen side (see `railAlignment`), and review turns photos upright.
     @State private var uiAngle: Angle = .zero
     @AppStorage("focusRailSide") private var railSide: RailSide = .right
     @AppStorage(DebugInfo.key) private var debugInfoSetting = false   // see `DebugInfo`
     @State private var showingSet = false   // the SET panel over the picture
-    @State private var setTile: SetMenu.Tile = .peakingMode   // the tile SET opens on
     @State private var showingVideoFormat = false
     @State private var selected: ManualParam = .shutter   // kept here so MANUAL comes back to the same ruler
     @State private var flash = false
@@ -27,6 +27,10 @@ struct ContentView: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear { cam.start() }
+        .onChange(of: scenePhase) { _, phase in
+            // Remembered between launches, like a camera's settings. Leaving the screen comes before any quit.
+            if phase != .active { cam.saveSettings() }
+        }
         .sheet(isPresented: $showingVideoFormat) {
             VideoFormatSheet(format: cam.videoFormat, capabilities: cam.videoCapabilities,
                              onChange: { cam.setVideoFormat($0) }, onDone: { showingVideoFormat = false })
@@ -159,7 +163,7 @@ struct ContentView: View {
                         Color.black.opacity(0.6)
                             .onTapGesture { showingSet = false }
                             .accessibilityHidden(true)
-                        SetMenu(cam: cam, angle: .zero, selected: $setTile, onDone: { showingSet = false })
+                        SetMenu(cam: cam, angle: .zero, onDone: { showingSet = false })
                     }
                     .transition(.opacity)
                 }
@@ -218,14 +222,14 @@ struct ContentView: View {
     // MARK: Top bar
 
     /// SET and the format on the left of the Dynamic Island, the meter on the right: like a camera's info display,
-    /// the format is a readout rather than a chip. Tapping it opens where it's changed: SET's file tile in PHOTO,
+    /// the format is a readout rather than a chip. Tapping it opens where it's changed: SET in PHOTO,
     /// the video format panel in VIDEO.
     private func topBar(topPadding: CGFloat) -> some View {
         HStack(spacing: 12) {
             if cam.isRecording {
                 RecordingTimer(cam: cam, angle: .zero)
             } else {
-                Button { openSet(on: setTile) } label: { chipLabel("SET") }
+                Button { toggleSet() } label: { chipLabel("SET") }
                     .buttonStyle(ChipStyle(isOn: showingSet, angle: .zero, outlined: true))
                     .accessibilityLabel("Settings")
                     .accessibilityValue(showingSet ? "Open" : "Closed")
@@ -249,7 +253,7 @@ struct ContentView: View {
             ? "\(file) \(SettingsText.aspect(cam.aspect))"   // always both, so the readout doesn't change shape
             : SettingsText.videoFormat(cam.videoFormat)
         return Button {
-            if photo { openSet(on: .fileType) } else { showingVideoFormat = true }
+            if photo { toggleSet() } else { showingVideoFormat = true }
         } label: {
             Text(title)
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -261,13 +265,11 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(photo ? "Photo format" : "Video format")
         .accessibilityValue(photo ? "\(file), \(SettingsText.aspectSpoken(cam.aspect))" : title)
-        .accessibilityHint(photo ? "Opens file type and aspect ratio in Settings" : "Opens resolution, frame rate, codec and exposure lock")
+        .accessibilityHint(photo ? "Opens Settings, where file type and aspect ratio are" : "Opens resolution, frame rate, codec and exposure lock")
     }
 
-    private func openSet(on tile: SetMenu.Tile) {
-        if showingSet && tile == setTile { withAnimation(.easeOut(duration: 0.15)) { showingSet = false }; return }
-        setTile = tile
-        withAnimation(.easeOut(duration: 0.15)) { showingSet = true }
+    private func toggleSet() {
+        withAnimation(.easeOut(duration: 0.15)) { showingSet.toggle() }
     }
 
     /// AF on top of the focus rail. Turning AF off, or touching the rail, locks the lens where autofocus left it.
