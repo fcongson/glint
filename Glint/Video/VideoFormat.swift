@@ -40,7 +40,7 @@ struct VideoCapabilities: Equatable, Sendable {
     var proResRAW: Bool { !proResRAWFrameRates.isEmpty }
 }
 
-/// The video format panel's choices.
+/// The video format: SET's VIDEO rows.
 struct VideoFormat: Equatable, Sendable, Codable {
     static let frameRates = [24, 25, 30, 60]
 
@@ -52,6 +52,10 @@ struct VideoFormat: Equatable, Sendable, Codable {
     var locksExposureWhileRecording = false
 
     var mode: VideoMode { VideoMode(resolution: resolution, frameRate: frameRate) }
+
+    /// The resolution actually recorded: ProRes RAW is the sensor's own size, shown as 4K, whatever was chosen
+    /// for the other codecs (which is kept, for when you switch back).
+    var recordedResolution: VideoResolution { codec == .proResRAW ? .uhd4K : resolution }
 
     /// The 180° rule: auto shutter in video is half the frame duration, 1/48 at 24 fps.
     var autoShutterDenominator: Double { Double(frameRate * 2) }
@@ -106,5 +110,31 @@ struct VideoFormat: Equatable, Sendable, Codable {
     /// Closest value; ties go to the lower one.
     private static func nearest(_ value: Int, in values: [Int]) -> Int? {
         values.min { (abs($0 - value), $0) < (abs($1 - value), $1) }
+    }
+}
+
+/// Which video choices the current lens can record, for greying out the rest in SET. Picking one settles the others
+/// to the nearest thing it can (`VideoFormat.normalized(for:)`).
+extension VideoCapabilities {
+    func allows(_ resolution: VideoResolution, for format: VideoFormat) -> Bool {
+        format.codec == .proResRAW ? resolution == format.recordedResolution : modes.contains { $0.resolution == resolution }
+    }
+
+    func allows(frameRate: Int, for format: VideoFormat) -> Bool {
+        format.codec == .proResRAW
+            ? proResRAWFrameRates.contains(frameRate)
+            : modes.contains(VideoMode(resolution: format.resolution, frameRate: frameRate))
+    }
+
+    func allows(_ codec: VideoCodec) -> Bool {
+        switch codec {
+        case .hevc: true
+        case .proRes: proRes
+        case .proResRAW: proResRAW
+        }
+    }
+
+    func allows(_ encoding: VideoEncoding, for format: VideoFormat) -> Bool {
+        encoding == .standard || (format.codec == .proRes && logModes.contains(format.mode))
     }
 }

@@ -319,7 +319,7 @@ final class CameraController {
         }
     }
 
-    /// A choice from the video format panel, settled to the nearest one this lens can record.
+    /// A choice from SET's VIDEO rows, settled to the nearest one this lens can record.
     func setVideoFormat(_ format: VideoFormat) {
         guard !isRecording else { return }
         let format = format.normalized(for: videoCapabilities)
