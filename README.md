@@ -60,7 +60,7 @@ Glint/
     Viewfinder.metal           its shaders: blur, high-pass, smooth, mark, pool to screen size, draw, magnify and zebra stripes
     Magnifier.swift            focus magnifier settings and geometry, and what the GPU viewfinder draws
     Zebras.swift               zebra levels
-    ReviewImageRenderer.swift  DNG development and review thumbnails
+    ReviewImageRenderer.swift  DNG development, review images (kept compressed, with a thumbnail) and the queue both run on
     LocationProvider.swift     location fixes for photo tagging, place names
     CameraInterruption.swift   why the system has taken the camera away, and what to say
     RecordingOutcome.swift     whether a finished recording is worth saving, and why it stopped
@@ -82,7 +82,7 @@ GlintTests/                    Swift Testing coverage of the logic, and of the p
 For performance testing, run from the Home Screen or use a Release build. Debug builds from Xcode (debugger plus Metal validation) make image work much slower.
 
 ## Tests
-Run the `GlintTests` scheme (Cmd-U). The tests cover capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, the histogram (including finding clipped white from its plateau), lenses, photo info, settings text, location freshness rules, camera interruptions and recording outcomes as pure logic. Focus peaking's tests run the real GPU shaders on synthetic frames (the Simulator's Metal is enough), sweep tracking, the magnifier's geometry and zebra levels are tested as logic, and the warm-up tests decode the bundled DNG (on a device only: Core Image doesn't decode RAW in the Simulator, so run them on your iPhone after changing the DNG). None need a camera.
+Run the `GlintTests` scheme (Cmd-U). The tests cover capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, the histogram (including finding clipped white from its plateau), lenses, photo info, settings text, location freshness rules, camera interruptions and recording outcomes as pure logic, and that review images are kept compressed with a thumbnail of the right size. Focus peaking's tests run the real GPU shaders on synthetic frames (the Simulator's Metal is enough), including that outlines come out the same after the viewfinder's scratch textures are freed; sweep tracking, the magnifier's geometry and zebra levels are tested as logic, and the warm-up tests decode the bundled DNG, directly and through the developer's queue as a real shot does (on a device only: Core Image doesn't decode RAW in the Simulator, so run them on your iPhone after changing the DNG). None need a camera.
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.
