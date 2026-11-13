@@ -41,44 +41,48 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 ```
 Glint.xcodeproj
 Glint/
-  GlintApp.swift               app entry point
-  ContentView.swift            the camera screen: puts the top bar, viewfinder, tool row and capture controls together
-  Camera/
+  App/
+    GlintApp.swift             app entry point
+    ContentView.swift          the camera screen: puts the top bar, viewfinder, tool row and capture controls together
+  Capture/                     the camera itself and the screen's state
     CameraController.swift     observable state for the camera screen; sends changes to the session, handles its events
     CaptureSession.swift       actor that owns the AVCaptureSession and the camera device
     CaptureEvent.swift         what the session reports back: events, device info, a captured photo
     CaptureDelegates.swift     the photo, recording and deferred-start delegates, which turn callbacks into events
-    DeviceVideoFormats.swift   what a lens can record, and which device format a video choice needs
-    ExposureQueue.swift        custom exposure changes, one at a time, latest wins
-    CapturePlan.swift          decides DNG vs developed HEIC vs processed HEIC
     CameraPreview.swift        preview layer + tap-to-focus
     Lens.swift                 lens model and zoom labels
+    Throttled.swift            rate-limits KVO updates (meter, lens position)
+    SystemPressure.swift       heat and load levels, and what Glint gives up at each
+    CameraInterruption.swift   why the system has taken the camera away, and what to say
+    SavedSettings.swift        the settings remembered between launches
+    DebugTimings.swift         the dev-only timing readout
+  Exposure/
     ExposureScale.swift        ISO, shutter and WB stops
     ExposureMeter.swift        meter reading and the focus rail's scale
     AutoExposure.swift         per-setting auto, and the shutter/ISO priority correction
-    VideoFormat.swift          video resolutions, frame rates, codecs, the 180° shutter and settling choices to what a lens supports
-    Throttled.swift            rate-limits KVO updates (meter, lens position)
-    SystemPressure.swift       heat and load levels, and what Glint gives up at each
-    ViewfinderAidPauses.swift  which of HIST, PK and ZEB Low Power Mode or heat switched off, to bring back after
-    CameraInterruption.swift   why the system has taken the camera away, and what to say
-    RecordingOutcome.swift     whether a finished recording is worth saving, and why it stopped
+    ExposureQueue.swift        custom exposure changes, one at a time, latest wins
+  Viewfinder/                  what's drawn from the preview frames: histogram, peaking, zebras, magnifier
     FrameAnalyzer.swift        the video frames shared by the histogram and the GPU viewfinder
     Histogram.swift            histogram and clipping, from a frame's luma
     WhiteLevelStore.swift      where clipped white sits, remembered per lens and format
-    FocusPeaking.swift         peaking settings (mode, sensitivity, colour, lines), the eased threshold, sweep tracking
     ViewfinderRenderer.swift   the GPU viewfinder, with peaking outlines, magnifying and zebras, while any is in use
     Viewfinder.metal           its shaders: blur, high-pass, smooth, mark, pool to screen size, draw, magnify and zebra stripes
+    FocusPeaking.swift         peaking settings (mode, sensitivity, colour, lines), the eased threshold, sweep tracking
     Magnifier.swift            focus magnifier settings and geometry, and what the GPU viewfinder draws
     Zebras.swift               zebra levels
+    ViewfinderAidPauses.swift  which of HIST, PK and ZEB Low Power Mode or heat switched off, to bring back after
+  Photo/                       a photo after capture
+    CapturePlan.swift          decides DNG vs developed HEIC vs processed HEIC
     PhotoProcessor.swift       a captured photo's develop, save and review image, in order
     PhotoDeveloper.swift       the serial queue RAW develops and review renders run on, and the launch warm-up
     ReviewImageRenderer.swift  DNG to HEIC, and review images (kept compressed, with a thumbnail)
-    MediaLibrary.swift         saves to Documents and Photos
     PhotoInfo.swift            settings and capture details of a photo, and a reviewed shot
+    MediaLibrary.swift         saves photos and video to Documents and Photos
     LocationProvider.swift     location fixes for photo tagging, place names
-    SavedSettings.swift        the settings remembered between launches
-    DebugTimings.swift         the dev-only timing readout
-  Resources/WarmUp.dng         64 × 64 DNG decoded at launch to prepare RAW decoding
+  Video/
+    VideoFormat.swift          video resolutions, frame rates, codecs, the 180° shutter and settling choices to what a lens supports
+    DeviceVideoFormats.swift   what a lens can record, and which device format a video choice needs
+    RecordingOutcome.swift     whether a finished recording is worth saving, and why it stopped
   Views/
     TopBar.swift               SET, the format readout, the meter; the recording time
     CameraViewfinder.swift     the picture and everything on it
@@ -90,6 +94,7 @@ Glint/
     (and)                      ruler picker, focus rail, SET menu, video format panel, format option rows, crop mask,
                                histogram, focus box, magnifier frame, camera access prompt, review screen, device
                                angle tracking, settings text
+  Resources/WarmUp.dng         64 × 64 DNG decoded at launch to prepare RAW decoding
   Assets.xcassets              app icon (light, dark, tinted) and accent color
 tools/make_warmup_dng.py       regenerates Resources/WarmUp.dng (needs tifffile)
 GlintTests/                    Swift Testing coverage of the logic, and of the peaking shaders on synthetic frames
