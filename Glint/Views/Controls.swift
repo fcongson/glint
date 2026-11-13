@@ -10,10 +10,9 @@ struct PressScaleStyle: ButtonStyle {
 }
 
 /// The amber-when-on capsule shared by toggles and option pickers. Callers set the font and size;
-/// this owns the on/off colours, the press feedback and turning the label with the device.
+/// this owns the on/off colours and the press feedback.
 struct ChipStyle: ButtonStyle {
     let isOn: Bool
-    let angle: Angle
     /// Amber outline and text when off, for a chip that opens something (SET) rather than switching it on.
     var outlined = false
     /// No pill when off, for a segment inside a control that has its own background (the lens picker).
@@ -25,8 +24,64 @@ struct ChipStyle: ButtonStyle {
             // Off is a dark pill, not a light tint, so it reads over a bright scene as well as on black.
             .background(isOn ? Color.amber : (plain ? Color.clear : Color(white: 0.16).opacity(0.9)), in: Capsule())
             .overlay(Capsule().strokeBorder(outlined && !isOn ? Color.amber : Color.clear, lineWidth: 1))
-            .rotationEffect(angle)
             .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+
+/// A chip's text: short, monospaced, shrinking rather than wrapping beside the Dynamic Island.
+struct ChipLabel: View {
+    let title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+    }
+}
+
+/// An on/off switch as a chip. The visible title is terse ("PK", "ZEB"), so VoiceOver gets a full label plus
+/// the current value instead.
+struct Chip: View {
+    let title: String
+    let label: String
+    let value: String
+    let isOn: Bool
+    let action: () -> Void
+
+    init(_ title: String, label: String, value: String, isOn: Bool, action: @escaping () -> Void) {
+        self.title = title
+        self.label = label
+        self.value = value
+        self.isOn = isOn
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) { ChipLabel(title) }
+            .buttonStyle(ChipStyle(isOn: isOn))
+            .accessibilityLabel(label)
+            .accessibilityValue(value)
+    }
+}
+
+/// Text over the picture (status, timings, MAGNIFIED) on a dark plate, so it reads over any scene.
+struct OverlayLabel: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 15, weight: .medium, design: .monospaced))
+            .foregroundStyle(Color.white)
+            .multilineTextAlignment(.leading)
+            .padding(8)
+            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -36,7 +91,6 @@ struct SettingReadout: View {
     let value: String
     var highlighted = false
     var isAuto = false   // a red A before the value, like the A on a Leica dial: the camera chose it
-    let angle: Angle
 
     var body: some View {
         VStack(spacing: 2) {
@@ -54,14 +108,12 @@ struct SettingReadout: View {
                     .foregroundStyle(highlighted ? Color.amber : Color.white)
             }
         }
-        .rotationEffect(angle)
     }
 }
 
 /// Leica-style meter: ▶ lights when under, ● on target, ◀ when over, with the offset in stops beside it.
 struct ExposureMeterView: View {
     let meter: ExposureMeter
-    let angle: Angle
 
     var body: some View {
         HStack(spacing: 4) {
@@ -74,7 +126,6 @@ struct ExposureMeterView: View {
                 .frame(width: 36, alignment: .trailing)
         }
         .fixedSize()
-        .rotationEffect(angle)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Exposure meter")
         .accessibilityValue(SettingsText.meterSpoken(meter))
@@ -107,7 +158,7 @@ struct AudioLevelMeter: View {
     }
 }
 
-/// One choice in a `SegmentedSwitch` or `ModeStrip`.
+/// One choice in a `SegmentedSwitch`.
 struct SwitchOption<Value: Hashable> {
     let title: String
     let value: Value
@@ -143,38 +194,6 @@ struct SegmentedSwitch<Value: Hashable>: View {
     }
 }
 
-/// PHOTO · VIDEO under the shutter: the current mode is white with a dot under it, the other is dimmed.
-struct ModeStrip<Value: Hashable>: View {
-    let label: String
-    let options: [SwitchOption<Value>]
-    let selection: Value
-    let onSelect: (Value) -> Void
-
-    var body: some View {
-        HStack(spacing: 24) {
-            ForEach(options, id: \.value) { option in
-                let selected = option.value == selection
-                Button { onSelect(option.value) } label: {
-                    VStack(spacing: 4) {
-                        Text(option.title)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(selected ? Color.white : Color.white.opacity(0.55))
-                        Circle()
-                            .fill(selected ? Color.amber : Color.clear)
-                            .frame(width: 4, height: 4)
-                    }
-                    .frame(minWidth: 64, minHeight: 44)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(label)
-    }
-}
-
 extension Color {
     /// Glint's accent, the amber from the app icon (#F5A524). Black text on it is about 10:1.
     static let amber = Color(red: 0xF5 / 255, green: 0xA5 / 255, blue: 0x24 / 255)
@@ -186,4 +205,15 @@ extension Angle {
     /// True at ±90° (and 270°…): the content's width now runs along the screen's height.
     /// `rotationEffect` doesn't change layout, so rotated views need their frame swapped by hand.
     var isQuarterTurn: Bool { Int((degrees / 90).rounded()) % 2 != 0 }
+}
+
+extension View {
+    /// At launch the preview and the shutter come first and the other controls fade in once the camera is running,
+    /// as Apple recommends for a fast launch. Until then they're hidden from touch and VoiceOver too.
+    func shownWhenReady(_ ready: Bool) -> some View {
+        opacity(ready ? 1 : 0)
+            .allowsHitTesting(ready)
+            .accessibilityHidden(!ready)
+            .animation(.easeOut(duration: 0.25), value: ready)
+    }
 }

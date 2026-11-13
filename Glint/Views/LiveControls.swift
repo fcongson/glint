@@ -8,20 +8,18 @@ import SwiftUI
 /// The exposure meter in the top bar.
 struct LiveExposureMeter: View {
     let cam: CameraController
-    let angle: Angle
 
     var body: some View {
-        ExposureMeterView(meter: ExposureMeter(offset: cam.exposureOffset), angle: angle)
+        ExposureMeterView(meter: ExposureMeter(offset: cam.exposureOffset))
     }
 }
 
 /// The focus rail, which follows the lens while autofocus moves it.
 struct LiveFocusRail: View {
     let cam: CameraController
-    let angle: Angle
 
     var body: some View {
-        FocusRail(position: cam.lensPosition, isAutofocus: cam.isAutofocus, angle: angle,
+        FocusRail(position: cam.lensPosition, isAutofocus: cam.isAutofocus,
                   onChange: { cam.setLensPosition($0) }, onTouch: { cam.focusRailTouched($0) })
     }
 }
@@ -29,7 +27,6 @@ struct LiveFocusRail: View {
 /// Elapsed time while recording, in place of the format chip (which can't change mid-recording anyway).
 struct RecordingTimer: View {
     let cam: CameraController
-    let angle: Angle
 
     var body: some View {
         let start = cam.recordingStartedAt ?? Date()
@@ -42,7 +39,6 @@ struct RecordingTimer: View {
             }
             .foregroundStyle(Color.red)
             .fixedSize()
-            .rotationEffect(angle)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Recording")
             .accessibilityValue(elapsed)
@@ -75,7 +71,6 @@ enum ManualParam {
 struct ManualControls: View {
     let cam: CameraController
     @Binding var selected: ManualParam
-    let angle: Angle
 
     /// ISO stops the current lens can actually reach.
     private var availableISOStops: [Float] { ExposureScale.isoStops(min: cam.minISO, max: cam.maxISO) }
@@ -94,7 +89,7 @@ struct ManualControls: View {
                 readout("ISO", SettingsText.iso(cam.iso), .iso)
                 readout("SHUTTER", SettingsText.shutter(denominator: cam.effectiveShutterDenominator), .shutter)
                 readout("WB", SettingsText.kelvin(cam.whiteBalanceKelvin), .wb)
-                SettingReadout(label: "APERTURE", value: SettingsText.aperture(Double(cam.aperture)), angle: angle)   // fixed lens: display only
+                SettingReadout(label: "APERTURE", value: SettingsText.aperture(Double(cam.aperture)))   // fixed lens: display only
             }
             HStack(spacing: 10) {
                 let isAuto = cam.auto[selected.setting]
@@ -139,7 +134,7 @@ struct ManualControls: View {
     private func readout(_ label: String, _ value: String, _ p: ManualParam) -> some View {
         let isAuto = cam.auto[p.setting]
         return Button { selected = p } label: {
-            SettingReadout(label: label, value: value, highlighted: selected == p, isAuto: isAuto, angle: angle)
+            SettingReadout(label: label, value: value, highlighted: selected == p, isAuto: isAuto)
         }
         .accessibilityLabel(SettingsText.name(p.setting))
         .accessibilityValue(isAuto ? "Auto, \(value)" : value)
@@ -160,7 +155,6 @@ struct ManualControls: View {
                     .foregroundStyle(Color.amber)
             }
             .frame(width: 40)
-            .rotationEffect(angle)
             .accessibilityHidden(true)
             RulerPicker(count: stops.count,
                         index: stopIndex(stops, value: { cam.exposureBias }, set: cam.setExposureBias),
@@ -180,7 +174,6 @@ struct ManualControls: View {
                 .frame(width: 44, height: 44)
                 .background(on ? Color.autoRed : Color.clear, in: Circle())
                 .overlay(Circle().strokeBorder(Color.autoRed.opacity(on ? 0 : 0.7), lineWidth: 1.5))
-                .rotationEffect(angle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(SettingsText.name(setting)) auto")

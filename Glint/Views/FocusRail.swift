@@ -8,7 +8,6 @@ import SwiftUI
 struct FocusRail: View {
     let position: Float   // 0 nearest … 1 farthest
     let isAutofocus: Bool
-    let angle: Angle
     let onChange: (Float) -> Void
     var onTouch: (Bool) -> Void = { _ in }   // touched (true) and let go (false), for the focus magnifier
 
@@ -31,14 +30,12 @@ struct FocusRail: View {
         VStack(spacing: 6) {
             Text("∞")
                 .font(.system(size: 17, weight: .semibold, design: .monospaced))
-                .rotationEffect(angle)
                 .opacity(fade)
                 .accessibilityHidden(true)
             track
             Text("NEAR")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .fixedSize()
-                .rotationEffect(angle)
                 .opacity(fade)
                 .accessibilityHidden(true)
         }
@@ -124,6 +121,32 @@ struct FocusRail: View {
         sleepTask = Task {
             try? await Task.sleep(for: .seconds(1.5))
             if !Task.isCancelled { awake = false }
+        }
+    }
+}
+
+/// Which side of the picture the focus rail sits on, as you hold the phone. Right by default, under the right thumb.
+enum RailSide: String, CaseIterable {
+    case left, right
+
+    static let key = "focusRailSide"   // UserDefaults
+
+    var title: String {
+        switch self {
+        case .left: "Left"
+        case .right: "Right"
+        }
+    }
+
+    /// Which edge of the picture is on this side, the way the phone is held (`DeviceAngle.quarterTurns`). Landscape
+    /// left puts the picture's bottom edge on your right; landscape right, its top edge.
+    func alignment(quarterTurns: Int) -> Alignment {
+        let right = self == .right
+        switch quarterTurns {
+        case 1: return right ? .bottom : .top
+        case 2: return right ? .leading : .trailing
+        case 3: return right ? .top : .bottom
+        default: return right ? .trailing : .leading
         }
     }
 }

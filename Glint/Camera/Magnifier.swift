@@ -3,7 +3,7 @@ import simd
 
 // Focus magnifier, as on a camera: the viewfinder punches in on the focus point so you can judge focus by eye.
 // It comes on while you touch the focus rail and goes off a second after you let go (Sony's "MF Assist"), or
-// stays on with the MAG switch. It's drawn by the GPU viewfinder (PeakingRenderer) from the full-resolution
+// stays on with the MAG switch. It's drawn by the GPU viewfinder (ViewfinderRenderer) from the full-resolution
 // frame, so it shows the photo's real detail, not an enlarged preview.
 
 /// How far the magnifier punches in. 1:1 puts one pixel of the frame on one pixel of the screen: the most
