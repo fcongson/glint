@@ -1,13 +1,12 @@
 import SwiftUI
 
 /// SET and the format on the left of the Dynamic Island, the meter on the right: like a camera's info display,
-/// the format is a readout rather than a chip. Tapping it opens where it's changed: SET in PHOTO, the video
-/// format panel in VIDEO. While recording, the time and microphone level take their place.
+/// the format is a readout rather than a chip. Tapping it opens SET, where it's changed. While recording, the time
+/// and microphone level take their place.
 struct TopBar: View {
     let cam: CameraController
     let topPadding: CGFloat
     @Binding var showingSet: Bool
-    @State private var showingVideoFormat = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -18,7 +17,7 @@ struct TopBar: View {
                     .buttonStyle(ChipStyle(isOn: showingSet, outlined: true))
                     .accessibilityLabel("Settings")
                     .accessibilityValue(showingSet ? "Open" : "Closed")
-                    .accessibilityHint("Peaking, zebra level, file type and aspect ratio")
+                    .accessibilityHint("The photo or video format, peaking and the zebra level")
                 formatReadout
             }
             Spacer(minLength: 100)   // the Dynamic Island
@@ -28,14 +27,6 @@ struct TopBar: View {
         .padding(.horizontal, 16)
         .padding(.top, topPadding)
         .padding(.bottom, 10)
-        .sheet(isPresented: $showingVideoFormat) {
-            VideoFormatSheet(format: cam.videoFormat, capabilities: cam.videoCapabilities,
-                             onChange: { cam.setVideoFormat($0) }, onDone: { showingVideoFormat = false })
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(Color(white: 0.1))
-                .preferredColorScheme(.dark)
-        }
     }
 
     /// The photo or video format, as plain text.
@@ -46,7 +37,7 @@ struct TopBar: View {
             ? "\(file) \(SettingsText.aspect(cam.aspect))"   // always both, so the readout doesn't change shape
             : SettingsText.videoFormat(cam.videoFormat)
         return Button {
-            if photo { toggleSet() } else { showingVideoFormat = true }
+            toggleSet()
         } label: {
             Text(title)
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -58,7 +49,7 @@ struct TopBar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(photo ? "Photo format" : "Video format")
         .accessibilityValue(photo ? "\(file), \(SettingsText.aspectSpoken(cam.aspect))" : title)
-        .accessibilityHint(photo ? "Opens Settings, where file type and aspect ratio are" : "Opens resolution, frame rate, codec and exposure lock")
+        .accessibilityHint(photo ? "Opens Settings, where file type and aspect ratio are" : "Opens Settings, where resolution, frame rate, codec and exposure lock are")
     }
 
     private func toggleSet() {

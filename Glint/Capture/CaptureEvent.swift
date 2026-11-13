@@ -44,7 +44,7 @@ enum CaptureEvent: Sendable {
     case autoWhiteBalance(kelvin: Float)
     /// The device format changed (photo/video switch, or a new video format); re-apply manual settings.
     case formatChanged(DeviceInfo)
-    /// What the current lens can record, for the video format panel.
+    /// What the current lens can record, for SET's VIDEO rows.
     case videoCapabilities(VideoCapabilities)
     /// The video format actually in use, when it had to differ from the one asked for.
     case videoFormatResolved(VideoFormat)

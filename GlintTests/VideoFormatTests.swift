@@ -85,4 +85,22 @@ struct VideoFormatTests {
         f.frameRate = 60
         #expect(f.normalized(for: VideoCapabilities()).frameRate == 60)
     }
+
+    @Test func setGreysOutWhatTheLensCantRecord() {
+        var f = VideoFormat()   // 4K 24 HEVC
+        #expect(pro.allows(.hd1080, for: f))
+        #expect(pro.allows(frameRate: 60, for: f))
+        #expect(!pro.allows(frameRate: 25, for: f))            // 25 only at 1080p here
+        #expect(pro.allows(.proResRAW))
+        #expect(!VideoCapabilities().allows(.proRes))
+        #expect(!pro.allows(.log, for: f))                     // Log needs ProRes
+        f.codec = .proRes
+        #expect(pro.allows(.log, for: f))
+        f.frameRate = 60
+        #expect(!pro.allows(.log, for: f))                     // no Log format at 4K 60
+        f.codec = .proResRAW
+        #expect(!pro.allows(.hd1080, for: f))                  // ProRes RAW is 4K only
+        #expect(pro.allows(frameRate: 30, for: f))
+        #expect(!pro.allows(frameRate: 60, for: f))
+    }
 }

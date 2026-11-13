@@ -1,7 +1,7 @@
 import AVFoundation
 
 /// Reads a lens's device formats: what it can record, and which format to activate for a choice from the video
-/// format panel. Nothing here changes the device; `CaptureSession` does that with what these return.
+/// rows in SET. Nothing here changes the device; `CaptureSession` does that with what these return.
 enum DeviceVideoFormats {
     /// The device format for a choice: ProRes RAW uses the Bayer video formats (largest first); everything else
     /// the YUV format of that size and frame rate, unbinned first, with Apple Log support when Log is wanted.

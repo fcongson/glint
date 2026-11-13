@@ -828,7 +828,7 @@ actor CaptureSession {
         }
     }
 
-    /// A new choice from the video format panel.
+    /// A new choice from SET's VIDEO rows.
     func setVideoFormat(_ format: VideoFormat) {
         guard let d = device, !movieOutput.isRecording else { return }
         // The exposure lock only matters when recording starts; no need to touch the device for it.
