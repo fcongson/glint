@@ -53,6 +53,10 @@ struct VideoFormat: Equatable, Sendable, Codable {
 
     var mode: VideoMode { VideoMode(resolution: resolution, frameRate: frameRate) }
 
+    /// The resolution actually recorded: ProRes RAW is the sensor's own size, shown as 4K, whatever was chosen
+    /// for the other codecs (which is kept, for when you switch back).
+    var recordedResolution: VideoResolution { codec == .proResRAW ? .uhd4K : resolution }
+
     /// The 180° rule: auto shutter in video is half the frame duration, 1/48 at 24 fps.
     var autoShutterDenominator: Double { Double(frameRate * 2) }
 
@@ -113,7 +117,7 @@ struct VideoFormat: Equatable, Sendable, Codable {
 /// to the nearest thing it can (`VideoFormat.normalized(for:)`).
 extension VideoCapabilities {
     func allows(_ resolution: VideoResolution, for format: VideoFormat) -> Bool {
-        format.codec == .proResRAW ? resolution == .uhd4K : modes.contains { $0.resolution == resolution }
+        format.codec == .proResRAW ? resolution == format.recordedResolution : modes.contains { $0.resolution == resolution }
     }
 
     func allows(frameRate: Int, for format: VideoFormat) -> Bool {

@@ -49,7 +49,8 @@ struct TopBar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(photo ? "Photo format" : "Video format")
         .accessibilityValue(photo ? "\(file), \(SettingsText.aspectSpoken(cam.aspect))" : title)
-        .accessibilityHint(photo ? "Opens Settings, where file type and aspect ratio are" : "Opens Settings, where resolution, frame rate, codec and exposure lock are")
+        .accessibilityHint(photo ? "Opens Settings, where file type and aspect ratio are"
+                                 : "Opens Settings, where resolution, frame rate, codec and exposure lock are")
     }
 
     private func toggleSet() {

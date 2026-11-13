@@ -86,6 +86,15 @@ struct VideoFormatTests {
         #expect(f.normalized(for: VideoCapabilities()).frameRate == 60)
     }
 
+    @Test func proResRAWRecordsAt4KWhateverWasChosen() {
+        var f = VideoFormat()
+        f.resolution = .hd1080
+        #expect(f.recordedResolution == .hd1080)
+        f.codec = .proResRAW
+        #expect(f.recordedResolution == .uhd4K)
+        #expect(f.resolution == .hd1080)   // kept for when the codec changes back
+    }
+
     @Test func setGreysOutWhatTheLensCantRecord() {
         var f = VideoFormat()   // 4K 24 HEVC
         #expect(pro.allows(.hd1080, for: f))

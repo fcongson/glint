@@ -3,7 +3,8 @@ import SwiftUI
 /// SET: the settings you choose once a session rather than toggle while shooting, like a camera's quick menu
 /// (Fuji and Canon's Q, Sony's Fn). One row per setting, with every choice on show and the current one amber, so
 /// there's nothing to select first: tap a choice and it applies. Grouped under headings so it's clear which feature
-/// each belongs to. The capture format comes first, PHOTO's or VIDEO's. The toggles themselves (HIST, ZEB, PK, MAG) stay one tap away in the tool row.
+/// each belongs to. The capture format comes first, PHOTO's or VIDEO's. The toggles themselves (HIST, ZEB, PK, MAG)
+/// stay one tap away in the tool row.
 struct SetMenu: View {
     let cam: CameraController
     let onDone: () -> Void
@@ -29,7 +30,7 @@ struct SetMenu: View {
             case .frameRate: "FRAME RATE"
             case .codec: "FORMAT"
             case .encoding: "ENCODING"
-            case .recordingExposure: "EXPOSURE"
+            case .recordingExposure: "REC EXPOSURE"   // exposure while recording; the full name doesn't fit the column
             case .debugInfo: "DEBUG INFO"
             }
         }
@@ -120,9 +121,10 @@ struct SetMenu: View {
                                     .accessibilityAddTraits(.isHeader)
                                 ForEach(sectionRows, id: \.self) { row($0) }
                                 if section == .video {
-                                    Text(SettingsText.videoNote(cam.videoFormat, capabilities: cam.videoCapabilities))
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(Color.white.opacity(0.65))
+                                    Text(SettingsText.videoNote(cam.videoFormat, capabilities: cam.videoCapabilities,
+                                                                isRecording: cam.isRecording))
+                                        .font(.system(.caption2, design: .monospaced))   // grows with the system text size
+                                        .foregroundStyle(Color.white.opacity(0.7))
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
@@ -142,6 +144,9 @@ struct SetMenu: View {
 
     private var format: VideoFormat { cam.videoFormat }
     private var caps: VideoCapabilities { cam.videoCapabilities }
+    /// The video format can't change mid-recording (the controller ignores it), so its rows are greyed out for
+    /// the length of one: SET can be open when recording starts, and the other sections still work.
+    private var canChangeVideo: Bool { !cam.isRecording }
 
     /// Changes one part of the video format; the controller settles the rest to what the lens can record.
     private func updateVideo(_ change: (inout VideoFormat) -> Void) {
@@ -179,26 +184,27 @@ struct SetMenu: View {
                        selection: cam.aspect, onSelect: { cam.setAspect($0) },
                        spoken: { SettingsText.aspectSpoken($0) })
         case .resolution:
-            let raw = format.codec == .proResRAW
             SettingRow(tile: tile, options: VideoResolution.allCases.map { (title: SettingsText.resolution($0), value: $0) },
-                       selection: raw ? .uhd4K : format.resolution, onSelect: { r in updateVideo { $0.resolution = r } },
-                       isAvailable: { caps.allows($0, for: format) })
+                       selection: format.recordedResolution, onSelect: { r in updateVideo { $0.resolution = r } },
+                       isAvailable: { canChangeVideo && caps.allows($0, for: format) })
         case .frameRate:
             SettingRow(tile: tile, options: VideoFormat.frameRates.map { (title: "\($0)", value: $0) },
                        selection: format.frameRate, onSelect: { fps in updateVideo { $0.frameRate = fps } },
-                       spoken: { "\($0) frames per second" }, isAvailable: { caps.allows(frameRate: $0, for: format) })
+                       spoken: { "\($0) frames per second" },
+                       isAvailable: { canChangeVideo && caps.allows(frameRate: $0, for: format) })
         case .codec:
             SettingRow(tile: tile, options: VideoCodec.allCases.map { (title: SettingsText.codec($0), value: $0) },
                        selection: format.codec, onSelect: { c in updateVideo { $0.codec = c } },
-                       isAvailable: { caps.allows($0) })
+                       isAvailable: { canChangeVideo && caps.allows($0) })
         case .encoding:
             SettingRow(tile: tile, options: VideoEncoding.allCases.map { (title: SettingsText.encoding($0), value: $0) },
                        selection: format.encoding, onSelect: { e in updateVideo { $0.encoding = e } },
-                       isAvailable: { caps.allows($0, for: format) })
+                       isAvailable: { canChangeVideo && caps.allows($0, for: format) })
         case .recordingExposure:
             SettingRow(tile: tile, options: [(title: "Adjustable", value: false), (title: "Locked", value: true)],
                        selection: format.locksExposureWhileRecording,
-                       onSelect: { locked in updateVideo { $0.locksExposureWhileRecording = locked } })
+                       onSelect: { locked in updateVideo { $0.locksExposureWhileRecording = locked } },
+                       isAvailable: { _ in canChangeVideo })
         case .debugInfo:
             SettingRow(tile: tile, options: [(title: "On", value: true), (title: "Off", value: false)],
                        selection: debugInfo, onSelect: { debugInfo = $0 })
@@ -213,7 +219,7 @@ private struct SettingRow<Value: Hashable>: View {
     let selection: Value
     let onSelect: (Value) -> Void
     var spoken: ((Value) -> String)? = nil
-    /// False greys a choice out, for what the current lens can't record.
+    /// False greys a choice out: what the current lens can't record, or anything that can't change right now.
     var isAvailable: (Value) -> Bool = { _ in true }
 
     var body: some View {

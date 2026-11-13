@@ -127,9 +127,10 @@ enum SettingsText {
         return "\(resolution(f.resolution)) \(f.frameRate) \(codec(f.codec))\(log)"
     }
 
-    /// What the video settings mean, under SET's VIDEO rows.
-    static func videoNote(_ format: VideoFormat, capabilities: VideoCapabilities) -> String {
-        var lines = ["Shutter on A follows the 180° rule (1/\(Int(format.autoShutterDenominator)) at \(format.frameRate) fps), and no shutter is slower than a frame. White balance holds still while recording."]
+    /// What the video settings mean, under SET's VIDEO rows. While recording it starts by saying why they're greyed out.
+    static func videoNote(_ format: VideoFormat, capabilities: VideoCapabilities, isRecording: Bool = false) -> String {
+        var lines = isRecording ? ["The video format can't change while recording."] : []
+        lines += ["Shutter on A follows the 180° rule (1/\(Int(format.autoShutterDenominator)) at \(format.frameRate) fps), and no shutter is slower than a frame. White balance holds still while recording."]
         switch format.codec {
         case .proResRAW:
             lines.append("ProRes RAW records the sensor data, so Log and white balance are set when editing. It needs a lot of storage; Apple recommends an external drive.")

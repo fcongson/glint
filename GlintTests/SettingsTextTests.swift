@@ -125,4 +125,29 @@ struct SettingsTextTests {
     func clipping(highlights: Bool, shadows: Bool, text: String) {
         #expect(SettingsText.clipping(highlights: highlights, shadows: shadows) == text)
     }
+
+    @Test func theVideoNoteExplainsTheChosenCodec() {
+        let pro = VideoCapabilities(proRes: true)
+        var format = VideoFormat()   // 4K 24 HEVC
+        let hevc = SettingsText.videoNote(format, capabilities: pro)
+        #expect(hevc.contains("1/48 at 24 fps"))
+        #expect(!hevc.contains("ProRes"))
+        #expect(SettingsText.videoNote(format, capabilities: VideoCapabilities()).contains("need a Pro iPhone"))
+        format.codec = .proRes
+        format.frameRate = 30
+        let proRes = SettingsText.videoNote(format, capabilities: pro)
+        #expect(proRes.contains("1/60 at 30 fps"))
+        #expect(proRes.contains("ProRes files are large"))
+        format.codec = .proResRAW
+        #expect(SettingsText.videoNote(format, capabilities: pro).contains("external drive"))
+    }
+
+    @Test func theVideoNoteSaysWhyTheRowsAreGreyedOutWhileRecording() {
+        let format = VideoFormat()
+        let idle = SettingsText.videoNote(format, capabilities: VideoCapabilities())
+        let recording = SettingsText.videoNote(format, capabilities: VideoCapabilities(), isRecording: true)
+        #expect(!idle.contains("can't change while recording"))
+        #expect(recording.hasPrefix("The video format can't change while recording."))
+        #expect(recording.hasSuffix(idle))
+    }
 }
