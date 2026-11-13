@@ -64,7 +64,11 @@ enum CaptureEvent: Sendable {
     /// The camera is running again after the review screen closed.
     case resumed
     case recordingStarted
-    case recordingFinished(URL)
+    /// However it ended; the outcome says whether the file is worth saving and what went wrong, if anything.
+    case recordingFinished(URL, RecordingOutcome)
+    /// The system took the camera away (another app, a call, heat); the preview is frozen until it ends.
+    case interrupted(CameraInterruption)
+    case interruptionEnded
     case status(String)
 }
 
@@ -119,6 +123,12 @@ actor CaptureSession {
     private var deferredStartObserver: NSObject?  // the session's deferred start delegate (iOS 26+), kept alive here
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]   // kept alive until each capture finishes
     private var recordingDelegate: RecordingDelegate?
+    private var wantsRunning = false              // whether the camera should be running; see `setRunning`
+    private var sessionObservers: [any NSObjectProtocol] = []   // interruptions and runtime errors
+
+    /// Recording stops by itself, with the file intact, when free storage falls to this. The file is then copied
+    /// into Photos, so there has to be room left for that.
+    private static let minimumFreeBytes: Int64 = 500_000_000
 
     /// `peaking` draws the viewfinder while focus peaking is on; nil leaves peaking unavailable.
     init(peaking: PeakingRenderer?) {
@@ -178,7 +188,10 @@ actor CaptureSession {
             session.addOutput(photoOutput)
             photoOutput.maxPhotoQualityPrioritization = .speed   // no Deep Fusion / multi-frame fusion
         }
-        if session.canAddOutput(movieOutput) { session.addOutput(movieOutput) }
+        if session.canAddOutput(movieOutput) {
+            session.addOutput(movieOutput)
+            movieOutput.minFreeDiskSpaceLimit = Self.minimumFreeBytes
+        }
         // The preview-frame output (histogram, GPU viewfinder) is attached once, with its frames switched off
         // until something wants them: adding or removing it later reconfigures the session, which stalls the
         // preview for a moment every time HIST or ZEB is switched.
@@ -192,6 +205,8 @@ actor CaptureSession {
         session.commitConfiguration()
 
         let info = applyDeviceSettings(wide)
+        observeSession()
+        wantsRunning = true
         session.startRunning()   // returns once the preview is running; deferred outputs follow shortly after
         restoreAfterReconfiguration()
         subjectAreaObserver = NotificationCenter.default.addObserver(
@@ -205,6 +220,43 @@ actor CaptureSession {
         #endif
         emit.yield(.ready(lenses: lenses, device: info))
         emit.yield(.videoCapabilities(videoCapabilities(wide)))
+    }
+
+    // MARK: Interruptions and errors
+
+    /// The system can take the camera away (another app, a call, heat) and hand it back; the session stops and
+    /// resumes by itself, and the viewfinder says why meanwhile. A runtime error stops the session for good unless
+    /// it's restarted, see `recoverFromRuntimeError`. Notifications arrive on any thread, so they only emit or enqueue.
+    private func observeSession() {
+        let center = NotificationCenter.default
+        sessionObservers = [
+            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [emit] note in
+                let raw = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
+                let reason = raw.flatMap { AVCaptureSession.InterruptionReason(rawValue: $0) }
+                emit.yield(.interrupted(CameraInterruption(reason)))
+            },
+            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [emit] _ in
+                emit.yield(.interruptionEnded)
+            },
+            center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
+                let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
+                let wasReset = error?.domain == AVFoundationErrorDomain && error?.code == AVError.Code.mediaServicesWereReset.rawValue
+                let description = error?.localizedDescription ?? "unknown"
+                self?.enqueue { $0.recoverFromRuntimeError(mediaServicesWereReset: wasReset, description: description) }
+            },
+        ]
+    }
+
+    /// When the system's media services restart, the session has stopped through no fault of its own: start it again,
+    /// as Apple's sample camera does. Any other error is reported and left, rather than restarted into the same failure.
+    private func recoverFromRuntimeError(mediaServicesWereReset: Bool, description: String) {
+        guard mediaServicesWereReset else {
+            emit.yield(.status("Camera error: \(description)"))
+            return
+        }
+        guard wantsRunning, !session.isRunning else { return }
+        session.startRunning()
+        schedulePhotoPreparation()
     }
 
     /// Launch brings up the preview first and starts everything else a moment later (WWDC26 "Build a responsive
@@ -609,17 +661,26 @@ actor CaptureSession {
     // MARK: Histogram
 
     /// Stops the camera while it isn't on screen (the review), which is most of what a camera app spends battery
-    /// on, and starts it again after. Never stops mid-recording.
+    /// on, and starts it again after. Never stops mid-recording or mid-shot: see `stopIfIdle`.
     func setRunning(_ running: Bool) {
+        wantsRunning = running
         if running {
             if !session.isRunning {
                 session.startRunning()   // blocks until frames are flowing
                 emit.yield(.resumed)
                 schedulePhotoPreparation()   // skipped while it was stopped
             }
-        } else if session.isRunning, !movieOutput.isRecording {
-            session.stopRunning()
+        } else {
+            stopIfIdle()
         }
+    }
+
+    /// Stops the session once nothing needs it: stopping with a photo still being captured would lose the photo
+    /// (opening review straight after the shutter), and stopping mid-recording would end the recording. Called
+    /// again as each capture and recording finishes, so the stop that was held back happens then.
+    private func stopIfIdle() {
+        guard !wantsRunning, session.isRunning, !movieOutput.isRecording, photoDelegates.isEmpty else { return }
+        session.stopRunning()
     }
 
     /// Chooses what the luma analysis stream is for. Its frames flow only while something wants them, so it costs
@@ -734,6 +795,8 @@ actor CaptureSession {
     /// Emits `.photoCaptured` (or a status on failure). `whiteBalance` is recorded with the photo for review.
     func capturePhoto(fileType: PhotoFileType, aspect: AspectRatio, whiteBalance: WhiteBalanceSetting,
                       requestedAt: CFAbsoluteTime) {
+        // Without a camera (access refused, or none found) the output has no connection, and capturing would raise.
+        guard photoOutput.connection(with: .video) != nil else { return }
         applyCaptureRotation(to: photoOutput)
         let (settings, bayerRAW) = makePhotoSettings()
         let plan = CapturePlan(fileType: fileType, bayerRAWAvailable: bayerRAW)
@@ -741,7 +804,12 @@ actor CaptureSession {
         let id = settings.uniqueID
         let delegate = PhotoCaptureDelegate(
             whiteBalance: whiteBalance, requestedAt: requestedAt, plan: plan, aspect: aspect, emit: emit,
-            finished: { [weak self] in self?.enqueue { $0.photoDelegates[id] = nil } })
+            finished: { [weak self] in
+                self?.enqueue {
+                    $0.photoDelegates[id] = nil
+                    $0.stopIfIdle()   // review may have opened while this shot was being captured
+                }
+            })
         photoDelegates[id] = delegate
         photoOutput.capturePhoto(with: settings, delegate: delegate)
     }
@@ -1006,6 +1074,7 @@ actor CaptureSession {
     func recordingEnded() {
         stopAudioMeter()
         exposureFrozen = false
+        stopIfIdle()   // review may have opened mid-recording
     }
 
     // MARK: Video
@@ -1017,6 +1086,7 @@ actor CaptureSession {
             stopAudioMeter()
             return
         }
+        guard movieOutput.connection(with: .video) != nil else { return }   // no camera: nothing to record
         applyCaptureRotation(to: movieOutput)
         if isVideo { applyCodec() }
         lockForRecording()
@@ -1087,7 +1157,7 @@ private final class RecordingDelegate: NSObject, AVCaptureFileOutputRecordingDel
     }
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
-        emit.yield(.recordingFinished(url))
+        emit.yield(.recordingFinished(url, RecordingOutcome(error: error)))
         finished()
     }
 }
