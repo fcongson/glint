@@ -12,6 +12,7 @@ import os
 final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     struct Wants: Sendable, Equatable {
         var histogram = false
+        var histogramRGB = false              // the histogram also wants red, green and blue (HISTOGRAM in SET)
         var viewfinder: ViewfinderSettings?   // non-nil while the GPU viewfinder draws (peaking or magnifier)
         var any: Bool { histogram || viewfinder != nil }
     }
@@ -57,7 +58,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         // Frame size is chosen in `set(_:)`: small for the histogram alone, full size for the GPU viewfinder.
         output.automaticallyConfiguresOutputBufferDimensions = false
         output.deliversPreviewSizedOutputBuffers = true
-        output.videoSettings = [   // only the luma plane is read
+        output.videoSettings = [   // luma for everything; the chroma plane only for the RGB histogram
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
         output.setSampleBufferDelegate(self, queue: queue)
@@ -107,7 +108,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         let doViewfinder = current.viewfinder != nil && renderer != nil
         guard doHistogram || doViewfinder, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         followWhiteKey()
-        if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer) {
+        if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer, rgb: current.histogram && current.histogramRGB) {
             lastHistogram = t
             if let white = histogram.whiteLevel { learnWhite(white) }
             if current.histogram { publishHistogram(histogram) }

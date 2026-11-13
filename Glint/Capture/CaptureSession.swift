@@ -28,6 +28,7 @@ actor CaptureSession {
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private let analyzer: FrameAnalyzer   // histogram and the GPU viewfinder, from one video data output
+    private let faceDetector: FaceDetector   // for VoiceOver; its output is attached only while that's running
     private var device: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
     private var lensDevices: [String: AVCaptureDevice] = [:]
@@ -53,6 +54,10 @@ actor CaptureSession {
     private var recordingDelegate: RecordingDelegate?
     private var wantsRunning = false              // whether the camera should be running; see `setRunning`
     private var sessionObservers: [any NSObjectProtocol] = []   // interruptions and runtime errors
+    private var videoLight = false                // VIDEO's LIGHT; see `applyVideoLight`
+    private var focusHeld = false                 // a long press is holding focus; see `holdFocusAndExposure`
+    private var exposureHeld = false              // …and exposure
+    private var holdGeneration = 0                // so a hold that's been replaced can't finish late
 
     /// Recording stops by itself, with the file intact, when free storage falls to this. The file is then copied
     /// into Photos, so there has to be room left for that.
@@ -64,6 +69,7 @@ actor CaptureSession {
         self.events = events
         self.emit = emit
         analyzer = FrameAnalyzer(histogram: { emit.yield(.histogram($0)) }, renderer: viewfinder)
+        faceDetector = FaceDetector(report: { emit.yield(.faces($0)) })
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
         self.commands = commands
@@ -163,8 +169,9 @@ actor CaptureSession {
                 let reason = raw.flatMap { AVCaptureSession.InterruptionReason(rawValue: $0) }
                 emit.yield(.interrupted(CameraInterruption(reason)))
             },
-            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [emit] _ in
+            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [emit, weak self] _ in
                 emit.yield(.interruptionEnded)
+                self?.enqueue { $0.applyVideoLight() }   // an interruption puts the light out
             },
             center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
                 let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
@@ -285,8 +292,12 @@ actor CaptureSession {
         exposureQueue.reset()   // what was waiting was meant for the previous lens
         observeMeterAndLens(d)
         if frameRateReduced { applyFrameRateLimit(d) }   // a new lens starts at its format's default
+        focusHeld = false      // a new lens or format starts in auto, so a long press's hold is over
+        exposureHeld = false
+        faceDetector.selectFaces()
+        applyVideoLight()
         return DeviceInfo(lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
-                          aperture: d.lensAperture)
+                          aperture: d.lensAperture, hasFlash: d.hasFlash, hasTorch: d.hasTorch)
     }
 
     /// Reports the exposure offset (for the meter) and the lens position (for the focus rail) as they change,
@@ -414,6 +425,8 @@ actor CaptureSession {
         isManual = manual
         autoSettings = auto
         exposureFrozen = false
+        focusHeld = false       // the modes set here replace a long press's hold
+        exposureHeld = false
         exposureQueue.reset()   // superseded by what's set here
         withLockedDevice(d, failure: "Config") { d in
             guard manual else {
@@ -505,7 +518,7 @@ actor CaptureSession {
     /// Called with each meter reading. In shutter or ISO priority, nudges the setting on auto toward the
     /// (compensated) target; in any partly-auto manual mode, reports what the camera is using for the readouts.
     private func followAuto(offset: Float) {
-        guard isManual, autoSettings.usesCompensation, !exposureFrozen, let d = device else { return }
+        guard isManual, autoSettings.usesCompensation, !exposureFrozen, !exposureHeld, let d = device else { return }
         let auto = autoSettings
         if auto.isPriority, d.exposureMode == .custom {
             let format = d.activeFormat
@@ -583,6 +596,7 @@ actor CaptureSession {
                 session.startRunning()   // blocks until frames are flowing
                 emit.yield(.resumed)
                 schedulePhotoPreparation()   // skipped while it was stopped
+                applyVideoLight()            // stopping put it out
             }
         } else {
             stopIfIdle()
@@ -600,8 +614,8 @@ actor CaptureSession {
 
     /// Chooses what the luma analysis stream is for. Its frames flow only while something wants them, so it costs
     /// nothing while the histogram, peaking and zebras are all off.
-    func setAnalysis(histogram: Bool, viewfinder: ViewfinderSettings?) {
-        let wants = FrameAnalyzer.Wants(histogram: histogram, viewfinder: viewfinder)
+    func setAnalysis(histogram: Bool, rgb: Bool, viewfinder: ViewfinderSettings?) {
+        let wants = FrameAnalyzer.Wants(histogram: histogram, histogramRGB: rgb, viewfinder: viewfinder)
         let output = analyzer.output
         // Normally attached since setup; then frames are just switched on or off, which is immediate. Only a change
         // of frame size (peaking or magnifying, which need full resolution) reconfigures the session.
@@ -660,6 +674,7 @@ actor CaptureSession {
 
     /// Locks the lens at `position`, or with nil returns to continuous autofocus. The device must already be locked.
     private func applyFocus(_ d: AVCaptureDevice, lockedAt position: Float?) {
+        focusHeld = false   // focus is being set some other way
         if let position, d.isLockingFocusWithCustomLensPositionSupported {
             manualFocusPosition = position
             d.isSubjectAreaChangeMonitoringEnabled = false
@@ -674,6 +689,9 @@ actor CaptureSession {
     /// manual focus. When the scene changes, `resumeContinuousFocus` hands control back to continuous autofocus.
     func focus(at point: CGPoint) {
         guard let d = device else { return }
+        focusHeld = false      // a tap ends a long press's hold
+        exposureHeld = false
+        holdGeneration += 1
         withLockedDevice(d, failure: "Focus") { d in
             manualFocusPosition = nil
             if d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.autoFocus) {
@@ -688,8 +706,49 @@ actor CaptureSession {
         }
     }
 
-    private func resumeContinuousFocus() {
+    /// A long press: AE/AF lock, like a camera's AE-L/AF-L button. Focuses and meters once at `point`, then both
+    /// stay put, whatever the scene does, until a tap or a change of mode (`focus(at:)`, `setExposureMode`).
+    /// `focus` and `exposure` say which of the two the camera is choosing (see `ViewfinderLock`); a setting made
+    /// by hand is left as it is.
+    func holdFocusAndExposure(at point: CGPoint, focus: Bool, exposure: Bool) {
         guard let d = device else { return }
+        focusHeld = focus && manualFocusPosition == nil
+        exposureHeld = exposure   // in shutter or ISO priority this is what stops `followAuto` correcting
+        holdGeneration += 1
+        var lockExposureLater = false
+        withLockedDevice(d, failure: "Focus") { d in
+            if focusHeld, d.isFocusModeSupported(.autoFocus) {
+                if d.isFocusPointOfInterestSupported { d.focusPointOfInterest = point }
+                d.focusMode = .autoFocus   // one pass, and the lens stays where it lands
+            }
+            if exposure, !isManualExposure(d) {
+                if d.isExposurePointOfInterestSupported { d.exposurePointOfInterest = point }
+                if d.isExposureModeSupported(.autoExpose) {
+                    d.exposureMode = .autoExpose   // meters once, then locks itself
+                } else if d.isExposureModeSupported(.continuousAutoExposure), d.isExposureModeSupported(.locked) {
+                    d.exposureMode = .continuousAutoExposure
+                    lockExposureLater = true
+                }
+            }
+            d.isSubjectAreaChangeMonitoringEnabled = false   // a changing scene mustn't hand control back
+        }
+        guard lockExposureLater else { return }
+        // Without a meter-once mode: let auto exposure settle on the point for a moment, then lock it.
+        let generation = holdGeneration
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            lockHeldExposure(generation)
+        }
+    }
+
+    private func lockHeldExposure(_ generation: Int) {
+        guard generation == holdGeneration, exposureHeld, let d = device,
+              d.exposureMode == .continuousAutoExposure, d.isExposureModeSupported(.locked) else { return }
+        withLockedDevice(d, failure: "Config") { $0.exposureMode = .locked }
+    }
+
+    private func resumeContinuousFocus() {
+        guard let d = device, !focusHeld, !exposureHeld else { return }
         withLockedDevice(d, failure: "Focus") { d in
             let center = CGPoint(x: 0.5, y: 0.5)
             // A notification still in flight must not undo manual focus set since the tap.
@@ -709,11 +768,11 @@ actor CaptureSession {
 
     /// Emits `.photoCaptured` (or a status on failure). `whiteBalance` is recorded with the photo for review.
     func capturePhoto(fileType: PhotoFileType, aspect: AspectRatio, whiteBalance: WhiteBalanceSetting,
-                      requestedAt: CFAbsoluteTime) {
+                      flash: FlashSetting, requestedAt: CFAbsoluteTime) {
         // Without a camera (access refused, or none found) the output has no connection, and capturing would raise.
         guard photoOutput.connection(with: .video) != nil else { return }
         applyCaptureRotation(to: photoOutput)
-        let (settings, bayerRAW) = makePhotoSettings()
+        let (settings, bayerRAW) = makePhotoSettings(flash: flash)
         let plan = CapturePlan(fileType: fileType, bayerRAWAvailable: bayerRAW)
         if plan.fellBackFromRAW(fileType: fileType) { emit.yield(.status("Bayer RAW unavailable, saving HEIC")) }
         let id = settings.uniqueID
@@ -731,7 +790,7 @@ actor CaptureSession {
 
     /// The settings every still is shot with. HEIC also shoots Bayer RAW, then develops it into a HEIC with no
     /// processing, so it matches the DNG. A settings object is good for one capture, so this makes a new one.
-    private func makePhotoSettings() -> (AVCapturePhotoSettings, bayerRAW: Bool) {
+    private func makePhotoSettings(flash: FlashSetting = .off) -> (AVCapturePhotoSettings, bayerRAW: Bool) {
         let settings: AVCapturePhotoSettings
         let bayerRAW: Bool
         if let bayer = photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) {
@@ -749,6 +808,10 @@ actor CaptureSession {
             settings.previewPhotoFormat = [kCVPixelBufferPixelFormatTypeKey as String: format,
                                            kCVPixelBufferWidthKey as String: Self.previewPixels,
                                            kCVPixelBufferHeightKey as String: Self.previewPixels]
+        }
+        // Asking for a flash mode the output doesn't offer (a lens with no flash) raises, so only what's supported.
+        if flash != .off, photoOutput.supportedFlashModes.contains(flash.captureMode) {
+            settings.flashMode = flash.captureMode
         }
         return (settings, bayerRAW)
     }
@@ -778,6 +841,43 @@ actor CaptureSession {
         guard !preparePending else { return }
         preparePending = true
         enqueue { $0.preparePhotoSettings() }
+    }
+
+    // MARK: Light and faces
+
+    /// VIDEO's LIGHT: the flash LED as a steady light.
+    func setVideoLight(_ on: Bool) {
+        videoLight = on
+        applyVideoLight()
+        if on, isVideo, let d = device, d.hasTorch, !d.isTorchAvailable {
+            emit.yield(.status("The light isn't available right now"))   // the phone is too hot for it
+        }
+    }
+
+    /// Lit only in VIDEO with the camera running, so framing and exposure can be set with it before recording.
+    /// A new lens or format, stopping the camera and an interruption all put it out, so this runs after each.
+    private func applyVideoLight() {
+        guard let d = device, d.hasTorch else { return }
+        let mode: AVCaptureDevice.TorchMode = videoLight && isVideo && session.isRunning && d.isTorchAvailable ? .on : .off
+        guard d.torchMode != mode, d.isTorchModeSupported(mode) else { return }
+        withLockedDevice(d, failure: "Light") { $0.torchMode = mode }
+    }
+
+    /// Face detection for VoiceOver's description of the picture. Its output is attached only while wanted: the
+    /// camera does the detecting, but there's no reason to have it running for anyone else.
+    func setFaceDetection(_ on: Bool) {
+        let output = faceDetector.output
+        guard device != nil, session.outputs.contains(output) != on else { return }
+        session.beginConfiguration()
+        if !on {
+            session.removeOutput(output)
+        } else if session.canAddOutput(output) {
+            session.addOutput(output)
+        }
+        setConnections()
+        session.commitConfiguration()
+        restoreAfterReconfiguration()
+        if on { faceDetector.selectFaces() }
     }
 
     // MARK: Video formats

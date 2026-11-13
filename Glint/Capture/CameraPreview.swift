@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AVKit
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
@@ -7,6 +8,10 @@ struct CameraPreview: UIViewRepresentable {
     var hint = "Touch the viewfinder to set the focus point"
     /// (device point 0...1, point in the preview view's coordinates, the view's size)
     var onTap: ((CGPoint, CGPoint, CGSize) -> Void)? = nil
+    /// A long press, with the same three values: AE/AF lock.
+    var onLongPress: ((CGPoint, CGPoint, CGSize) -> Void)? = nil
+    /// A volume button or Camera Control was pressed and let go.
+    var onCaptureButton: (() -> Void)? = nil
     var onLayerReady: ((AVCaptureVideoPreviewLayer) -> Void)? = nil
 
     final class PreviewView: UIView {
@@ -17,12 +22,23 @@ struct CameraPreview: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         var onTap: ((CGPoint, CGPoint, CGSize) -> Void)?
+        var onLongPress: ((CGPoint, CGPoint, CGSize) -> Void)?
+        var onCaptureButton: (() -> Void)?
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
+            report(g, to: onTap)
+        }
+
+        /// Fires once, when the press has been held long enough, not again when the finger lifts.
+        @objc func handleLongPress(_ g: UILongPressGestureRecognizer) {
+            if g.state == .began { report(g, to: onLongPress) }
+        }
+
+        private func report(_ g: UIGestureRecognizer, to handler: ((CGPoint, CGPoint, CGSize) -> Void)?) {
             guard let v = g.view as? PreviewView else { return }
             let p = g.location(in: v)
             let devicePoint = v.previewLayer.captureDevicePointConverted(fromLayerPoint: p)
-            onTap?(devicePoint, p, v.bounds.size)
+            handler?(devicePoint, p, v.bounds.size)
         }
     }
 
@@ -37,15 +53,30 @@ struct CameraPreview: UIViewRepresentable {
         v.accessibilityTraits = .allowsDirectInteraction
         v.previewLayer.session = session
         v.previewLayer.videoGravity = .resizeAspect   // show the whole frame when the sensor image is landscape in the portrait box
-        context.coordinator.onTap = onTap
-        v.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator,
-                                                      action: #selector(Coordinator.handleTap(_:))))
+        let coordinator = context.coordinator
+        update(coordinator)
+        v.addGestureRecognizer(UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleTap(_:))))
+        v.addGestureRecognizer(UILongPressGestureRecognizer(target: coordinator,
+                                                            action: #selector(Coordinator.handleLongPress(_:))))
+        // The volume buttons and Camera Control work the capture button, as in the system Camera. The system
+        // only sends these while the camera is running, and gives the buttons back their usual job otherwise.
+        if #available(iOS 17.2, *) {
+            v.addInteraction(AVCaptureEventInteraction { [weak coordinator] event in
+                if event.phase == .ended { coordinator?.onCaptureButton?() }
+            })
+        }
         onLayerReady?(v.previewLayer)
         return v
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        context.coordinator.onTap = onTap
+        update(context.coordinator)
         uiView.accessibilityHint = hint
+    }
+
+    private func update(_ coordinator: Coordinator) {
+        coordinator.onTap = onTap
+        coordinator.onLongPress = onLongPress
+        coordinator.onCaptureButton = onCaptureButton
     }
 }

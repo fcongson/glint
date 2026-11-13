@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Vertical manual-focus slider down the side of the viewfinder: ∞ at the top, NEAR at the bottom.
+/// Vertical manual-focus slider down the side of the viewfinder: ∞ at the top, NEAR at the bottom. The two
+/// labels are also presets: a tap sends the lens straight to that end (`FocusPreset`).
 ///
 /// Dragging moves the lens relative to where it was when the touch began, so touching the rail never makes the
 /// picture jump. It fades back when idle so it doesn't sit on the picture, and stays fully visible while
@@ -27,22 +28,36 @@ struct FocusRail: View {
     private var fade: Double { isVisible ? 1 : 0.4 }
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text("∞")
-                .font(.system(size: 17, weight: .semibold, design: .monospaced))
-                .opacity(fade)
-                .accessibilityHidden(true)
+        VStack(spacing: 0) {
+            presetButton(.infinity, size: 17)
             track
-            Text("NEAR")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .fixedSize()
-                .opacity(fade)
-                .accessibilityHidden(true)
+            presetButton(.nearest, size: 10)
         }
         .foregroundStyle(Color.white)
         .shadow(color: .black.opacity(0.6), radius: 2)
         .animation(.easeOut(duration: 0.4), value: isVisible)
         .onChange(of: isAutofocus) { wake() }
+    }
+
+    /// An end label, which is also the preset for that end. Like a touch on the rail it turns autofocus off and
+    /// brings up the magnifier for a moment, so the result can be checked.
+    private func presetButton(_ preset: FocusPreset, size: CGFloat) -> some View {
+        Button {
+            wake()
+            onTouch(true)
+            onChange(preset.position)
+            onTouch(false)
+        } label: {
+            Text(preset.title)
+                .font(.system(size: size, weight: .semibold, design: .monospaced))
+                .fixedSize()
+                .opacity(fade)
+                .frame(width: width, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(preset.name)
+        .accessibilityHint("Turns autofocus off.")
     }
 
     private var track: some View {

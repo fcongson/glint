@@ -42,7 +42,29 @@ final class CameraController {
     private(set) var aperture: Float = 0
     private(set) var whiteBalanceKelvin: Float = 5500
     private(set) var isHistogramEnabled = false
+    private(set) var histogramStyle = HistogramStyle.luma
     let histogramModel = HistogramModel()
+    private(set) var isGridEnabled = false    // rule-of-thirds lines over the picture
+    private(set) var isLevelEnabled = false   // the horizon level over the picture
+    let levelModel = LevelModel()
+    @ObservationIgnored private lazy var levelSensor = LevelSensor { [weak self] in self?.levelChanged($0) }
+    private(set) var flash = FlashSetting.off   // stills
+    private(set) var isVideoLightOn = false     // the same LED, steady, in VIDEO; not remembered between launches
+    private(set) var hasFlash = false           // whether the current lens has them
+    private(set) var hasVideoLight = false
+    /// What a long press on the viewfinder is holding (AE/AF lock), if anything.
+    private(set) var viewfinderLock: ViewfinderLock?
+    /// Counts photos asked for, by the shutter button or a hardware one, for the screen's blink and the haptic.
+    private(set) var shutterPresses = 0
+    @ObservationIgnored private var isReviewing = false
+    // VoiceOver's description of the picture (see `SceneDescription`).
+    @ObservationIgnored private var isDescribingScene = false
+    @ObservationIgnored private var faceSpeech = SceneAnnouncer(saidAlready: SceneDescription.noFaces)
+    @ObservationIgnored private var levelSpeech = SceneAnnouncer()
+    @ObservationIgnored private var spokenTilt: SceneDescription.Tilt?
+    @ObservationIgnored private var heldQuarterTurns = 0   // how the phone was last held, from the level
+    @ObservationIgnored private var latestFaces = SceneDescription.noFaces
+    @ObservationIgnored private var faceRetry: Task<Void, Never>?
     /// Draws the viewfinder with peaking outlines, on the GPU. Nil without Metal, which leaves peaking off.
     let viewfinderRenderer: ViewfinderRenderer?
     /// Focus peaking is shown while focusing by hand (AF off), as on a camera in MF. On by default.
@@ -106,7 +128,8 @@ final class CameraController {
                       videoFormat: videoFormat, isHistogramEnabled: isHistogramEnabled,
                       isPeakingEnabled: isPeakingEnabled, peakingSensitivity: peakingSensitivity,
                       peakingAppearance: peakingAppearance, peakingMode: peakingMode, isZebraEnabled: isZebraEnabled,
-                      zebraLevel: zebraLevel, isMagnifierEnabled: isMagnifierEnabled)
+                      zebraLevel: zebraLevel, isMagnifierEnabled: isMagnifierEnabled, flash: flash,
+                      histogramStyle: histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
     }
 
     /// Called when the app leaves the screen, which is also the last chance before it's quit from the app switcher.
@@ -136,6 +159,10 @@ final class CameraController {
         isZebraEnabled = viewfinderRenderer != nil && (saved.isZebraEnabled ?? isZebraEnabled)
         zebraLevel = saved.zebraLevel ?? zebraLevel
         isMagnifierEnabled = saved.isMagnifierEnabled ?? isMagnifierEnabled
+        flash = saved.flash ?? flash
+        histogramStyle = saved.histogramStyle ?? histogramStyle
+        isGridEnabled = saved.isGridEnabled ?? isGridEnabled
+        isLevelEnabled = saved.isLevelEnabled ?? isLevelEnabled
     }
 
     /// Once the camera is running: the session starts in PHOTO with auto exposure and no analysis, so send what was
@@ -143,6 +170,8 @@ final class CameraController {
     private func applySavedSettingsToCamera() {
         if manual { sendExposureMode(keepWhiteBalance: hasManualWhiteBalance) }
         sendAnalysis()
+        updateLevelSensor()
+        voiceOverChanged(UIAccessibility.isVoiceOverRunning)
         if captureMode == .video {
             captureMode = .photo   // what the session is actually in
             setCaptureMode(.video)
@@ -170,6 +199,11 @@ final class CameraController {
             if ProcessInfo.processInfo.isLowPowerModeEnabled { lowPowerModeChanged(true) }
             for await _ in NotificationCenter.default.notifications(named: .NSProcessInfoPowerStateDidChange) {
                 lowPowerModeChanged(ProcessInfo.processInfo.isLowPowerModeEnabled)
+            }
+        }
+        Task {
+            for await _ in NotificationCenter.default.notifications(named: UIAccessibility.voiceOverStatusDidChangeNotification) {
+                voiceOverChanged(UIAccessibility.isVoiceOverRunning)
             }
         }
         Task {
@@ -207,6 +241,7 @@ final class CameraController {
             stopTimer("lens")
             stopTimer("mode")
             apply(device)
+            viewfinderLock = nil   // a new lens or format starts in auto
             // A new device or format starts in auto, so re-lock exposure/WB if in MANUAL, and focus if by hand.
             if manual || !isAutofocus { sendExposureMode(keepWhiteBalance: true) }
         case .videoCapabilities(let caps):
@@ -245,6 +280,8 @@ final class CameraController {
             }
         case .histogram(let histogram):
             if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
+        case .faces(let faces):
+            describeFaces(faces)
         case .photoPreview(let image, let requestedAt):
             lastThumbnail = image   // the review image replaces it once it's rendered (`addShot`)
             #if DEBUG
@@ -286,6 +323,8 @@ final class CameraController {
         maxISO = device.maxISO
         iso = min(max(iso, device.minISO), device.maxISO)
         aperture = device.aperture
+        hasFlash = device.hasFlash
+        hasVideoLight = device.hasTorch
     }
 
     // MARK: Lens switching
@@ -392,6 +431,7 @@ final class CameraController {
     }
 
     private func sendExposureMode(keepWhiteBalance: Bool) {
+        if viewfinderLock != nil { viewfinderLock = nil }   // setting the modes afresh ends a long press's lock
         let manual = manual, iso = iso, denom = shutterDenominator, kelvin = whiteBalanceKelvin
         let manualFocus: Float? = isAutofocus ? nil : lensPosition
         let auto = auto, bias = exposureBias
@@ -415,6 +455,104 @@ final class CameraController {
         if !on { histogramModel.clear() }
         aidPauses.userChose(.histogram)
         sendAnalysis()
+    }
+
+    /// SET's HISTOGRAM row: brightness, or red, green and blue.
+    func setHistogramStyle(_ style: HistogramStyle) {
+        guard style != histogramStyle else { return }
+        histogramStyle = style
+        sendAnalysis()
+    }
+
+    // MARK: Composition
+
+    func setGridEnabled(_ on: Bool) { isGridEnabled = on }
+
+    func setLevelEnabled(_ on: Bool) {
+        guard on != isLevelEnabled else { return }
+        isLevelEnabled = on
+        if !on { levelModel.show(nil) }
+        updateLevelSensor()
+    }
+
+    /// Gravity is read only while the level is on screen or VoiceOver is describing the picture, and never
+    /// behind the review screen.
+    private func updateLevelSensor() {
+        levelSensor.setRunning((isLevelEnabled || isDescribingScene) && isCameraReady && !isReviewing)
+    }
+
+    private func levelChanged(_ level: Level?) {
+        if isLevelEnabled { levelModel.show(level) }
+        guard let level else { return }
+        heldQuarterTurns = level.quarterTurns
+        if isDescribingScene { describeLevel(level) }
+    }
+
+    // MARK: Flash and light
+
+    func setFlash(_ setting: FlashSetting) { flash = setting }
+
+    /// VIDEO's LIGHT. Unlike the format, it can change mid-recording.
+    func setVideoLight(_ on: Bool) {
+        guard on != isVideoLightOn else { return }
+        isVideoLightOn = on
+        capture.enqueue { $0.setVideoLight(on) }
+    }
+
+    // MARK: Spoken descriptions
+
+    /// VoiceOver came on or went off. While it's on Glint says what the camera sees, as the system Camera does:
+    /// faces (the camera finds them) and whether the horizon is level.
+    private func voiceOverChanged(_ isOn: Bool) {
+        guard isOn != isDescribingScene, isCameraReady else { return }
+        isDescribingScene = isOn
+        faceRetry?.cancel()
+        faceSpeech = SceneAnnouncer(saidAlready: SceneDescription.noFaces)
+        levelSpeech = SceneAnnouncer()
+        spokenTilt = nil
+        capture.enqueue { $0.setFaceDetection(isOn) }
+        updateLevelSensor()
+    }
+
+    /// `faces` are in the metadata output's coordinates. The preview layer turns them into the screen's, and how
+    /// the phone is held into the picture's, so "left" is your left.
+    private func describeFaces(_ faces: [CGRect]) {
+        guard isDescribingScene, let layer = previewLayer, layer.bounds.width > 0, layer.bounds.height > 0 else { return }
+        let size = layer.bounds.size
+        let frames = faces.map { face -> CGRect in
+            let onScreen = layer.layerRectConverted(fromMetadataOutputRect: face)
+            let unit = CGRect(x: onScreen.minX / size.width, y: onScreen.minY / size.height,
+                              width: onScreen.width / size.width, height: onScreen.height / size.height)
+            return SceneDescription.rotated(unit, quarterTurns: heldQuarterTurns)
+        }
+        latestFaces = SceneDescription.faces(frames)
+        speakFaces()
+    }
+
+    /// Says the latest description if it's new. If it's too soon after the last one, tries again when it isn't:
+    /// the camera only reports again when something changes, so a description held back mustn't be lost.
+    private func speakFaces() {
+        faceRetry?.cancel()
+        let now = CFAbsoluteTimeGetCurrent()
+        if let text = faceSpeech.offer(key: latestFaces, text: latestFaces, now: now) {
+            AccessibilityNotification.Announcement(text).post()
+        } else if latestFaces != faceSpeech.lastKey {
+            let wait = faceSpeech.retryAfter(now: now) + 0.05
+            faceRetry = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(wait))
+                guard let self, !Task.isCancelled, isDescribingScene else { return }
+                speakFaces()
+            }
+        }
+    }
+
+    private func describeLevel(_ level: Level) {
+        let tilt = SceneDescription.Tilt(level, previous: spokenTilt)
+        let text = SceneDescription.level(tilt, degrees: level.tilt)
+        if let text = levelSpeech.offer(key: tilt.rawValue, text: text, now: CFAbsoluteTimeGetCurrent()) {
+            spokenTilt = tilt
+            AccessibilityNotification.Announcement(text).post()
+        }
     }
 
     func setPeakingEnabled(_ on: Bool) {
@@ -560,6 +698,8 @@ final class CameraController {
 
     /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
     func setReviewing(_ isReviewing: Bool) {
+        self.isReviewing = isReviewing
+        updateLevelSensor()
         let running = !isReviewing
         if running { startTimer("resume") }
         locationProvider.setPaused(isReviewing)   // no photo can be taken from review
@@ -568,20 +708,21 @@ final class CameraController {
 
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
-        let histogram = isHistogramEnabled
+        let histogram = isHistogramEnabled, rgb = histogramStyle == .rgb
         let viewfinder: ViewfinderSettings? = isViewfinderDrawn
             ? ViewfinderSettings(outlines: isPeakingShown, sensitivity: peakingSensitivity,
                                  appearance: peakingAppearance, mode: peakingMode,
                                  magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil,
                                  zebras: isZebraShown ? zebraLevel : nil)
             : nil
-        capture.enqueue { $0.setAnalysis(histogram: histogram, viewfinder: viewfinder) }
+        capture.enqueue { $0.setAnalysis(histogram: histogram, rgb: rgb, viewfinder: viewfinder) }
     }
 
     // MARK: Focus
 
     /// Tap to focus. This also hands focus back to autofocus.
     func focus(at point: CGPoint) {
+        if viewfinderLock != nil { viewfinderLock = nil }
         if !isAutofocus {
             isAutofocus = true
             sendAnalysis()   // peaking is for manual focus
@@ -594,6 +735,7 @@ final class CameraController {
     func setAutofocus(_ on: Bool) {
         guard on != isAutofocus else { return }
         isAutofocus = on
+        if viewfinderLock?.focus == true { viewfinderLock = viewfinderLock?.withoutFocus }
         sendAnalysis()
         if on {
             capture.enqueue { $0.setAutofocus() }
@@ -605,6 +747,7 @@ final class CameraController {
     /// Moving the focus rail. Turns autofocus off if it was on.
     func setLensPosition(_ position: Float) {
         let position = FocusScale.clamp(position)
+        if viewfinderLock?.focus == true { viewfinderLock = viewfinderLock?.withoutFocus }
         if isAutofocus {
             isAutofocus = false
             sendAnalysis()
@@ -613,15 +756,42 @@ final class CameraController {
         capture.enqueue { $0.setManualFocus(position) }
     }
 
+    /// A long press on the viewfinder: AE/AF lock at that point (see `ViewfinderLock`). It holds until a tap on
+    /// the viewfinder, or a change of lens, mode or exposure settings; the end of a recording releases it too,
+    /// when Glint puts the exposure modes back. Returns whether there was anything to lock.
+    @discardableResult
+    func lockFocusAndExposure(at point: CGPoint) -> Bool {
+        guard let lock = ViewfinderLock(isAutofocus: isAutofocus, manual: manual, auto: auto) else {
+            post("Nothing to lock: focus and exposure are both manual")
+            return false
+        }
+        viewfinderLock = lock
+        capture.enqueue { $0.holdFocusAndExposure(at: point, focus: lock.focus, exposure: lock.exposure) }
+        AccessibilityNotification.Announcement(lock.spoken).post()
+        return true
+    }
+
     // MARK: Stills
 
+    /// The capture button: the one on screen, a volume button or Camera Control. Takes a photo, or starts or
+    /// stops recording. Not from behind the review screen, where there's no viewfinder to shoot through.
+    func pressCaptureButton() {
+        guard !isCameraDenied, !isReviewing else { return }
+        switch captureMode {
+        case .photo: capturePhoto()
+        case .video: toggleRecording()
+        }
+    }
+
     func capturePhoto() {
+        shutterPresses += 1
         photoProcessing(started: true)
-        let fileType = fileType, aspect = aspect
+        let fileType = fileType, aspect = aspect, flash = flash.available(hasFlash: hasFlash)
         let whiteBalance: WhiteBalanceSetting = manual && !auto.whiteBalance ? .kelvin(Int(whiteBalanceKelvin)) : .auto
         let requestedAt = CFAbsoluteTimeGetCurrent()
         capture.enqueue {
-            $0.capturePhoto(fileType: fileType, aspect: aspect, whiteBalance: whiteBalance, requestedAt: requestedAt)
+            $0.capturePhoto(fileType: fileType, aspect: aspect, whiteBalance: whiteBalance, flash: flash,
+                            requestedAt: requestedAt)
         }
     }
 

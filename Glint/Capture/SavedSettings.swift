@@ -4,7 +4,8 @@ import Foundation
 /// switched off. Saved when the app leaves the screen, loaded at launch.
 ///
 /// Not kept: the lens and the focus position (Glint starts on the main lens with autofocus, so the first frame is
-/// sharp), and anything that only lasts a session, like this session's shots. Every field is optional when
+/// sharp), VIDEO's light (so it never comes on by itself), and anything that only lasts a session, like this
+/// session's shots. Every field is optional when
 /// decoding, so a setting added later starts at its default instead of discarding the rest.
 struct SavedSettings: Codable, Equatable {
     var captureMode: CaptureMode?
@@ -26,6 +27,10 @@ struct SavedSettings: Codable, Equatable {
     var isZebraEnabled: Bool?
     var zebraLevel: ZebraLevel?
     var isMagnifierEnabled: Bool?
+    var flash: FlashSetting?
+    var histogramStyle: HistogramStyle?
+    var isGridEnabled: Bool?
+    var isLevelEnabled: Bool?
 
     static let key = "settings"
 

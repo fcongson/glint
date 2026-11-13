@@ -3,8 +3,9 @@ import SwiftUI
 /// SET: the settings you choose once a session rather than toggle while shooting, like a camera's quick menu
 /// (Fuji and Canon's Q, Sony's Fn). One row per setting, with every choice on show and the current one amber, so
 /// there's nothing to select first: tap a choice and it applies. Grouped under headings so it's clear which feature
-/// each belongs to. The capture format comes first, PHOTO's or VIDEO's. The toggles themselves (HIST, ZEB, PK, MAG)
-/// stay one tap away in the tool row.
+/// each belongs to. The capture format comes first, PHOTO's or VIDEO's, with the flash or the light. The toggles used
+/// while shooting (HIST, ZEB, PK, MAG) stay one tap away in the tool row; the grid and the level, set once for a
+/// shoot, are here.
 struct SetMenu: View {
     let cam: CameraController
     let onDone: () -> Void
@@ -12,8 +13,8 @@ struct SetMenu: View {
     @AppStorage(DebugInfo.key) private var debugInfo = false
 
     enum Tile: CaseIterable {
-        case fileType, aspect, resolution, frameRate, codec, encoding, recordingExposure
-        case peakingMode, sensitivity, colour, lines, zebras, railSide, debugInfo
+        case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
+        case peakingMode, sensitivity, colour, lines, histogram, zebras, grid, level, railSide, debugInfo
 
         /// The row's label, under its section's heading.
         var title: String {
@@ -32,15 +33,20 @@ struct SetMenu: View {
             case .encoding: "ENCODING"
             case .recordingExposure: "REC EXPOSURE"   // exposure while recording; the full name doesn't fit the column
             case .debugInfo: "DEBUG INFO"
+            case .flash: "FLASH"
+            case .light: "LIGHT"
+            case .histogram: "HISTOGRAM"
+            case .grid: "GRID"
+            case .level: "LEVEL"
             }
         }
 
         var section: Section {
             switch self {
             case .peakingMode, .sensitivity, .colour, .lines: .peaking
-            case .zebras, .railSide: .viewfinder
-            case .fileType, .aspect: .photo
-            case .resolution, .frameRate, .codec, .encoding, .recordingExposure: .video
+            case .histogram, .zebras, .grid, .level, .railSide: .viewfinder
+            case .fileType, .aspect, .flash: .photo
+            case .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light: .video
             case .debugInfo: .developer
             }
         }
@@ -62,6 +68,11 @@ struct SetMenu: View {
             case .encoding: "Encoding"
             case .recordingExposure: "Exposure while recording"
             case .debugInfo: "Debug info"
+            case .flash: "Flash"
+            case .light: "Video light"
+            case .histogram: "Histogram"
+            case .grid: "Grid"
+            case .level: "Level"
             }
         }
 
@@ -155,6 +166,8 @@ struct SetMenu: View {
         cam.setVideoFormat(next)
     }
 
+    private static let offOn = [(title: "Off", value: false), (title: "On", value: true)]
+
     @ViewBuilder
     private func row(_ tile: Tile) -> some View {
         switch tile {
@@ -208,6 +221,27 @@ struct SetMenu: View {
         case .debugInfo:
             SettingRow(tile: tile, options: [(title: "On", value: true), (title: "Off", value: false)],
                        selection: debugInfo, onSelect: { debugInfo = $0 })
+        case .flash:
+            // Greyed out on a lens with no flash, where Off is all there is.
+            SettingRow(tile: tile, options: FlashSetting.allCases.map { (title: $0.title, value: $0) },
+                       selection: cam.flash.available(hasFlash: cam.hasFlash), onSelect: { cam.setFlash($0) },
+                       spoken: { "Flash \($0.title.lowercased())" },
+                       isAvailable: { $0 == .off || cam.hasFlash })
+        case .light:
+            // Not part of the format, so it stays live while recording.
+            SettingRow(tile: tile, options: Self.offOn, selection: cam.isVideoLightOn && cam.hasVideoLight,
+                       onSelect: { cam.setVideoLight($0) },
+                       isAvailable: { !$0 || cam.hasVideoLight })
+        case .histogram:
+            SettingRow(tile: tile, options: HistogramStyle.allCases.map { (title: $0.title, value: $0) },
+                       selection: cam.histogramStyle, onSelect: { cam.setHistogramStyle($0) },
+                       spoken: { $0 == .rgb ? "Red, green and blue" : "Brightness" })
+        case .grid:
+            SettingRow(tile: tile, options: [(title: "Off", value: false), (title: "Thirds", value: true)],
+                       selection: cam.isGridEnabled, onSelect: { cam.setGridEnabled($0) })
+        case .level:
+            SettingRow(tile: tile, options: Self.offOn, selection: cam.isLevelEnabled,
+                       onSelect: { cam.setLevelEnabled($0) })
         }
     }
 }

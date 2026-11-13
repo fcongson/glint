@@ -72,13 +72,17 @@ struct Chip: View {
 /// Text over the picture (status, timings, MAGNIFIED) on a dark plate, so it reads over any scene.
 struct OverlayLabel: View {
     let text: String
+    let color: Color
 
-    init(_ text: String) { self.text = text }
+    init(_ text: String, color: Color = .white) {
+        self.text = text
+        self.color = color
+    }
 
     var body: some View {
         Text(text)
             .font(.system(size: 15, weight: .medium, design: .monospaced))
-            .foregroundStyle(Color.white)
+            .foregroundStyle(color)
             .multilineTextAlignment(.leading)
             .padding(8)
             .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
