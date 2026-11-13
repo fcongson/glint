@@ -31,6 +31,15 @@ struct WarmUpTests {
         #expect(image.size.width > 0 && image.size.height > 0)
     }
 
+    /// The path a real shot takes: through the developer's queue, coming back compressed with a thumbnail.
+    @Test func theWarmUpRAWReviewsThroughTheDeveloper() async throws {
+        let developer = PhotoDeveloper(renderer: ReviewImageRenderer())
+        let review = try #require(await developer.review(try warmUpDNG(), isRAW: true))
+        let decoded = try #require(UIImage(data: review.data))
+        #expect(decoded.size.width > 0 && decoded.size.height > 0)
+        #expect(review.thumbnail.size.width > 0 && review.thumbnail.size.height > 0)
+    }
+
     @Test func theWarmUpRAWDevelopsToHEIC() throws {
         #expect(ReviewImageRenderer().developHEIC(from: try warmUpDNG(), aspect: .fourThree) != nil)
     }

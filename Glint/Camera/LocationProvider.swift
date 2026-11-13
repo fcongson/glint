@@ -6,6 +6,7 @@ import CoreLocation
 final class LocationProvider: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private(set) var latest: CLLocation?
+    private var isPaused = false
 
     /// A fix older or vaguer than this would put a photo in the wrong place, so it's better to leave the photo untagged.
     nonisolated static let maxAge: TimeInterval = 5 * 60
@@ -43,7 +44,17 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
         }
     }
 
+    /// Stops the fixes while no photo can be taken (the review screen), and starts them again after: at this
+    /// accuracy the GPS receiver runs for as long as updates do. A shot still arriving uses the last fix, which
+    /// `current` accepts for a few minutes.
+    func setPaused(_ paused: Bool) {
+        guard paused != isPaused else { return }
+        isPaused = paused
+        if paused { manager.stopUpdatingLocation() } else { startIfAuthorized() }
+    }
+
     private func startIfAuthorized() {
+        guard !isPaused else { return }
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways: manager.startUpdatingLocation()
         default: break

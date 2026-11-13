@@ -71,6 +71,21 @@ struct FocusPeakingTests {
         #expect((2..<46).allSatisfy { m.mask[$0 * 64 + 31] > 0 && m.mask[$0 * 64 + 32] > 0 })
     }
 
+    /// The scratch textures are freed when the viewfinder stops drawing; the next frame has to make them again
+    /// and come out the same.
+    @Test func outlinesAreTheSameAfterTheWorkspaceIsReleased() throws {
+        let renderer = try #require(PeakingRenderer.make())
+        let buffer = try frame { x, _ in x < 32 ? 0 : 255 }
+        let stats = try #require(renderer.analyse(buffer, level: nil))
+        let level = PeakingRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: .medium)
+        let before = try #require(renderer.analyse(buffer, level: level))
+        renderer.releaseWorkspace()
+        let after = try #require(renderer.analyse(buffer, level: level))
+        #expect(count(before) > 0)
+        #expect(after.mask == before.mask)
+        #expect(after.mean == before.mean && after.deviation == before.deviation)
+    }
+
     @Test func aSharpDarkEdgeIsOutlined() throws {
         #expect(columns(try mask { x, _ in x < 32 ? 20 : 60 }) == [31, 32])
     }

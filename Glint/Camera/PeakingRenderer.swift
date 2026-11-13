@@ -85,7 +85,11 @@ final class PeakingRenderer: @unchecked Sendable {
     private struct Work {
         let frameWidth: Int, frameHeight: Int
         let factor: Int
-        let small: any MTLTexture, blurred: any MTLTexture, response: any MTLTexture, edges: any MTLTexture
+        let width: Int, height: Int   // the analysed size: the frame's, shrunk by `factor`
+        /// The shrunk frame. Nil at factor 1, where the camera's luma plane is read directly: at 12 MP that's a
+        /// 24 MB texture that would never be written.
+        let small: (any MTLTexture)?
+        let blurred: any MTLTexture, response: any MTLTexture, edges: any MTLTexture
         let mask: any MTLTexture
         let groups: MTLSize
         let partials: [any MTLBuffer]
@@ -177,6 +181,15 @@ final class PeakingRenderer: @unchecked Sendable {
         lock.withLock { analysisInterval = max(1, interval) }
     }
 
+    /// Frees the scratch textures (about 85 MB at 12 MP) once the GPU viewfinder stops drawing or the camera stops;
+    /// the next frame makes them again. Frames still on the GPU keep their own references until they finish.
+    /// Call on the analysis queue, like `render`.
+    func releaseWorkspace() {
+        work = nil
+        pooled = nil
+        CVMetalTextureCacheFlush(textureCache, 0)
+    }
+
     // MARK: Rendering
 
     /// Draws one camera frame (420YpCbCr8 full range) with its peaking outlines. Does nothing while no view is
@@ -258,7 +271,7 @@ final class PeakingRenderer: @unchecked Sendable {
 
         let frame = InFlight(textures: [luma, chroma], partials: partials,
                              groupCount: work.groups.width * work.groups.height,
-                             pixelCount: work.small.width * work.small.height)
+                             pixelCount: work.width * work.height)
         let generation = lock.withLock { thresholdGeneration }
         let sweeping = mode == .sweep
         let verdictsOut = UncheckedBuffer(ownVerdicts)
@@ -309,20 +322,20 @@ final class PeakingRenderer: @unchecked Sendable {
     private func encodeAnalysis(_ commandBuffer: any MTLCommandBuffer, luma: any MTLTexture, work: Work,
                                 partials: any MTLBuffer, level: Double?, verdicts: any MTLBuffer, sweep: Bool) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
-        let size = MTLSize(width: work.small.width, height: work.small.height, depth: 1)
+        let size = MTLSize(width: work.width, height: work.height, depth: 1)
         let group = MTLSize(width: 16, height: 16, depth: 1)
 
         // At full resolution, read the camera's luma plane directly rather than copying it first.
         let source: any MTLTexture
         var lumaScale: Float
-        if work.factor > 1 {
+        if let small = work.small {
             var factor = UInt32(work.factor)
             encoder.setComputePipelineState(downscalePipeline)
             encoder.setTexture(luma, index: 0)
-            encoder.setTexture(work.small, index: 1)
+            encoder.setTexture(small, index: 1)
             encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
             encoder.dispatchThreads(size, threadsPerThreadgroup: group)
-            source = work.small
+            source = small
             lumaScale = 1
         } else {
             source = luma
@@ -391,11 +404,13 @@ final class PeakingRenderer: @unchecked Sendable {
             memset(buffer.contents(), 0, verdictsLength)   // no verdicts: standard peaking
             return buffer
         }
-        guard let small = make(.r16Float), let blurred = make(.r16Float), let response = make(.r16Float),
+        let small = factor > 1 ? make(.r16Float) : nil
+        guard factor == 1 || small != nil,
+              let blurred = make(.r16Float), let response = make(.r16Float),
               let edges = make(.r16Float),
               let mask = make(.r8Unorm),
               partials.count == Self.framesInFlight, verdicts.count == Self.framesInFlight else { return nil }
-        let new = Work(frameWidth: width, frameHeight: height, factor: factor, small: small, blurred: blurred,
+        let new = Work(frameWidth: width, frameHeight: height, factor: factor, width: w, height: h, small: small, blurred: blurred,
                        response: response, edges: edges, mask: mask, groups: groups, partials: partials,
                        verdicts: verdicts)
         work = new
