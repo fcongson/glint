@@ -3,7 +3,7 @@ using namespace metal;
 
 // The viewfinder while focus peaking or the focus magnifier is on: each camera frame is drawn with its own
 // peaking outlines, so they can't lag behind the picture, and magnified from the full-resolution frame. See
-// PeakingRenderer.swift for the steps and why.
+// ViewfinderRenderer.swift for the steps and why.
 
 // 1. Shrink the luma plane by a whole factor, averaging each block. Output is luma in 0…255.
 kernel void peakingDownscale(texture2d<float, access::read> luma [[texture(0)]],

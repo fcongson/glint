@@ -42,10 +42,14 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 Glint.xcodeproj
 Glint/
   GlintApp.swift               app entry point
-  ContentView.swift            viewfinder and layout
+  ContentView.swift            the camera screen: puts the top bar, viewfinder, tool row and capture controls together
   Camera/
-    CameraController.swift     observable state, lenses, manual controls
-    CaptureSession.swift       actor that owns the AVCaptureSession
+    CameraController.swift     observable state for the camera screen; sends changes to the session, handles its events
+    CaptureSession.swift       actor that owns the AVCaptureSession and the camera device
+    CaptureEvent.swift         what the session reports back: events, device info, a captured photo
+    CaptureDelegates.swift     the photo, recording and deferred-start delegates, which turn callbacks into events
+    DeviceVideoFormats.swift   what a lens can record, and which device format a video choice needs
+    ExposureQueue.swift        custom exposure changes, one at a time, latest wins
     CapturePlan.swift          decides DNG vs developed HEIC vs processed HEIC
     CameraPreview.swift        preview layer + tap-to-focus
     Lens.swift                 lens model and zoom labels
@@ -54,20 +58,38 @@ Glint/
     AutoExposure.swift         per-setting auto, and the shutter/ISO priority correction
     VideoFormat.swift          video resolutions, frame rates, codecs, the 180° shutter and settling choices to what a lens supports
     Throttled.swift            rate-limits KVO updates (meter, lens position)
-    HistogramAnalyzer.swift    histogram and clipping, and the video frames shared by it and the GPU viewfinder
+    SystemPressure.swift       heat and load levels, and what Glint gives up at each
+    ViewfinderAidPauses.swift  which of HIST, PK and ZEB Low Power Mode or heat switched off, to bring back after
+    CameraInterruption.swift   why the system has taken the camera away, and what to say
+    RecordingOutcome.swift     whether a finished recording is worth saving, and why it stopped
+    FrameAnalyzer.swift        the video frames shared by the histogram and the GPU viewfinder
+    Histogram.swift            histogram and clipping, from a frame's luma
+    WhiteLevelStore.swift      where clipped white sits, remembered per lens and format
     FocusPeaking.swift         peaking settings (mode, sensitivity, colour, lines), the eased threshold, sweep tracking
-    PeakingRenderer.swift      the GPU viewfinder, with peaking outlines, magnifying and zebras, while any is in use
+    ViewfinderRenderer.swift   the GPU viewfinder, with peaking outlines, magnifying and zebras, while any is in use
     Viewfinder.metal           its shaders: blur, high-pass, smooth, mark, pool to screen size, draw, magnify and zebra stripes
     Magnifier.swift            focus magnifier settings and geometry, and what the GPU viewfinder draws
     Zebras.swift               zebra levels
-    ReviewImageRenderer.swift  DNG development, review images (kept compressed, with a thumbnail) and the queue both run on
-    LocationProvider.swift     location fixes for photo tagging, place names
-    CameraInterruption.swift   why the system has taken the camera away, and what to say
-    RecordingOutcome.swift     whether a finished recording is worth saving, and why it stopped
+    PhotoProcessor.swift       a captured photo's develop, save and review image, in order
+    PhotoDeveloper.swift       the serial queue RAW develops and review renders run on, and the launch warm-up
+    ReviewImageRenderer.swift  DNG to HEIC, and review images (kept compressed, with a thumbnail)
     MediaLibrary.swift         saves to Documents and Photos
-    PhotoInfo.swift            settings and capture details of a photo
+    PhotoInfo.swift            settings and capture details of a photo, and a reviewed shot
+    LocationProvider.swift     location fixes for photo tagging, place names
+    SavedSettings.swift        the settings remembered between launches
+    DebugTimings.swift         the dev-only timing readout
   Resources/WarmUp.dng         64 × 64 DNG decoded at launch to prepare RAW decoding
-  Views/                       controls and switches, the fast-updating controls (LiveControls.swift), ruler picker, focus rail, photo and video format panels and crop mask, histogram, focus box, magnifier frame, review screen with info card
+  Views/
+    TopBar.swift               SET, the format readout, the meter; the recording time
+    CameraViewfinder.swift     the picture and everything on it
+    GPUViewfinder.swift        the Metal view the GPU viewfinder draws into
+    ToolRow.swift              HIST, ZEB · lenses · PK, MAG
+    CaptureControls.swift      MANUAL's ruler, the mode switches, shutter or record button, thumbnail
+    Controls.swift             chips, switches, readouts and the meter's LEDs
+    LiveControls.swift         the fast-updating controls, each reading only what it shows
+    (and)                      ruler picker, focus rail, SET menu, video format panel, format option rows, crop mask,
+                               histogram, focus box, magnifier frame, camera access prompt, review screen, device
+                               angle tracking, settings text
   Assets.xcassets              app icon (light, dark, tinted) and accent color
 tools/make_warmup_dng.py       regenerates Resources/WarmUp.dng (needs tifffile)
 GlintTests/                    Swift Testing coverage of the logic, and of the peaking shaders on synthetic frames
@@ -82,7 +104,7 @@ GlintTests/                    Swift Testing coverage of the logic, and of the p
 For performance testing, run from the Home Screen or use a Release build. Debug builds from Xcode (debugger plus Metal validation) make image work much slower.
 
 ## Tests
-Run the `GlintTests` scheme (Cmd-U). The tests cover capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, the histogram (including finding clipped white from its plateau), lenses, photo info, settings text, location freshness rules, camera interruptions and recording outcomes as pure logic, and that review images are kept compressed with a thumbnail of the right size. Focus peaking's tests run the real GPU shaders on synthetic frames (the Simulator's Metal is enough), including that outlines come out the same after the viewfinder's scratch textures are freed; sweep tracking, the magnifier's geometry and zebra levels are tested as logic, and the warm-up tests decode the bundled DNG, directly and through the developer's queue as a real shot does (on a device only: Core Image doesn't decode RAW in the Simulator, so run them on your iPhone after changing the DNG). None need a camera.
+Run the `GlintTests` scheme (Cmd-U). The tests cover capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, the histogram (including finding clipped white from its plateau), lenses, photo info, settings text, location freshness rules, camera interruptions, recording outcomes, the exposure queue, what Low Power Mode and heat pause and bring back, the device angle and focus rail side, the debug timings and the remembered white levels as pure logic, and that review images are kept compressed with a thumbnail of the right size. Focus peaking's tests run the real GPU shaders on synthetic frames (the Simulator's Metal is enough), including that outlines come out the same after the viewfinder's scratch textures are freed; sweep tracking, the magnifier's geometry and zebra levels are tested as logic, and the warm-up tests decode the bundled DNG, directly and through the developer's queue as a real shot does (on a device only: Core Image doesn't decode RAW in the Simulator, so run them on your iPhone after changing the DNG). None need a camera.
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.

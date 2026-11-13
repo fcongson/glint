@@ -33,19 +33,19 @@ struct FocusPeakingTests {
 
     /// The outline mask for a frame at a sensitivity, with the threshold taken from the frame's own statistics.
     private func mask(_ sensitivity: PeakingSensitivity = .medium,
-                      _ value: (Int, Int) -> Int) throws -> PeakingRenderer.Analysis {
-        let renderer = try #require(PeakingRenderer.make())
+                      _ value: (Int, Int) -> Int) throws -> ViewfinderRenderer.Analysis {
+        let renderer = try #require(ViewfinderRenderer.make())
         let buffer = try frame(value)
         let stats = try #require(renderer.analyse(buffer, level: nil))
-        let level = PeakingRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity)
+        let level = ViewfinderRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity)
         return try #require(renderer.analyse(buffer, level: level))
     }
 
-    private func columns(_ a: PeakingRenderer.Analysis) -> Set<Int> {
+    private func columns(_ a: ViewfinderRenderer.Analysis) -> Set<Int> {
         Set(a.mask.indices.filter { a.mask[$0] > 0 }.map { $0 % a.width })
     }
 
-    private func count(_ a: PeakingRenderer.Analysis) -> Int { a.mask.filter { $0 > 0 }.count }
+    private func count(_ a: ViewfinderRenderer.Analysis) -> Int { a.mask.filter { $0 > 0 }.count }
 
     /// Repeatable sensor-like noise, roughly ±10 luma standard deviation, with no pattern to line up along.
     private static func noise(_ x: Int, _ y: Int) -> Int {
@@ -74,10 +74,10 @@ struct FocusPeakingTests {
     /// The scratch textures are freed when the viewfinder stops drawing; the next frame has to make them again
     /// and come out the same.
     @Test func outlinesAreTheSameAfterTheWorkspaceIsReleased() throws {
-        let renderer = try #require(PeakingRenderer.make())
+        let renderer = try #require(ViewfinderRenderer.make())
         let buffer = try frame { x, _ in x < 32 ? 0 : 255 }
         let stats = try #require(renderer.analyse(buffer, level: nil))
-        let level = PeakingRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: .medium)
+        let level = ViewfinderRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: .medium)
         let before = try #require(renderer.analyse(buffer, level: level))
         renderer.releaseWorkspace()
         let after = try #require(renderer.analyse(buffer, level: level))
@@ -130,7 +130,7 @@ struct FocusPeakingTests {
 
     @Test func shrinkingAveragesBlocks() throws {
         // 4100 wide shrinks by 2; each 2 × 2 block of a checkerboard averages to 127 and is flat: no detail at all.
-        let renderer = try #require(PeakingRenderer.make())
+        let renderer = try #require(ViewfinderRenderer.make())
         let buffer = try frame(width: 4100, height: 12) { x, y in (x + y) % 2 == 0 ? 255 : 0 }
         let a = try #require(renderer.analyse(buffer, level: nil))
         #expect(a.width == 2050 && a.height == 6)
@@ -139,21 +139,21 @@ struct FocusPeakingTests {
 
     @Test func thresholdFollowsDetailOrNoise() {
         // Lots of detail: the spread sets it. Little but noise: a multiple of the mean does.
-        #expect(PeakingRenderer.level(mean: 1, deviation: 10, sensitivity: .medium) == 31)
-        #expect(PeakingRenderer.level(mean: 4, deviation: 1, sensitivity: .medium) == 10)
+        #expect(ViewfinderRenderer.level(mean: 1, deviation: 10, sensitivity: .medium) == 31)
+        #expect(ViewfinderRenderer.level(mean: 4, deviation: 1, sensitivity: .medium) == 10)
     }
 
     /// Analysed at full resolution: only frames past 4096 on the long side (48 MP) are shrunk.
     @Test(arguments: [(4032, 3024, 1), (3840, 2160, 1), (4096, 3072, 1), (8064, 6048, 2)])
     func framesAreAnalysedAtFullResolution(width: Int, height: Int, scale: Int) {
-        #expect(PeakingRenderer.scale(width: width, height: height) == scale)
+        #expect(ViewfinderRenderer.scale(width: width, height: height) == scale)
     }
 
     @Test func framesAreFittedUprightLikeThePreview() {
         let box = CGSize(width: 300, height: 400)   // the 3:4 viewfinder
-        #expect(PeakingRenderer.fitScale(frameWidth: 4032, frameHeight: 3024, viewSize: box) == SIMD2(1, 1))
+        #expect(ViewfinderRenderer.fitScale(frameWidth: 4032, frameHeight: 3024, viewSize: box) == SIMD2(1, 1))
         // 16:9 video stands 9:16 upright: full height, three quarters of the width.
-        #expect(PeakingRenderer.fitScale(frameWidth: 3840, frameHeight: 2160, viewSize: box) == SIMD2(0.75, 1))
+        #expect(ViewfinderRenderer.fitScale(frameWidth: 3840, frameHeight: 2160, viewSize: box) == SIMD2(0.75, 1))
     }
 
     @Test func theThresholdEasesTowardEachFrame() {

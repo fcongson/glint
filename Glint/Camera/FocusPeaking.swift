@@ -1,7 +1,7 @@
 import Foundation
 
 // Focus peaking settings shared by the controller and the GPU renderer. The pipeline itself, done the way cameras
-// do it, is described in PeakingRenderer.swift and lives in Viewfinder.metal.
+// do it, is described in ViewfinderRenderer.swift and lives in Viewfinder.metal.
 //
 // Like any camera's peaking it marks the sharpest fine detail, not focus as such, so on a phone's deep depth of
 // field a lot can be marked at once. It is most telling close up, where manual focus matters most.

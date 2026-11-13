@@ -3,8 +3,6 @@ import CoreVideo
 import Foundation
 import Metal
 import QuartzCore
-import SwiftUI
-import UIKit
 
 /// Draws the viewfinder while focus peaking or the focus magnifier is on, each camera frame with its own outlines
 /// and magnified from the full-resolution frame, on the GPU.
@@ -31,7 +29,7 @@ import UIKit
 ///
 /// `render` is called on the analysis queue, one frame at a time. The target layer is set from the main thread
 /// and the threshold from Metal's completion handlers, so both sit behind `lock`.
-final class PeakingRenderer: @unchecked Sendable {
+final class ViewfinderRenderer: @unchecked Sendable {
     /// Lowest smoothed response (in luma steps) ever marked, so a featureless frame isn't outlined at all.
     static let minimumStrength: Float = 4
     /// Nothing is marked below this multiple of the frame's mean response, which keeps noise out of frames that
@@ -113,9 +111,9 @@ final class PeakingRenderer: @unchecked Sendable {
     enum SetupError: Error { case unavailable }
 
     /// Nil if the device has no Metal, which every supported iPhone does.
-    static func make() -> PeakingRenderer? {
+    static func make() -> ViewfinderRenderer? {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
-        return try? PeakingRenderer(device: device)
+        return try? ViewfinderRenderer(device: device)
     }
 
     init(device: any MTLDevice) throws {
@@ -124,7 +122,7 @@ final class PeakingRenderer: @unchecked Sendable {
         guard CVMetalTextureCacheCreate(nil, nil, device, nil, &cache) == kCVReturnSuccess, let cache else {
             throw SetupError.unavailable
         }
-        let library = try device.makeDefaultLibrary(bundle: Bundle(for: PeakingRenderer.self))
+        let library = try device.makeDefaultLibrary(bundle: Bundle(for: ViewfinderRenderer.self))
         func function(_ name: String) throws -> any MTLFunction {
             guard let f = library.makeFunction(name: name) else { throw SetupError.unavailable }
             return f
@@ -563,53 +561,5 @@ final class PeakingRenderer: @unchecked Sendable {
         let bytes = readback.contents().bindMemory(to: UInt8.self, capacity: w * h)
         return Analysis(width: w, height: h, mean: stats.mean, deviation: stats.deviation,
                         mask: Array(UnsafeBufferPointer(start: bytes, count: w * h)))
-    }
-}
-
-/// The Metal view the renderer draws into, laid over the system preview while peaking is on. It never takes
-/// touches (taps go through to the preview, which turns them into focus points) and VoiceOver skips it.
-struct PeakingViewfinder: UIViewRepresentable {
-    let renderer: PeakingRenderer
-
-    final class MetalView: UIView {
-        override class var layerClass: AnyClass { CAMetalLayer.self }
-        var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
-        var renderer: PeakingRenderer?
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            guard window != nil else { return }
-            let scale = traitCollection.displayScale
-            let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-            metalLayer.contentsScale = scale
-            metalLayer.drawableSize = size
-            renderer?.attach(metalLayer, drawableSize: size)
-        }
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            if window == nil {
-                renderer?.detach(metalLayer)
-            } else {
-                setNeedsLayout()
-            }
-        }
-    }
-
-    func makeUIView(context: Context) -> MetalView {
-        let view = MetalView()
-        view.backgroundColor = .clear
-        view.isOpaque = false
-        view.isUserInteractionEnabled = false
-        view.accessibilityElementsHidden = true
-        view.renderer = renderer
-        renderer.configure(view.metalLayer)
-        return view
-    }
-
-    func updateUIView(_ view: MetalView, context: Context) {}
-
-    static func dismantleUIView(_ view: MetalView, coordinator: ()) {
-        view.renderer?.detach(view.metalLayer)
     }
 }

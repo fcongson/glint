@@ -44,7 +44,7 @@ final class CameraController {
     private(set) var isHistogramEnabled = false
     let histogramModel = HistogramModel()
     /// Draws the viewfinder with peaking outlines, on the GPU. Nil without Metal, which leaves peaking off.
-    let peakingRenderer: PeakingRenderer?
+    let viewfinderRenderer: ViewfinderRenderer?
     /// Focus peaking is shown while focusing by hand (AF off), as on a camera in MF. On by default.
     private(set) var isPeakingEnabled = true
     private(set) var peakingSensitivity = PeakingSensitivity.medium
@@ -52,12 +52,10 @@ final class CameraController {
     private(set) var peakingMode = PeakingMode.standard
     @ObservationIgnored private var photosProcessing = 0
     @ObservationIgnored private var processingTimeout: Task<Void, Never>?
-    /// What Low Power Mode switched off, so it can come back when Low Power Mode ends. Cleared by any manual change.
     private(set) var isZebraEnabled = false
     private(set) var zebraLevel = ZebraLevel.hundred
-    private var pausedForLowPower = (histogram: false, peaking: false, zebras: false)
-    /// What heat or load switched off, so it can come back when the pressure eases. Cleared by any manual change.
-    private var pausedForPressure = (peaking: false, zebras: false)
+    /// What Low Power Mode and heat switched off, so each comes back when its reason ends.
+    @ObservationIgnored private var aidPauses = ViewfinderAidPauses()
     private(set) var systemPressure = SystemPressure.nominal
     var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
 
@@ -68,35 +66,33 @@ final class CameraController {
     private(set) var isMagnifierEnabled = true                // MAG: whether touching the rail magnifies
     private(set) var isRailHeld = false                       // on while the focus rail is touched, and a moment after
     @ObservationIgnored private var railReleaseTask: Task<Void, Never>?
-    var isMagnifierAvailable: Bool { peakingRenderer != nil }
+    var isMagnifierAvailable: Bool { viewfinderRenderer != nil }
     var isMagnifying: Bool { isMagnifierAvailable && isMagnifierEnabled && isRailHeld }
     /// Whether the GPU viewfinder draws, for outlines or magnifying.
     var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying || isZebraShown }
-    var isZebraShown: Bool { isZebraEnabled && peakingRenderer != nil }
+    var isZebraShown: Bool { isZebraEnabled && viewfinderRenderer != nil }
     private(set) var timing = ""
     private(set) var isCameraReady = false   // the preview is running; secondary controls fade in then
     private(set) var isCameraDenied = false  // camera access refused: the viewfinder offers the way to Settings
     private(set) var interruption: CameraInterruption?   // why the preview is frozen, while the system has the camera
-    @ObservationIgnored private var timers: [String: CFAbsoluteTime] = [:]   // dev-only, see `startTimer`
-    @ObservationIgnored private var thumbTime: Double?   // dev-only: shutter to the capture's preview image
+    @ObservationIgnored private var timings = DebugTimings()   // dev-only; `timing` is its readout
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
     private let maxShots = 30             // each keeps a compressed review image (`ReviewImage`), so memory stays bounded
 
     private let capture: CaptureSession
     private let locationProvider = LocationProvider()
-    private let developer: PhotoDeveloper
+    private let photoProcessor = PhotoProcessor()
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var modeGeneration = 0   // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
     @ObservationIgnored private var statusGeneration = 0
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
 
     init() {
-        let peaking = PeakingRenderer.make()
-        peakingRenderer = peaking
-        capture = CaptureSession(peaking: peaking)
-        isPeakingEnabled = peaking != nil
-        developer = PhotoDeveloper(renderer: ReviewImageRenderer())
+        let renderer = ViewfinderRenderer.make()
+        viewfinderRenderer = renderer
+        capture = CaptureSession(viewfinder: renderer)
+        isPeakingEnabled = renderer != nil
         if let saved = SavedSettings.load() { restore(saved) }
     }
 
@@ -133,11 +129,11 @@ final class CameraController {
         exposureBias = saved.exposureBias ?? exposureBias
         videoFormat = saved.videoFormat ?? videoFormat
         isHistogramEnabled = saved.isHistogramEnabled ?? isHistogramEnabled
-        isPeakingEnabled = peakingRenderer != nil && (saved.isPeakingEnabled ?? isPeakingEnabled)
+        isPeakingEnabled = viewfinderRenderer != nil && (saved.isPeakingEnabled ?? isPeakingEnabled)
         peakingSensitivity = saved.peakingSensitivity ?? peakingSensitivity
         peakingAppearance = saved.peakingAppearance ?? peakingAppearance
         peakingMode = saved.peakingMode ?? peakingMode
-        isZebraEnabled = peakingRenderer != nil && (saved.isZebraEnabled ?? isZebraEnabled)
+        isZebraEnabled = viewfinderRenderer != nil && (saved.isZebraEnabled ?? isZebraEnabled)
         zebraLevel = saved.zebraLevel ?? zebraLevel
         isMagnifierEnabled = saved.isMagnifierEnabled ?? isMagnifierEnabled
     }
@@ -183,10 +179,10 @@ final class CameraController {
             capture.enqueue { $0.configureAndStart() }
         }
         // Prepare RAW decoding before the first shot, once the camera has had a moment to start.
-        let developer = developer
+        let processor = photoProcessor
         Task.detached(priority: .utility) {
             try? await Task.sleep(for: .seconds(1))
-            await developer.warmUp()
+            await processor.warmUp()
         }
     }
 
@@ -252,7 +248,7 @@ final class CameraController {
         case .photoPreview(let image, let requestedAt):
             lastThumbnail = image   // the review image replaces it once it's rendered (`addShot`)
             #if DEBUG
-            thumbTime = CFAbsoluteTimeGetCurrent() - requestedAt
+            timings.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
             #endif
         case .photoCaptured(let photo):
             photoCaptured(photo)
@@ -417,15 +413,14 @@ final class CameraController {
         guard on != isHistogramEnabled else { return }
         isHistogramEnabled = on
         if !on { histogramModel.clear() }
-        pausedForLowPower.histogram = false   // the user's choice now
+        aidPauses.userChose(.histogram)
         sendAnalysis()
     }
 
     func setPeakingEnabled(_ on: Bool) {
-        guard on != isPeakingEnabled, !on || peakingRenderer != nil else { return }
+        guard on != isPeakingEnabled, !on || viewfinderRenderer != nil else { return }
         isPeakingEnabled = on
-        pausedForLowPower.peaking = false   // the user's choice now
-        pausedForPressure.peaking = false
+        aidPauses.userChose(.peaking)
         sendAnalysis()
     }
 
@@ -492,25 +487,33 @@ final class CameraController {
     }
 
     /// Low Power Mode turns off the histogram, peaking and zebras, the only extra work Glint does on every preview
-    /// frame. Turning one back on keeps it on; whatever was turned off comes back when Low Power Mode ends.
+    /// frame. Turning one back on keeps it on; whatever was turned off comes back when Low Power Mode ends
+    /// (`ViewfinderAidPauses` keeps track).
     private func lowPowerModeChanged(_ isOn: Bool) {
         if isOn {
-            guard isHistogramEnabled || isPeakingEnabled || isZebraEnabled else { return }
-            pausedForLowPower = (isHistogramEnabled, isPeakingEnabled, isZebraEnabled)
-            isHistogramEnabled = false
-            isPeakingEnabled = false
-            isZebraEnabled = false
-            histogramModel.clear()
-            sendAnalysis()
+            let paused = aidPauses.lowPowerBegan(enabled: enabledAids)
+            guard paused.any else { return }
+            switchAids(paused, on: false)
             post("Low Power Mode: histogram, peaking and zebras off")
         } else {
-            guard pausedForLowPower.histogram || pausedForLowPower.peaking || pausedForLowPower.zebras else { return }
-            if pausedForLowPower.histogram { isHistogramEnabled = true }
-            if pausedForLowPower.peaking { isPeakingEnabled = true }
-            if pausedForLowPower.zebras { isZebraEnabled = true }
-            pausedForLowPower = (false, false, false)
-            sendAnalysis()
+            let back = aidPauses.lowPowerEnded()
+            if back.any { switchAids(back, on: true) }
         }
+    }
+
+    private var enabledAids: ViewfinderAids {
+        ViewfinderAids(histogram: isHistogramEnabled, peaking: isPeakingEnabled, zebras: isZebraEnabled)
+    }
+
+    /// Switches these aids on or off on Glint's own account (the user's switches are the `set…Enabled` methods).
+    private func switchAids(_ aids: ViewfinderAids, on: Bool) {
+        if aids.histogram {
+            isHistogramEnabled = on
+            if !on { histogramModel.clear() }
+        }
+        if aids.peaking { isPeakingEnabled = on }
+        if aids.zebras { isZebraEnabled = on }
+        sendAnalysis()
     }
 
     /// Heat or load on the camera changed. Glint gives things up in order (see `SystemPressure`): peaking analyses
@@ -523,38 +526,29 @@ final class CameraController {
         #if DEBUG
         if DebugInfo.isOn { post("System pressure: \(level)") }   // a message below, if any, replaces it
         #endif
-        peakingRenderer?.setAnalysisInterval(level.peakingInterval)
+        viewfinderRenderer?.setAnalysisInterval(level.peakingInterval)
         if level.reducesFrameRate != old.reducesFrameRate {
             let reduced = level.reducesFrameRate
             capture.enqueue { $0.setFrameRateReduced(reduced) }
         }
-        if level.pausesViewfinderAids, !old.pausesViewfinderAids, isPeakingEnabled || isZebraEnabled {
-            pausedForPressure = (isPeakingEnabled, isZebraEnabled)
-            isPeakingEnabled = false
-            isZebraEnabled = false
-            sendAnalysis()
+        if level.pausesViewfinderAids, !old.pausesViewfinderAids {
+            let paused = aidPauses.pressureBegan(enabled: enabledAids)
+            guard paused.any else { return }
+            switchAids(paused, on: false)
             post("iPhone is hot: peaking and zebras off for now")
-        } else if !level.pausesViewfinderAids, old.pausesViewfinderAids,
-                  pausedForPressure.peaking || pausedForPressure.zebras {
-            if ProcessInfo.processInfo.isLowPowerModeEnabled {
-                // Low Power Mode still wants them off: hand them over, to come back when it ends.
-                pausedForLowPower.peaking = pausedForLowPower.peaking || pausedForPressure.peaking
-                pausedForLowPower.zebras = pausedForLowPower.zebras || pausedForPressure.zebras
-            } else {
-                if pausedForPressure.peaking { isPeakingEnabled = true }
-                if pausedForPressure.zebras { isZebraEnabled = true }
-                sendAnalysis()
-                post("Cooler again: peaking and zebras back on")
-            }
-            pausedForPressure = (false, false)
+        } else if !level.pausesViewfinderAids, old.pausesViewfinderAids {
+            // While Low Power Mode is on it takes them over, and nothing comes back yet.
+            let back = aidPauses.pressureEased(lowPowerModeIsOn: ProcessInfo.processInfo.isLowPowerModeEnabled)
+            guard back.any else { return }
+            switchAids(back, on: true)
+            post("Cooler again: peaking and zebras back on")
         }
     }
 
     func setZebraEnabled(_ on: Bool) {
-        guard on != isZebraEnabled, !on || peakingRenderer != nil else { return }
+        guard on != isZebraEnabled, !on || viewfinderRenderer != nil else { return }
         isZebraEnabled = on
-        pausedForLowPower.zebras = false   // the user's choice now
-        pausedForPressure.zebras = false
+        aidPauses.userChose(.zebras)
         sendAnalysis()
     }
 
@@ -631,108 +625,62 @@ final class CameraController {
         }
     }
 
-    /// Saving and rendering the review image both run off the main actor; the result is added to `shots` here.
+    /// Developing, saving and drawing the review image run off the main actor (`PhotoProcessor`); the result is
+    /// added to `shots` here.
     private func photoCaptured(_ photo: CapturedPhoto) {
         let shotTime = CFAbsoluteTimeGetCurrent() - photo.requestedAt
         let location = locationProvider.current   // the fix at the moment the photo arrives
         let report = statusReporter
-        let developer = developer
+        let processor = photoProcessor
         Task.detached(priority: .userInitiated) { [weak self] in
-            // HEIC: the DNG is developed (and cropped) into a HEIC, which replaces it everywhere.
-            // RAW+HEIC: the same, but the DNG is saved alongside it. Review shows the HEIC, which has the crop.
-            var heic: Data?
-            var info = photo.info
-            var developTime = 0.0
-            if photo.needsDevelopment {
-                let t0 = CFAbsoluteTimeGetCurrent()
-                heic = await developer.develop(photo.data, aspect: photo.aspect)
-                if let heic {
-                    let size = Self.savedSize(width: info.pixelWidth, height: info.pixelHeight, aspect: photo.aspect)
-                    info = info.saved(pixelWidth: size?.width, pixelHeight: size?.height,
-                                      fileBytes: photo.keepsDNG ? info.fileBytes + heic.count : heic.count)
-                } else {
-                    report(photo.keepsDNG ? "Develop failed, saving DNG only" : "Develop failed, saving DNG")
-                }
-                developTime = CFAbsoluteTimeGetCurrent() - t0
-            }
-            let dng = photo.data, developed = heic
-            Task.detached(priority: .utility) {
-                if let developed, photo.keepsDNG {
-                    MediaLibrary.savePhotoPair(heic: developed, dng: dng, captureID: photo.captureID, location: location, report: report)
-                } else if let developed {
-                    MediaLibrary.savePhoto(developed, isRAW: false, captureID: photo.captureID, location: location, report: report)
-                } else {
-                    let isRAW = photo.keepsDNG || photo.needsDevelopment   // a failed develop still saves the DNG
-                    MediaLibrary.savePhoto(dng, isRAW: isRAW, captureID: photo.captureID, location: location, report: report)
-                }
-            }
-            let t0 = CFAbsoluteTimeGetCurrent()
-            // Queued with the develops, so a burst's RAW decodes don't run side by side.
-            let image = if let heic { await developer.review(heic, isRAW: false) }
-                        else { await developer.review(photo.data, isRAW: photo.keepsDNG || photo.needsDevelopment) }
-            let renderTime = CFAbsoluteTimeGetCurrent() - t0
-            await self?.addShot(image, info: info, location: location, shotTime: shotTime, developTime: developTime, renderTime: renderTime)
+            let result = await processor.process(photo, location: location, report: report)
+            await self?.addShot(result, location: location, shotTime: shotTime)
         }
     }
 
     /// Peaking's analysis pauses while photos are developed and their review images drawn, so the GPU is theirs
-    /// (see `PeakingRenderer.setAnalysisPaused`). Counted, for shots taken in quick succession; a capture that
+    /// (see `ViewfinderRenderer.setAnalysisPaused`). Counted, for shots taken in quick succession; a capture that
     /// never arrives can't leave it paused for more than a few seconds.
     private func photoProcessing(started: Bool) {
         photosProcessing = max(0, photosProcessing + (started ? 1 : -1))
-        peakingRenderer?.setAnalysisPaused(photosProcessing > 0)
+        viewfinderRenderer?.setAnalysisPaused(photosProcessing > 0)
         processingTimeout?.cancel()
         guard photosProcessing > 0 else { return }
         processingTimeout = Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
             guard let self, !Task.isCancelled else { return }
             photosProcessing = 0
-            peakingRenderer?.setAnalysisPaused(false)
+            viewfinderRenderer?.setAnalysisPaused(false)
         }
     }
 
-    /// The pixel size after cropping to `aspect`, from the capture's size.
-    nonisolated private static func savedSize(width: Int?, height: Int?, aspect: AspectRatio) -> (width: Int, height: Int)? {
-        guard let width, let height else { return nil }
-        let crop = aspect.cropRect(in: CGSize(width: width, height: height)).integral
-        return (Int(crop.width), Int(crop.height))
-    }
-
-    private func addShot(_ image: ReviewImage?, info: PhotoInfo, location: CLLocation?, shotTime: Double, developTime: Double, renderTime: Double) {
-        if let image {
+    private func addShot(_ result: PhotoProcessor.Result, location: CLLocation?, shotTime: Double) {
+        if let image = result.review {
             lastThumbnail = image.thumbnail
-            let shot = Shot(thumbnail: image.thumbnail, imageData: image.data, info: info, location: location)
+            let shot = Shot(thumbnail: image.thumbnail, imageData: image.data, info: result.info, location: location)
             shots.append(shot)
             if shots.count > maxShots { shots.removeFirst(shots.count - maxShots) }
             if let location { resolvePlace(for: shot.id, at: location) }
         }
         photoProcessing(started: false)
         #if DEBUG
-        var lines = [String(format: "shot    %.1fs", shotTime)]
-        if let thumbTime { lines.append(String(format: "thumb   %.2fs", thumbTime)) }   // shutter to thumbnail
-        thumbTime = nil
-        if developTime > 0 { lines.append(String(format: "develop %.1fs", developTime)) }
-        lines.append(String(format: "render  %.1fs", renderTime))
-        timing = lines.joined(separator: "\n")   // dev-only readout
+        timings.shotFinished(shotTime: shotTime, developTime: result.developTime, renderTime: result.renderTime)
+        timing = timings.readout
         #endif
     }
 
-    /// Dev-only timings for the readout over the viewfinder, in debug builds: from launch to the preview running and
-    /// to every deferred output having started, a lens or PHOTO · VIDEO tap to the new lens or format being live,
-    /// and closing review to the camera running again. (Launch includes the camera permission prompt, the first
-    /// time.) The latest one replaces the last, unless it's appended to it.
+    /// Dev-only timings for the readout over the viewfinder (see `DebugTimings`). Compiled out of release builds
+    /// here, at the call, so a release build does no work for them at all.
     private func startTimer(_ name: String) {
         #if DEBUG
-        timers[name] = CFAbsoluteTimeGetCurrent()
+        timings.start(name)
         #endif
     }
 
     private func stopTimer(_ name: String, appending: Bool = false) {
         #if DEBUG
-        guard let started = timers.removeValue(forKey: name) else { return }
-        let line = String(format: "%@ %.2fs", name.padding(toLength: 7, withPad: " ", startingAt: 0),
-                          CFAbsoluteTimeGetCurrent() - started)
-        timing = appending && !timing.isEmpty ? timing + "\n" + line : line
+        timings.stop(name, appending: appending)
+        timing = timings.readout
         #endif
     }
 

@@ -6,9 +6,8 @@ import SwiftUI
 /// each belongs to. The toggles themselves (HIST, ZEB, PK, MAG) stay one tap away in the tool row.
 struct SetMenu: View {
     let cam: CameraController
-    let angle: Angle
     let onDone: () -> Void
-    @AppStorage("focusRailSide") private var railSide: RailSide = .right
+    @AppStorage(RailSide.key) private var railSide: RailSide = .right
     @AppStorage(DebugInfo.key) private var debugInfo = false
 
     enum Tile: CaseIterable {
@@ -110,7 +109,6 @@ struct SetMenu: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: 400)
-        .rotationEffect(angle)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Settings")
         .accessibilityAddTraits(.isModal)
@@ -191,18 +189,6 @@ private struct SettingRow<Value: Hashable>: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tile.name)
-    }
-}
-
-/// Which side of the picture the focus rail sits on, as you hold the phone. Right by default, under the right thumb.
-enum RailSide: String, CaseIterable {
-    case left, right
-
-    var title: String {
-        switch self {
-        case .left: "Left"
-        case .right: "Right"
-        }
     }
 }
 
