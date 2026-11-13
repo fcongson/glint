@@ -75,6 +75,8 @@ final class CameraController {
     var isZebraShown: Bool { isZebraEnabled && peakingRenderer != nil }
     private(set) var timing = ""
     private(set) var isCameraReady = false   // the preview is running; secondary controls fade in then
+    private(set) var isCameraDenied = false  // camera access refused: the viewfinder offers the way to Settings
+    private(set) var interruption: CameraInterruption?   // why the preview is frozen, while the system has the camera
     @ObservationIgnored private var timers: [String: CFAbsoluteTime] = [:]   // dev-only, see `startTimer`
     @ObservationIgnored private var thumbTime: Double?   // dev-only: shutter to the capture's preview image
     private(set) var lastThumbnail: UIImage?
@@ -180,7 +182,7 @@ final class CameraController {
         Task {
             // Only the camera is asked for at launch, so the preview isn't held up by a second prompt. The
             // microphone is asked for the first time VIDEO is chosen.
-            guard await AVCaptureDevice.requestAccess(for: .video) else { post("Camera access denied"); return }
+            guard await AVCaptureDevice.requestAccess(for: .video) else { isCameraDenied = true; return }
             capture.enqueue { $0.configureAndStart() }
         }
         // Prepare RAW decoding before the first shot, once the camera has had a moment to start.
@@ -268,14 +270,18 @@ final class CameraController {
         case .recordingStarted:
             isRecording = true
             recordingStartedAt = Date()
-        case .recordingFinished(let url):
+        case .recordingFinished(let url, let outcome):
             isRecording = false
             recordingStartedAt = nil
             // Recording held white balance (and exposure, if asked) still; put the normal modes back.
             capture.enqueue { $0.recordingEnded() }
             sendExposureMode(keepWhiteBalance: true)
-            let report = statusReporter
-            Task.detached(priority: .utility) { MediaLibrary.saveVideo(at: url, report: report) }
+            recordingFinished(url, outcome)
+        case .interrupted(let reason):
+            interruption = reason
+            if let message = reason.message { AccessibilityNotification.Announcement(message).post() }
+        case .interruptionEnded:
+            interruption = nil
         case .status(let message):
             post(message)
         }
@@ -745,6 +751,22 @@ final class CameraController {
 
     func toggleRecording() {
         capture.enqueue { $0.toggleRecording() }   // isRecording follows the .recordingStarted/.recordingFinished events
+    }
+
+    /// Saves the recording if its file is good, and says why it stopped if it wasn't the user who stopped it. The
+    /// reason stays in front of the save's own message ("Video saved"), which would otherwise replace it at once.
+    private func recordingFinished(_ url: URL, _ outcome: RecordingOutcome) {
+        let post = statusReporter
+        guard outcome.hasUsableFile else {
+            post(outcome.failure ?? "Recording failed")
+            Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: url) }
+            return
+        }
+        let report: @Sendable (String) -> Void = outcome.failure.map { failure in
+            post(failure)
+            return { message in post("\(failure). \(message)") }
+        } ?? post
+        Task.detached(priority: .utility) { MediaLibrary.saveVideo(at: url, report: report) }
     }
 
     // MARK: Status

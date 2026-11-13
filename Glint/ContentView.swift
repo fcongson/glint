@@ -31,6 +31,11 @@ struct ContentView: View {
             // Remembered between launches, like a camera's settings. Leaving the screen comes before any quit.
             if phase != .active { cam.saveSettings() }
         }
+        // A long take, or one on a tripod, mustn't end because the phone locked itself. Only while recording:
+        // the rest of the time the screen sleeps as usual, which is what saves the battery.
+        .onChange(of: cam.isRecording) { _, isRecording in
+            UIApplication.shared.isIdleTimerDisabled = isRecording
+        }
         .sheet(isPresented: $showingVideoFormat) {
             VideoFormatSheet(format: cam.videoFormat, capabilities: cam.videoCapabilities,
                              onChange: { cam.setVideoFormat($0) }, onDone: { showingVideoFormat = false })
@@ -151,11 +156,15 @@ struct ContentView: View {
                 // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
                 // there's room to read them; the top bar has no space to spare beside the Dynamic Island.
                 VStack(alignment: .leading, spacing: 6) {
+                    if let paused = cam.interruption?.message { overlayLabel(paused) }   // stays until the camera is back
                     if !cam.status.isEmpty { overlayLabel(cam.status) }
                     if DebugInfo.isAvailable, debugInfoSetting, !cam.timing.isEmpty { overlayLabel(cam.timing) }
                 }
                 .padding(8)
                 .allowsHitTesting(false)
+            }
+            .overlay {
+                if cam.isCameraDenied { CameraAccessPrompt() }
             }
             .overlay {
                 if showingSet {
@@ -423,10 +432,14 @@ struct ContentView: View {
 
     @ViewBuilder
     private var captureButton: some View {
-        switch cam.captureMode {
-        case .photo: shutterButton
-        case .video: recordButton
+        Group {
+            switch cam.captureMode {
+            case .photo: shutterButton
+            case .video: recordButton
+            }
         }
+        .disabled(cam.isCameraDenied)
+        .opacity(cam.isCameraDenied ? 0.4 : 1)
     }
 
     /// The lenses as one segmented control in the tool row.

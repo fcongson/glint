@@ -21,7 +21,7 @@ enum MediaLibrary {
     static func savePhoto(_ data: Data, isRAW: Bool, captureID: Int64, location: CLLocation?, report: @escaping @Sendable (String) -> Void) {
         if let dir = documentsDirectory {
             let name = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID).\(isRAW ? "dng" : "heic")"
-            do { try data.write(to: dir.appendingPathComponent(name)) }
+            do { try writeToDocuments(data, at: dir.appendingPathComponent(name)) }
             catch { report("Save failed: \(error.localizedDescription)") }
         }
         requestAddAccess { granted in
@@ -45,8 +45,8 @@ enum MediaLibrary {
         let base = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID)"
         if let dir = documentsDirectory {
             do {
-                try heic.write(to: dir.appendingPathComponent(base + ".heic"))
-                try dng.write(to: dir.appendingPathComponent(base + ".dng"))
+                try writeToDocuments(heic, at: dir.appendingPathComponent(base + ".heic"))
+                try writeToDocuments(dng, at: dir.appendingPathComponent(base + ".dng"))
             } catch {
                 report("Save failed: \(error.localizedDescription)")
             }
@@ -102,7 +102,11 @@ enum MediaLibrary {
     /// Copies a finished recording into Documents, adds it to Photos, then deletes the temporary file.
     static func saveVideo(at tempURL: URL, report: @escaping @Sendable (String) -> Void) {
         if let dir = documentsDirectory {
-            do { try FileManager.default.copyItem(at: tempURL, to: dir.appendingPathComponent(tempURL.lastPathComponent)) }
+            do {
+                let copy = dir.appendingPathComponent(tempURL.lastPathComponent)
+                try FileManager.default.copyItem(at: tempURL, to: copy)
+                excludeFromBackup(copy)
+            }
             catch { report("Save failed: \(error.localizedDescription)") }
         }
         let removeTemp: @Sendable () -> Void = { try? FileManager.default.removeItem(at: tempURL) }
@@ -115,6 +119,20 @@ enum MediaLibrary {
                 removeTemp()
             }
         }
+    }
+
+    private static func writeToDocuments(_ data: Data, at url: URL) throws {
+        try data.write(to: url)
+        excludeFromBackup(url)
+    }
+
+    /// The Documents copies stay on the phone (and in Files) but out of iCloud and computer backups: the same
+    /// capture is already in Photos, which has its own backup, and DNGs and ProRes clips would fill a backup fast.
+    static func excludeFromBackup(_ url: URL) {
+        var url = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
     }
 
     /// Asks for add-only Photos access (prompting the first time). `completion(true)` means saving is allowed.
