@@ -3,8 +3,8 @@ import ImageIO
 import os
 import UIKit
 
-/// Develops DNGs into HEIC one at a time. A full-resolution RAW decode is memory-hungry, so a burst of shots
-/// queues here instead of decoding side by side. Runs on its own serial queue, off the cooperative pool,
+/// Develops DNGs into HEIC and draws review images, one at a time. A RAW decode is memory-hungry, so a burst of
+/// shots queues here instead of decoding side by side. Runs on its own serial queue, off the cooperative pool,
 /// because the work blocks for a while.
 actor PhotoDeveloper {
     private let queue = DispatchSerialQueue(label: "glint.develop", qos: .userInitiated)
@@ -18,6 +18,11 @@ actor PhotoDeveloper {
 
     func develop(_ dng: Data, aspect: AspectRatio) -> Data? {
         renderer.developHEIC(from: dng, aspect: aspect)
+    }
+
+    /// The review image for a saved photo's data, in the form a `Shot` keeps.
+    func review(_ data: Data, isRAW: Bool) -> ReviewImage? {
+        renderer.render(data, isRAW: isRAW).flatMap(ReviewImage.init)
     }
 
     /// The first RAW decode after launch is slow (seconds) while Core Image prepares its RAW pipeline and GPU
@@ -45,7 +50,9 @@ struct ReviewImageRenderer: @unchecked Sendable {
     /// Longest side of the review image, in pixels.
     static let maxPixelSize: CGFloat = 1400
 
-    private let ciContext = CIContext()
+    /// Each render here is a one-off (a different photo every time), so there's nothing for Core Image to gain
+    /// from keeping intermediate buffers around between them.
+    private let ciContext = CIContext(options: [.cacheIntermediates: false])
 
     /// Develops a Bayer DNG at full resolution into HEIC data, with the optional enhancements switched off so the
     /// result looks like the RAW itself, cropped to `aspect`. Slow; run off the main actor.
@@ -130,5 +137,30 @@ struct ReviewImageRenderer: @unchecked Sendable {
         guard let image = filter.outputImage,
               let cg = ciContext.createCGImage(image, from: image.extent) else { return nil }
         return UIImage(cgImage: cg)
+    }
+}
+
+/// A review image as it's kept for the session: compressed, plus a small bitmap for the thumbnail button. Thirty
+/// decoded review images would hold about 175 MB; compressed they're a few hundred kilobytes each, and review
+/// decodes only the one on screen.
+struct ReviewImage: Sendable {
+    /// The thumbnail's short side, in pixels: the 48-point button at 3×, with room to spare.
+    static let thumbnailPixels: CGFloat = 160
+
+    let thumbnail: UIImage
+    let data: Data   // JPEG
+
+    init?(_ image: UIImage) {
+        guard let data = image.jpegData(compressionQuality: 0.9) else { return nil }
+        self.data = data
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        let short = min(pixels.width, pixels.height)
+        let shrink = short > 0 ? min(1, Self.thumbnailPixels / short) : 1
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let size = CGSize(width: (pixels.width * shrink).rounded(), height: (pixels.height * shrink).rounded())
+        thumbnail = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 }

@@ -81,11 +81,10 @@ final class CameraController {
     @ObservationIgnored private var thumbTime: Double?   // dev-only: shutter to the capture's preview image
     private(set) var lastThumbnail: UIImage?
     private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
-    private let maxShots = 30             // review images are full bitmaps (ReviewImageRenderer.maxPixelSize), so keep memory bounded
+    private let maxShots = 30             // each keeps a compressed review image (`ReviewImage`), so memory stays bounded
 
     private let capture: CaptureSession
     private let locationProvider = LocationProvider()
-    private let reviewRenderer: ReviewImageRenderer
     private let developer: PhotoDeveloper
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var modeGeneration = 0   // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
@@ -97,9 +96,7 @@ final class CameraController {
         peakingRenderer = peaking
         capture = CaptureSession(peaking: peaking)
         isPeakingEnabled = peaking != nil
-        let renderer = ReviewImageRenderer()
-        reviewRenderer = renderer
-        developer = PhotoDeveloper(renderer: renderer)   // shares the renderer's CIContext
+        developer = PhotoDeveloper(renderer: ReviewImageRenderer())
         if let saved = SavedSettings.load() { restore(saved) }
     }
 
@@ -571,6 +568,7 @@ final class CameraController {
     func setReviewing(_ isReviewing: Bool) {
         let running = !isReviewing
         if running { startTimer("resume") }
+        locationProvider.setPaused(isReviewing)   // no photo can be taken from review
         capture.enqueue { $0.setRunning(running) }
     }
 
@@ -638,7 +636,6 @@ final class CameraController {
         let shotTime = CFAbsoluteTimeGetCurrent() - photo.requestedAt
         let location = locationProvider.current   // the fix at the moment the photo arrives
         let report = statusReporter
-        let renderer = reviewRenderer
         let developer = developer
         Task.detached(priority: .userInitiated) { [weak self] in
             // HEIC: the DNG is developed (and cropped) into a HEIC, which replaces it everywhere.
@@ -670,8 +667,9 @@ final class CameraController {
                 }
             }
             let t0 = CFAbsoluteTimeGetCurrent()
-            let image = heic.map { renderer.render($0, isRAW: false) }
-                ?? renderer.render(photo.data, isRAW: photo.keepsDNG || photo.needsDevelopment)
+            // Queued with the develops, so a burst's RAW decodes don't run side by side.
+            let image = if let heic { await developer.review(heic, isRAW: false) }
+                        else { await developer.review(photo.data, isRAW: photo.keepsDNG || photo.needsDevelopment) }
             let renderTime = CFAbsoluteTimeGetCurrent() - t0
             await self?.addShot(image, info: info, location: location, shotTime: shotTime, developTime: developTime, renderTime: renderTime)
         }
@@ -700,10 +698,10 @@ final class CameraController {
         return (Int(crop.width), Int(crop.height))
     }
 
-    private func addShot(_ image: UIImage?, info: PhotoInfo, location: CLLocation?, shotTime: Double, developTime: Double, renderTime: Double) {
+    private func addShot(_ image: ReviewImage?, info: PhotoInfo, location: CLLocation?, shotTime: Double, developTime: Double, renderTime: Double) {
         if let image {
-            lastThumbnail = image
-            let shot = Shot(image: image, info: info, location: location)
+            lastThumbnail = image.thumbnail
+            let shot = Shot(thumbnail: image.thumbnail, imageData: image.data, info: info, location: location)
             shots.append(shot)
             if shots.count > maxShots { shots.removeFirst(shots.count - maxShots) }
             if let location { resolvePlace(for: shot.id, at: location) }

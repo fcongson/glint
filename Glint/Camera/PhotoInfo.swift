@@ -74,11 +74,13 @@ struct PhotoInfo: Sendable {
     }()
 }
 
-/// One reviewed photo: the review-size image plus the settings it was taken with.
+/// One reviewed photo: the review-size image plus the settings it was taken with. The image is kept compressed
+/// (see `ReviewImage`) and decoded by review when its page is on screen.
 /// `place` is filled in after the fact, once the reverse-geocoding lookup for `location` returns.
 struct Shot: Identifiable {
     let id = UUID()
-    let image: UIImage
+    let thumbnail: UIImage
+    let imageData: Data
     let info: PhotoInfo
     let location: CLLocation?
     var place: String?

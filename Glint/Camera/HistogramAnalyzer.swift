@@ -178,11 +178,22 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     }
 
     func set(_ new: Wants) {
-        wants.withLock { $0 = new }
+        let hadViewfinder = wants.withLock { current in
+            defer { current = new }
+            return current.viewfinder != nil
+        }
+        if hadViewfinder, new.viewfinder == nil { releaseViewfinderResources() }
         let previewSized = Self.previewSized(new)
         if output.deliversPreviewSizedOutputBuffers != previewSized {
             output.deliversPreviewSizedOutputBuffers = previewSized
         }
+    }
+
+    /// The GPU viewfinder has stopped drawing (peaking, magnifying and zebras all off, or the camera stopped), so
+    /// its scratch textures can go. On `queue`, after any frame being drawn now.
+    func releaseViewfinderResources() {
+        guard let peaking else { return }
+        queue.async { peaking.releaseWorkspace() }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {

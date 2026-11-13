@@ -681,6 +681,7 @@ actor CaptureSession {
     private func stopIfIdle() {
         guard !wantsRunning, session.isRunning, !movieOutput.isRecording, photoDelegates.isEmpty else { return }
         session.stopRunning()
+        analyzer.releaseViewfinderResources()   // no frames to draw while stopped; made again on the next one
     }
 
     /// Chooses what the luma analysis stream is for. Its frames flow only while something wants them, so it costs

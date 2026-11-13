@@ -23,7 +23,7 @@ struct ReviewView: View {
             // Swipe sideways to move between photos taken this session.
             TabView(selection: $selection) {
                 ForEach(shots) { shot in
-                    page(shot.image).tag(Optional(shot.id))
+                    ReviewPage(shot: shot, angle: angle, onTap: { dismiss() }).tag(Optional(shot.id))
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -143,12 +143,22 @@ struct ReviewView: View {
         rows.append(("WB", SettingsText.whiteBalance(info.whiteBalance)))
         return rows
     }
+}
 
-    private func page(_ image: UIImage) -> some View {
+/// One photo in review. Shots keep their review image compressed, so the page decodes it when it comes on screen
+/// (showing the thumbnail for the moment that takes) and lets it go when it leaves: only the pages near the one
+/// you're looking at hold a full bitmap.
+private struct ReviewPage: View {
+    let shot: Shot
+    let angle: Angle
+    let onTap: () -> Void
+    @State private var image: UIImage?
+
+    var body: some View {
         GeometryReader { geo in
             // At a quarter turn the image's width runs along the screen's height, so swap the box before rotating.
             let box = angle.isQuarterTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
-            Image(uiImage: image)
+            Image(uiImage: image ?? shot.thumbnail)
                 .resizable()
                 .scaledToFit()
                 .frame(width: box.width, height: box.height)
@@ -158,6 +168,10 @@ struct ReviewView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: angle)
         .contentShape(Rectangle())
-        .onTapGesture { dismiss() }
+        .onTapGesture { onTap() }
+        .task {
+            if image == nil { image = await UIImage(data: shot.imageData)?.byPreparingForDisplay() }
+        }
+        .onDisappear { image = nil }
     }
 }
