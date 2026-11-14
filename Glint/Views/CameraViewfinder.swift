@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The picture and what sits on it: the system preview, the GPU viewfinder over it while peaking, zebras or the
-/// magnifier is on, the focus box and magnifier frame, the crop mask, the histogram, the focus rail on its edge,
-/// status messages, and the SET panel when it's open.
+/// magnifier is on, the focus box and magnifier frame, the crop mask, the grid and the level, the histogram, the
+/// focus rail on its edge, status messages, and the SET panel when it's open.
 struct CameraViewfinder: View {
     let cam: CameraController
     let deviceAngle: Angle
@@ -12,11 +12,15 @@ struct CameraViewfinder: View {
     @AppStorage(DebugInfo.key) private var debugInfoSetting = false   // see `DebugInfo`
     @State private var focusPoint: CGPoint?
     @State private var focusTapCount = 0
+    @State private var lockPoint: CGPoint?   // where the long press that set the AE/AF lock was
+    @State private var lockCount = 0
 
     var body: some View {
         ZStack {
             CameraPreview(session: cam.session, hint: viewfinderHint,
                           onTap: { devicePoint, layerPoint, size in tapped(devicePoint, layerPoint, size) },
+                          onLongPress: { devicePoint, layerPoint, _ in longPressed(devicePoint, layerPoint) },
+                          onCaptureButton: { cam.pressCaptureButton() },
                           onLayerReady: { cam.attachPreviewLayer($0) })
             // While peaking, magnifying or zebras are on, the viewfinder is drawn on the GPU over the system
             // preview, so outlines can't lag the picture and magnifying uses the full-resolution frame.
@@ -28,6 +32,19 @@ struct CameraViewfinder: View {
             }
             if let p = focusPoint {
                 FocusBox().id(focusTapCount).position(p).accessibilityHidden(true)
+            }
+            // AE/AF lock: the box stays where the long press was, and a label says what's held, until a tap.
+            if let lock = cam.viewfinderLock, !cam.isMagnifying {
+                if let p = lockPoint, focusPoint == nil {
+                    FocusBox().id(lockCount).position(p).accessibilityHidden(true)
+                }
+                OverlayLabel(lock.title, color: .amber)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 10)
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(lock.spoken)
+                    .accessibilityHint("Touch the viewfinder to release it")
             }
             // In manual focus, where the magnifier will punch in.
             if !cam.isAutofocus, !cam.isMagnifying, cam.isMagnifierAvailable, cam.isMagnifierEnabled {
@@ -60,6 +77,14 @@ struct CameraViewfinder: View {
                 CropMask(aspect: cam.aspect)
             }
         }
+        .overlay {
+            // Composition aids, inside the frame that will be kept. Not while magnified, like the crop.
+            if !cam.isMagnifying {
+                if cam.isGridEnabled { GridOverlay(aspect: frameAspect) }
+                if cam.isLevelEnabled { LevelIndicator(model: cam.levelModel) }
+            }
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: lockCount)
         .overlay(alignment: .topLeading) {
             if cam.isHistogramEnabled {
                 // Reserve the rotated footprint so it stays inside the corner.
@@ -132,17 +157,32 @@ struct CameraViewfinder: View {
         }
     }
 
+    /// A long press holds focus and exposure at that point (AE/AF lock). Not while magnified, where a touch
+    /// is about the magnifier.
+    private func longPressed(_ devicePoint: CGPoint, _ layerPoint: CGPoint) {
+        guard !cam.isMagnifying, cam.lockFocusAndExposure(at: devicePoint) else { return }
+        focusPoint = nil
+        lockPoint = layerPoint
+        lockCount += 1
+    }
+
+    /// The frame that's kept: video's 16:9, or the photo aspect.
+    private var frameAspect: AspectRatio {
+        cam.captureMode == .video ? .sixteenNine : cam.aspect
+    }
+
     private var viewfinderHint: String {
         if cam.isMagnifying { return "Touch to switch between actual pixels and double magnification" }
+        let hold = "Touch and hold to lock \(cam.isAutofocus ? "focus and exposure" : "exposure") there."
         return cam.isAutofocus
-            ? "Touch the viewfinder to set the focus point"
-            : "Touch the viewfinder to choose where the magnifier looks. Autofocus is off."
+            ? "Touch the viewfinder to set the focus point. \(hold)"
+            : "Touch the viewfinder to choose where the magnifier looks. Autofocus is off. \(hold)"
     }
 
     // MARK: Focus rail
 
     /// AF over the focus rail, laid out upright, before it's turned for landscape.
-    private static let railColumn = CGSize(width: 64, height: FocusRail.trackHeight + 100)
+    private static let railColumn = CGSize(width: 64, height: FocusRail.trackHeight + 116)
 
     /// Which edge of the picture is on the chosen side, the way the phone is held.
     private var railAlignment: Alignment {

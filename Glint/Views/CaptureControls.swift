@@ -8,7 +8,6 @@ struct CaptureControls: View {
     /// The shutter's blink, shown over the viewfinder.
     @Binding var flash: Bool
     @State private var selected: ManualParam = .shutter   // kept here so MANUAL comes back to the same ruler
-    @State private var shutterTaps = 0
     @State private var showReview = false
 
     var body: some View {
@@ -48,6 +47,15 @@ struct CaptureControls: View {
         }
         .padding(.top, 2)
         .padding(.bottom, 4)
+        // Every photo blinks the viewfinder and taps the hand, whichever button asked for it: this one, a volume
+        // button or Camera Control.
+        .onChange(of: cam.shutterPresses) {
+            withAnimation(.easeOut(duration: 0.08)) { flash = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.easeIn(duration: 0.2)) { flash = false }
+            }
+        }
+        .sensoryFeedback(.impact(flexibility: .rigid, intensity: 1.0), trigger: cam.shutterPresses)
     }
 
     @ViewBuilder
@@ -63,14 +71,7 @@ struct CaptureControls: View {
     }
 
     private var shutterButton: some View {
-        Button {
-            shutterTaps += 1
-            withAnimation(.easeOut(duration: 0.08)) { flash = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.easeIn(duration: 0.2)) { flash = false }
-            }
-            cam.capturePhoto()
-        } label: {
+        Button { cam.pressCaptureButton() } label: {
             ZStack {
                 Circle().strokeBorder(Color.white, lineWidth: 4).frame(width: 78, height: 78)
                 Circle().fill(Color.white).frame(width: 64, height: 64)
@@ -78,12 +79,12 @@ struct CaptureControls: View {
         }
         .buttonStyle(PressScaleStyle())
         .accessibilityLabel("Take photo")
-        .sensoryFeedback(.impact(flexibility: .rigid, intensity: 1.0), trigger: shutterTaps)
+        .accessibilityHint("The volume buttons take a photo too.")
     }
 
     /// Takes the shutter's place in video mode, at the same size: a red dot that becomes a stop square.
     private var recordButton: some View {
-        Button { cam.toggleRecording() } label: {
+        Button { cam.pressCaptureButton() } label: {
             ZStack {
                 Circle().strokeBorder(Color.white, lineWidth: 4).frame(width: 78, height: 78)
                 RoundedRectangle(cornerRadius: cam.isRecording ? 6 : 32)

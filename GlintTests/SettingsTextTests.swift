@@ -150,4 +150,11 @@ struct SettingsTextTests {
         #expect(recording.hasPrefix("The video format can't change while recording."))
         #expect(recording.hasSuffix(idle))
     }
+
+    @Test func theFlashMarkInWords() {
+        #expect(SettingsText.flashSpoken(.off, isVideo: false).isEmpty)
+        #expect(SettingsText.flashSpoken(.auto, isVideo: false) == ", flash auto")
+        #expect(SettingsText.flashSpoken(.on, isVideo: false) == ", flash on")
+        #expect(SettingsText.flashSpoken(.on, isVideo: true) == ", light on")
+    }
 }

@@ -37,3 +37,33 @@ enum FocusScale {
         clamp(position + Float(steps) * step)
     }
 }
+
+/// The focus rail's two presets, a tap on the label at either end: straight to the far stop or the near one, as
+/// a lens's focus ring turns to its ends. The far stop is as near to infinity as the lens position goes; like the
+/// rest of the scale it isn't a calibrated distance.
+enum FocusPreset: CaseIterable, Sendable {
+    case infinity, nearest
+
+    var position: Float {
+        switch self {
+        case .infinity: 1
+        case .nearest: 0
+        }
+    }
+
+    /// On the rail.
+    var title: String {
+        switch self {
+        case .infinity: "∞"
+        case .nearest: "NEAR"
+        }
+    }
+
+    /// For VoiceOver.
+    var name: String {
+        switch self {
+        case .infinity: "Focus at infinity"
+        case .nearest: "Focus at nearest"
+        }
+    }
+}

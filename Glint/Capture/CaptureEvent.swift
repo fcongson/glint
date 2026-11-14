@@ -7,6 +7,8 @@ struct DeviceInfo: Sendable {
     let minISO: Float
     let maxISO: Float
     let aperture: Float
+    let hasFlash: Bool   // for stills
+    let hasTorch: Bool   // the same LED as a steady light, for video
 }
 
 /// A finished photo, copied out of `AVCapturePhoto` so it can leave the capture callback.
@@ -51,6 +53,8 @@ enum CaptureEvent: Sendable {
     /// Microphone level while recording, 0 (silence) … 1 (full scale).
     case audioLevel(Float)
     case histogram(Histogram)
+    /// The faces the camera sees, in the metadata output's coordinates, while VoiceOver describes the picture.
+    case faces([CGRect])
     /// A small image of the shot, straight from the capture, for the thumbnail until the review image is ready.
     case photoPreview(UIImage, requestedAt: CFAbsoluteTime)
     case photoCaptured(CapturedPhoto)

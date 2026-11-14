@@ -11,14 +11,67 @@
     ],
   },
   "files": [
-    { "kind": "folder", "path": "Glint", "target-membership": [ "Glint" ] },
+    {
+      "kind": "folder",
+      "path": "Glint",
+      "target-membership": [
+        "Glint",
+        "GlintCapture",
+      ],
+      "membership-exceptions": [
+        {
+          "target": "GlintCapture",
+          "exclusions": [
+            "App/GlintApp.swift",
+          ],
+        },
+      ],
+    },
+    { "kind": "folder", "path": "Shared", "target-membership": [ "Glint", "GlintCapture", "GlintControlExtension" ] },
     { "kind": "folder", "path": "GlintTests", "target-membership": [ "GlintTests" ] },
     {
+      "kind": "folder",
+      "path": "GlintCapture",
+      "target-membership": [
+        "GlintCapture",
+      ],
+      "membership-exceptions": [
+        {
+          "target": "GlintCapture",
+          "exclusions": [
+            "Info.plist",
+          ],
+        },
+      ],
+    }, {
+      "kind": "folder",
+      "path": "GlintControl",
+      "target-membership": [
+        "GlintControlExtension",
+      ],
+      "membership-exceptions": [
+        {
+          "target": "GlintControlExtension",
+          "exclusions": [
+            "Info.plist",
+          ],
+        },
+      ],
+    }, {
+      "kind": "group",
+      "name": "Frameworks",
+      "children": [
+        { "path": "<SDK>/System/Library/Frameworks/WidgetKit.framework", "target-membership": [ "GlintControlExtension/frameworks" ] },
+        { "path": "<SDK>/System/Library/Frameworks/SwiftUI.framework", "target-membership": [ "GlintControlExtension/frameworks" ] },
+      ],
+    }, {
       "kind": "group",
       "name": "Products",
       "children": [
         { "path": "<PRODUCTS>/Glint.app", "id": "000000000000000000000120", "type": "wrapper.application", "index": false },
         { "path": "<PRODUCTS>/GlintTests.xctest", "id": "010133F7309AF1B100063F52", "type": "wrapper.cfbundle", "index": false },
+        { "path": "<PRODUCTS>/GlintCapture.appex", "id": "01CD901B30A7E1870017CF97", "type": "wrapper.extensionkit-extension", "index": false, "target-membership": [ { "build-phase": "Glint/copy/Embed ExtensionKit Extensions", "header-preservation": "remove-on-copy" } ] },
+        { "path": "<PRODUCTS>/GlintControlExtension.appex", "id": "01CD902C30A7E1C10017CF97", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "Glint/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
       ],
     },
   ],
@@ -28,10 +81,24 @@
       "id": "000000000000000100000000",
       "product": "Products/Glint.app",
       "product-type": "application",
+      "dependencies": [
+        "GlintCapture",
+        "GlintControlExtension",
+      ],
       "build-phases": [
         "compile-sources",
         "frameworks",
         "resources",
+        {
+          "kind": "copy",
+          "name": "Embed ExtensionKit Extensions",
+          "bundle-base-path": "build-products-directory",
+          "relative-path": "$(EXTENSIONS_FOLDER_PATH)",
+        }, {
+          "kind": "copy",
+          "name": "Embed Foundation Extensions",
+          "bundle-base-path": "plugins-directory",
+        },
       ],
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
@@ -107,6 +174,86 @@
         "SWIFT_VERSION": "6.0",
         "TARGETED_DEVICE_FAMILY": "1",
         "TEST_HOST": "$(BUILT_PRODUCTS_DIR)/Glint.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Glint",
+      },
+    }, {
+      "name": "GlintCapture",
+      "id": "01CD901A30A7E1870017CF97",
+      "product": "Products/GlintCapture.appex",
+      "product-type": "extensionkit-extension",
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+        "resources",
+      ],
+      "build-settings": {
+        "CODE_SIGN_STYLE": "Automatic",
+        "CURRENT_PROJECT_VERSION": "1",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_FILE": "GlintCapture/Info.plist",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Glint",
+        "INFOPLIST_KEY_NSCameraUsageDescription": "Glint uses the camera to capture photos and video.",
+        "INFOPLIST_KEY_NSHumanReadableCopyright": "",
+        "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Glint records audio with video.",
+        "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": "Glint saves your captures to Photos.",
+        "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+        "LD_RUNPATH_SEARCH_PATHS": [
+          "$(inherited)",
+          "@executable_path/Frameworks",
+          "@executable_path/../../Frameworks",
+        ],
+        "MARKETING_VERSION": "1.0",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.frankcongson.glint.GlintCapture",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "iphoneos",
+        "SKIP_INSTALL": "YES",
+        "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
+        "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) LOCKED_CAPTURE",
+        "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
+        "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
+        "SWIFT_EMIT_LOC_STRINGS": "YES",
+        "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
+        "SWIFT_VERSION": "6.0",
+        "TARGETED_DEVICE_FAMILY": "1",
+        "VALIDATE_PRODUCT[config=Release]": "YES",
+      },
+    }, {
+      "name": "GlintControlExtension",
+      "id": "01CD902B30A7E1C10017CF97",
+      "product": "Products/GlintControlExtension.appex",
+      "product-type": "app-extension",
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+        "resources",
+      ],
+      "build-settings": {
+        "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
+        "ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME": "WidgetBackground",
+        "CODE_SIGN_STYLE": "Automatic",
+        "CURRENT_PROJECT_VERSION": "1",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_FILE": "GlintControl/Info.plist",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Glint",
+        "INFOPLIST_KEY_NSHumanReadableCopyright": "",
+        "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+        "LD_RUNPATH_SEARCH_PATHS": [
+          "$(inherited)",
+          "@executable_path/Frameworks",
+          "@executable_path/../../Frameworks",
+        ],
+        "MARKETING_VERSION": "1.0",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.frankcongson.glint.GlintControl",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "iphoneos",
+        "SKIP_INSTALL": "YES",
+        "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
+        "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
+        "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
+        "SWIFT_EMIT_LOC_STRINGS": "YES",
+        "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
+        "SWIFT_VERSION": "6.0",
+        "TARGETED_DEVICE_FAMILY": "1",
+        "VALIDATE_PRODUCT[config=Release]": "YES",
       },
     },
   ],

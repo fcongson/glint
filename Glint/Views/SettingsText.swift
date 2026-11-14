@@ -142,6 +142,15 @@ enum SettingsText {
         return lines.joined(separator: " ")
     }
 
+    /// The top bar's flash mark in words, after the format: nothing when off.
+    static func flashSpoken(_ flash: FlashSetting, isVideo: Bool) -> String {
+        switch flash {
+        case .off: ""
+        case .auto: ", flash auto"
+        case .on: isVideo ? ", light on" : ", flash on"
+        }
+    }
+
     /// A manual setting's name, for its A button.
     static func name(_ setting: ManualSetting) -> String {
         switch setting {

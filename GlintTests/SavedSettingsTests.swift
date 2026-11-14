@@ -16,7 +16,8 @@ struct SavedSettingsTests {
                                      videoFormat: format, isHistogramEnabled: true, isPeakingEnabled: false,
                                      peakingSensitivity: .high, peakingAppearance: PeakingAppearance(color: .blue, lines: .fine),
                                      peakingMode: .sweep, isZebraEnabled: true, zebraLevel: .ninety,
-                                     isMagnifierEnabled: false)
+                                     isMagnifierEnabled: false, flash: .auto, histogramStyle: .rgb,
+                                     isGridEnabled: true, isLevelEnabled: true)
         settings.save(to: defaults)
         #expect(SavedSettings.load(from: defaults) == settings)
     }
@@ -28,5 +29,6 @@ struct SavedSettingsTests {
         let loaded = try #require(SavedSettings.load(from: defaults))
         #expect(loaded.isHistogramEnabled == true)
         #expect(loaded.manual == nil)
+        #expect(loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil && loaded.isLevelEnabled == nil)
     }
 }
