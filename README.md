@@ -115,6 +115,7 @@ Glint/
   Resources/WarmUp.dng         64 × 64 DNG decoded at launch to prepare RAW decoding
   Assets.xcassets              app icon (light, dark, tinted) and accent color
 tools/make_warmup_dng.py       regenerates Resources/WarmUp.dng (needs tifffile)
+tools/make_control_symbol.py   regenerates the Lock Screen control's icon (a custom symbol) from the app icon's measurements
 GlintTests/                    Swift Testing coverage of the logic, and of the peaking shaders on synthetic frames
 ```
 

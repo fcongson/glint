@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--Custom symbol for the Glint control, redrawn from the app icon (docs/app-icon.png). Template version 3.0. A control
-    can only draw SF Symbols and custom symbols, not bitmap images, and a symbol is one colour, so the icon's colours
-    become shape: dark parts are filled (the ring and the disc) and light parts are cut out (the hexagon outline and
-    the two dots). One weight (Regular) at the three sizes, all the same shape. Drawn 1.5x the size of a plain
-    circle symbol, so it fills its button like the others. -->
+<!--Custom symbol for the Glint control, redrawn from the app icon (docs/app-icon.png) by tools/make_control_symbol.py.
+    Template version 3.0. A control can only draw SF Symbols and custom symbols, not bitmap images, and a symbol is one
+    colour, so the icon's colours become shape: dark parts are filled (the ring and the disc) and light parts are cut
+    out (the hexagon outline and the two dots). Drawn 1.8x the size of a plain circle symbol. -->
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="3300" height="2200">
  <g id="Notes">
@@ -15,25 +14,25 @@
   <line id="Baseline-S" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="696" y2="696"/>
   <line id="Capline-S" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="625.5409999999999" y2="625.5409999999999"/>
   <line id="left-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1406" x2="1406" y1="586" y2="736"/>
-  <line id="right-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1538.50" x2="1538.50" y1="586" y2="736"/>
+  <line id="right-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1563.40" x2="1563.40" y1="586" y2="736"/>
   <line id="Baseline-M" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1126" y2="1126"/>
   <line id="Capline-M" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1055.541" y2="1055.541"/>
   <line id="left-margin-Regular-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1406" x2="1406" y1="1016" y2="1166"/>
-  <line id="right-margin-Regular-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1538.50" x2="1538.50" y1="1016" y2="1166"/>
+  <line id="right-margin-Regular-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1563.40" x2="1563.40" y1="1016" y2="1166"/>
   <line id="Baseline-L" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1556" y2="1556"/>
   <line id="Capline-L" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1485.541" y2="1485.541"/>
   <line id="left-margin-Regular-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1406" x2="1406" y1="1446" y2="1596"/>
-  <line id="right-margin-Regular-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1538.50" x2="1538.50" y1="1446" y2="1596"/>
+  <line id="right-margin-Regular-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1563.40" x2="1563.40" y1="1446" y2="1596"/>
  </g>
  <g id="Symbols">
   <g id="Regular-S" transform="matrix(1 0 0 1 1406 696)">
-   <path d="M4.00 -35.25A62.25 62.25 0 1 1 128.50 -35.25A62.25 62.25 0 1 1 4.00 -35.25ZM11.85 -35.25A54.40 54.40 0 1 0 120.65 -35.25A54.40 54.40 0 1 0 11.85 -35.25ZM20.01 -35.25A46.24 46.24 0 1 1 112.49 -35.25A46.24 46.24 0 1 1 20.01 -35.25ZM85.96 -34.31A1.88 1.88 0 0 0 85.96 -36.19L76.92 -51.85A1.88 1.88 0 0 0 75.29 -52.79L57.21 -52.79A1.88 1.88 0 0 0 55.58 -51.85L46.54 -36.19A1.88 1.88 0 0 0 46.54 -34.31L55.58 -18.65A1.88 1.88 0 0 0 57.21 -17.71L75.29 -17.71A1.88 1.88 0 0 0 76.92 -18.65ZM82.11 -35.25L74.18 -21.52L58.32 -21.52L50.39 -35.25L58.32 -48.98L74.18 -48.98ZM34.07 -57.39A10.05 10.05 0 1 0 54.16 -57.39A10.05 10.05 0 1 0 34.07 -57.39ZM80.85 -14.21A4.55 4.55 0 1 0 89.96 -14.21A4.55 4.55 0 1 0 80.85 -14.21Z"/>
+   <path d="M4.00 -35.25A74.70 74.70 0 1 1 153.40 -35.25A74.70 74.70 0 1 1 4.00 -35.25ZM13.42 -35.25A65.28 65.28 0 1 0 143.98 -35.25A65.28 65.28 0 1 0 13.42 -35.25ZM23.22 -35.25A55.48 55.48 0 1 1 134.18 -35.25A55.48 55.48 0 1 1 23.22 -35.25ZM102.35 -34.12A2.26 2.26 0 0 0 102.35 -36.38L91.50 -55.17A2.26 2.26 0 0 0 89.55 -56.30L67.85 -56.30A2.26 2.26 0 0 0 65.90 -55.17L55.05 -36.38A2.26 2.26 0 0 0 55.05 -34.12L65.90 -15.33A2.26 2.26 0 0 0 67.85 -14.20L89.55 -14.20A2.26 2.26 0 0 0 91.50 -15.33ZM97.73 -35.25L88.21 -18.77L69.19 -18.77L59.67 -35.25L69.19 -51.73L88.21 -51.73ZM40.08 -61.81A12.06 12.06 0 1 0 64.19 -61.81A12.06 12.06 0 1 0 40.08 -61.81ZM96.22 -10.00A5.46 5.46 0 1 0 107.15 -10.00A5.46 5.46 0 1 0 96.22 -10.00Z"/>
   </g>
   <g id="Regular-M" transform="matrix(1 0 0 1 1406 1126)">
-   <path d="M4.00 -35.25A62.25 62.25 0 1 1 128.50 -35.25A62.25 62.25 0 1 1 4.00 -35.25ZM11.85 -35.25A54.40 54.40 0 1 0 120.65 -35.25A54.40 54.40 0 1 0 11.85 -35.25ZM20.01 -35.25A46.24 46.24 0 1 1 112.49 -35.25A46.24 46.24 0 1 1 20.01 -35.25ZM85.96 -34.31A1.88 1.88 0 0 0 85.96 -36.19L76.92 -51.85A1.88 1.88 0 0 0 75.29 -52.79L57.21 -52.79A1.88 1.88 0 0 0 55.58 -51.85L46.54 -36.19A1.88 1.88 0 0 0 46.54 -34.31L55.58 -18.65A1.88 1.88 0 0 0 57.21 -17.71L75.29 -17.71A1.88 1.88 0 0 0 76.92 -18.65ZM82.11 -35.25L74.18 -21.52L58.32 -21.52L50.39 -35.25L58.32 -48.98L74.18 -48.98ZM34.07 -57.39A10.05 10.05 0 1 0 54.16 -57.39A10.05 10.05 0 1 0 34.07 -57.39ZM80.85 -14.21A4.55 4.55 0 1 0 89.96 -14.21A4.55 4.55 0 1 0 80.85 -14.21Z"/>
+   <path d="M4.00 -35.25A74.70 74.70 0 1 1 153.40 -35.25A74.70 74.70 0 1 1 4.00 -35.25ZM13.42 -35.25A65.28 65.28 0 1 0 143.98 -35.25A65.28 65.28 0 1 0 13.42 -35.25ZM23.22 -35.25A55.48 55.48 0 1 1 134.18 -35.25A55.48 55.48 0 1 1 23.22 -35.25ZM102.35 -34.12A2.26 2.26 0 0 0 102.35 -36.38L91.50 -55.17A2.26 2.26 0 0 0 89.55 -56.30L67.85 -56.30A2.26 2.26 0 0 0 65.90 -55.17L55.05 -36.38A2.26 2.26 0 0 0 55.05 -34.12L65.90 -15.33A2.26 2.26 0 0 0 67.85 -14.20L89.55 -14.20A2.26 2.26 0 0 0 91.50 -15.33ZM97.73 -35.25L88.21 -18.77L69.19 -18.77L59.67 -35.25L69.19 -51.73L88.21 -51.73ZM40.08 -61.81A12.06 12.06 0 1 0 64.19 -61.81A12.06 12.06 0 1 0 40.08 -61.81ZM96.22 -10.00A5.46 5.46 0 1 0 107.15 -10.00A5.46 5.46 0 1 0 96.22 -10.00Z"/>
   </g>
   <g id="Regular-L" transform="matrix(1 0 0 1 1406 1556)">
-   <path d="M4.00 -35.25A62.25 62.25 0 1 1 128.50 -35.25A62.25 62.25 0 1 1 4.00 -35.25ZM11.85 -35.25A54.40 54.40 0 1 0 120.65 -35.25A54.40 54.40 0 1 0 11.85 -35.25ZM20.01 -35.25A46.24 46.24 0 1 1 112.49 -35.25A46.24 46.24 0 1 1 20.01 -35.25ZM85.96 -34.31A1.88 1.88 0 0 0 85.96 -36.19L76.92 -51.85A1.88 1.88 0 0 0 75.29 -52.79L57.21 -52.79A1.88 1.88 0 0 0 55.58 -51.85L46.54 -36.19A1.88 1.88 0 0 0 46.54 -34.31L55.58 -18.65A1.88 1.88 0 0 0 57.21 -17.71L75.29 -17.71A1.88 1.88 0 0 0 76.92 -18.65ZM82.11 -35.25L74.18 -21.52L58.32 -21.52L50.39 -35.25L58.32 -48.98L74.18 -48.98ZM34.07 -57.39A10.05 10.05 0 1 0 54.16 -57.39A10.05 10.05 0 1 0 34.07 -57.39ZM80.85 -14.21A4.55 4.55 0 1 0 89.96 -14.21A4.55 4.55 0 1 0 80.85 -14.21Z"/>
+   <path d="M4.00 -35.25A74.70 74.70 0 1 1 153.40 -35.25A74.70 74.70 0 1 1 4.00 -35.25ZM13.42 -35.25A65.28 65.28 0 1 0 143.98 -35.25A65.28 65.28 0 1 0 13.42 -35.25ZM23.22 -35.25A55.48 55.48 0 1 1 134.18 -35.25A55.48 55.48 0 1 1 23.22 -35.25ZM102.35 -34.12A2.26 2.26 0 0 0 102.35 -36.38L91.50 -55.17A2.26 2.26 0 0 0 89.55 -56.30L67.85 -56.30A2.26 2.26 0 0 0 65.90 -55.17L55.05 -36.38A2.26 2.26 0 0 0 55.05 -34.12L65.90 -15.33A2.26 2.26 0 0 0 67.85 -14.20L89.55 -14.20A2.26 2.26 0 0 0 91.50 -15.33ZM97.73 -35.25L88.21 -18.77L69.19 -18.77L59.67 -35.25L69.19 -51.73L88.21 -51.73ZM40.08 -61.81A12.06 12.06 0 1 0 64.19 -61.81A12.06 12.06 0 1 0 40.08 -61.81ZM96.22 -10.00A5.46 5.46 0 1 0 107.15 -10.00A5.46 5.46 0 1 0 96.22 -10.00Z"/>
   </g>
  </g>
 </svg>
