@@ -17,6 +17,10 @@ struct FlashTests {
         #expect(FlashSetting.on.captureMode == .on)
     }
 
+    @Test func titlesForSET() {
+        #expect(FlashSetting.allCases.map(\.title) == ["Off", "Auto", "On"])
+    }
+
     @Test func theTopBarIsOnlyMarkedWhenTheFlashCanFire() {
         #expect(FlashSetting.off.mark.isEmpty)
         #expect(FlashSetting.auto.mark.hasSuffix("A"))
@@ -70,6 +74,11 @@ struct FocusPresetTests {
         #expect(FocusPreset.nearest.position == 0)
         #expect(SettingsText.focusPosition(FocusPreset.infinity.position) == "Infinity")
         #expect(SettingsText.focusPosition(FocusPreset.nearest.position) == "Nearest")
+    }
+
+    @Test func labelledAsOnTheRailAndNamedForVoiceOver() {
+        #expect(FocusPreset.allCases.map(\.title) == ["∞", "NEAR"])
+        #expect(FocusPreset.allCases.map(\.name) == ["Focus at infinity", "Focus at nearest"])
     }
 }
 

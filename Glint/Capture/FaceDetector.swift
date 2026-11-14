@@ -9,10 +9,7 @@ final class FaceDetector: NSObject, AVCaptureMetadataOutputObjectsDelegate {
     let output = AVCaptureMetadataOutput()
     private let queue = DispatchQueue(label: "glint.faces")
     private let report: @Sendable ([CGRect]) -> Void
-    private var lastCount = 0          // only touched on `queue`
-    private var lastTime: Double = 0   // only touched on `queue`
-
-    static let interval = 0.5
+    private var pacer = FaceReportPacer()   // only touched on `queue`
 
     init(report: @escaping @Sendable ([CGRect]) -> Void) {
         self.report = report
@@ -30,10 +27,22 @@ final class FaceDetector: NSObject, AVCaptureMetadataOutputObjectsDelegate {
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
                         from connection: AVCaptureConnection) {
         let faces = metadataObjects.filter { $0.type == .face }.map(\.bounds)
-        let now = CFAbsoluteTimeGetCurrent()
-        guard faces.count != lastCount || now - lastTime >= Self.interval else { return }
-        lastCount = faces.count
+        if pacer.shouldReport(count: faces.count, now: CFAbsoluteTimeGetCurrent()) { report(faces) }
+    }
+}
+
+/// When to pass the camera's faces on: at once when their number changes (including to none, which the camera
+/// says only once), otherwise at most every `interval`, which is enough to follow a face across the picture.
+struct FaceReportPacer: Sendable {
+    static let interval = 0.5
+
+    private var lastCount = 0
+    private var lastTime = -Double.infinity
+
+    mutating func shouldReport(count: Int, now: Double) -> Bool {
+        guard count != lastCount || now - lastTime >= Self.interval else { return false }
+        lastCount = count
         lastTime = now
-        report(faces)
+        return true
     }
 }

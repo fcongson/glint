@@ -29,5 +29,6 @@ struct SavedSettingsTests {
         let loaded = try #require(SavedSettings.load(from: defaults))
         #expect(loaded.isHistogramEnabled == true)
         #expect(loaded.manual == nil)
+        #expect(loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil && loaded.isLevelEnabled == nil)
     }
 }

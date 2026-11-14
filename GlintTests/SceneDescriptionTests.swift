@@ -99,4 +99,18 @@ struct SceneDescriptionTests {
         #expect(speech.offer(key: "right", text: "Tilted right, 4 degrees", now: 0) != nil)
         #expect(speech.offer(key: "right", text: "Tilted right, 9 degrees", now: 60) == nil)
     }
+
+    @Test func faceReportsArePacedButACountChangeIsImmediate() {
+        var pacer = FaceReportPacer()
+        let reports: [(count: Int, at: Double)] = [
+            (1, 10),      // a face
+            (1, 10.2),    // the same face, too soon
+            (2, 10.3),    // someone joined
+            (0, 10.35),   // everyone left: the camera only says so once
+            (0, 10.4),
+            (0, 10.35 + FaceReportPacer.interval),
+        ]
+        let passed = reports.map { pacer.shouldReport(count: $0.count, now: $0.at) }
+        #expect(passed == [true, false, true, true, false, true])
+    }
 }

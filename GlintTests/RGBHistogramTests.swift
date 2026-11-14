@@ -1,4 +1,5 @@
 import CoreVideo
+import Foundation
 import Testing
 @testable import Glint
 
@@ -82,5 +83,32 @@ struct RGBHistogramTests {
         // Out-of-range colours are clamped rather than wrapping round.
         let beyond = YCbCrMatrix.rec709.rgb(y: 250, cb: 255, cr: 255)
         #expect(beyond.red == 255 && beyond.blue == 255)
+    }
+
+    /// A frame with no chroma plane still gives the luma histogram.
+    @Test func aLumaOnlyBufferHasNoChannels() throws {
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(nil, 32, 32, kCVPixelFormatType_OneComponent8, nil, &buffer)
+        let grey = try #require(buffer)
+        CVPixelBufferLockBaseAddress(grey, [])
+        memset(CVPixelBufferGetBaseAddress(grey), 128, CVPixelBufferGetDataSize(grey))
+        CVPixelBufferUnlockBaseAddress(grey, [])
+        // One-plane buffers report no planes at all, so there is nothing to read: no histogram, and no crash.
+        #expect(Histogram(lumaOf: grey, rgb: true) == nil)
+    }
+
+    @MainActor
+    @Test func theModelShowsAndClearsTheChannels() throws {
+        let model = HistogramModel()
+        model.show(try #require(Histogram(lumaOf: pixelBuffer(y: 128, cb: 128, cr: 128), rgb: true)))
+        #expect(model.channels != nil && !model.bins.isEmpty)
+        model.show(try #require(Histogram(lumaOf: pixelBuffer(y: 128, cb: 128, cr: 128))))
+        #expect(model.channels == nil)   // back to Luma in SET
+        model.clear()
+        #expect(model.bins.isEmpty && model.channels == nil)
+    }
+
+    @Test func styleTitles() {
+        #expect(HistogramStyle.allCases.map(\.title) == ["Luma", "RGB"])
     }
 }
