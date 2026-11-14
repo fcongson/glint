@@ -12,8 +12,10 @@ enum MediaLibrary {
         return f
     }()
 
+    /// Where the app's own copies go: Documents, or on the Lock Screen the capture session's folder, which Glint
+    /// moves into Documents the next time it's opened (see `LockScreenCaptures`).
     private static var documentsDirectory: URL? {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        LockScreenCaptures.sessionDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
     }
 
     /// The capture ID keeps file names unique when several shots land in the same second.

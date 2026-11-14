@@ -37,7 +37,9 @@ struct ContentView: View {
         // A long take, or one on a tripod, mustn't end because the phone locked itself. Only while recording:
         // the rest of the time the screen sleeps as usual, which is what saves the battery.
         .onChange(of: cam.isRecording) { _, isRecording in
+            #if !LOCKED_CAPTURE   // the Lock Screen extension has no application to ask
             UIApplication.shared.isIdleTimerDisabled = isRecording
+            #endif
         }
         .trackingDeviceAngle($deviceAngle)
     }

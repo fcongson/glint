@@ -191,7 +191,12 @@ final class CameraController {
         hasStarted = true
         startTimer("launch")
         startTimer("outputs")
+        #if !LOCKED_CAPTURE   // location permission belongs to the app; Lock Screen shots are saved untagged
         locationProvider.start()
+        if #available(iOS 18.0, *) {
+            Task.detached(priority: .utility) { await LockScreenCaptures.collect() }
+        }
+        #endif
         Task {
             for await event in capture.events { handle(event) }
         }
