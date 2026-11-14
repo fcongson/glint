@@ -10,7 +10,12 @@ struct GlintControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(action: GlintCaptureIntent()) {
-                Label("Glint", systemImage: "camera.aperture")
+                Label {
+                    Text("Glint")
+                } icon: {
+                    Image("GlintControlIcon")
+                        .renderingMode(.template)
+                }
             }
         }
         .displayName("Glint")
