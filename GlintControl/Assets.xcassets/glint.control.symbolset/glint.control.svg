@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--Custom symbol for the Glint control, redrawn from the Lock Screen icon. Template version 3.0. A control can only
+    draw SF Symbols and custom symbols, not bitmap images. One weight (Regular) at the three sizes, all the same shape:
+    the icon has one weight. Drawn 1.5x the size of a plain circle symbol, so it fills its button like the others. -->
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="3300" height="2200">
+ <g id="Notes">
+  <rect height="2200" id="artboard" style="fill:white;opacity:1" width="3300" x="0" y="0"/>
+  <line style="fill:none;stroke:black;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="292" y2="292"/>
+  <text style="stroke:none;fill:black;font-family:sans-serif;font-size:13;font-weight:bold;" transform="matrix(1 0 0 1 263 322)">Weight/Scale Variations</text>
+ </g>
+ <g id="Guides">
+  <line id="Baseline-S" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="696" y2="696"/>
+  <line id="Capline-S" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="625.5409999999999" y2="625.5409999999999"/>
+  <line id="left-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1406" x2="1406" y1="586" y2="736"/>
+  <line id="right-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1538.50" x2="1538.50" y1="586" y2="736"/>
+  <line id="Baseline-M" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1126" y2="1126"/>
+  <line id="Capline-M" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1055.541" y2="1055.541"/>
+  <line id="left-margin-Regular-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1406" x2="1406" y1="1016" y2="1166"/>
+  <line id="right-margin-Regular-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1538.50" x2="1538.50" y1="1016" y2="1166"/>
+  <line id="Baseline-L" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1556" y2="1556"/>
+  <line id="Capline-L" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1485.541" y2="1485.541"/>
+  <line id="left-margin-Regular-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1406" x2="1406" y1="1446" y2="1596"/>
+  <line id="right-margin-Regular-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1538.50" x2="1538.50" y1="1446" y2="1596"/>
+ </g>
+ <g id="Symbols">
+  <g id="Regular-S" transform="matrix(1 0 0 1 1406 696)">
+   <path d="M4.00 -35.25A62.25 62.25 0 1 1 128.50 -35.25A62.25 62.25 0 1 1 4.00 -35.25ZM16.97 -35.25A49.28 49.28 0 1 0 115.53 -35.25A49.28 49.28 0 1 0 16.97 -35.25ZM93.05 -35.25L79.65 -12.04L52.85 -12.04L39.45 -35.25L52.85 -58.46L79.65 -58.46ZM87.00 -35.25L76.62 -53.22L55.87 -53.22L45.50 -35.25L55.88 -17.28L76.62 -17.28ZM39.45 -68.10A8.65 8.65 0 1 1 56.74 -68.10A8.65 8.65 0 1 1 39.45 -68.10ZM81.81 -4.99A5.19 5.19 0 1 1 92.19 -4.99A5.19 5.19 0 1 1 81.81 -4.99Z"/>
+  </g>
+  <g id="Regular-M" transform="matrix(1 0 0 1 1406 1126)">
+   <path d="M4.00 -35.25A62.25 62.25 0 1 1 128.50 -35.25A62.25 62.25 0 1 1 4.00 -35.25ZM16.97 -35.25A49.28 49.28 0 1 0 115.53 -35.25A49.28 49.28 0 1 0 16.97 -35.25ZM93.05 -35.25L79.65 -12.04L52.85 -12.04L39.45 -35.25L52.85 -58.46L79.65 -58.46ZM87.00 -35.25L76.62 -53.22L55.87 -53.22L45.50 -35.25L55.88 -17.28L76.62 -17.28ZM39.45 -68.10A8.65 8.65 0 1 1 56.74 -68.10A8.65 8.65 0 1 1 39.45 -68.10ZM81.81 -4.99A5.19 5.19 0 1 1 92.19 -4.99A5.19 5.19 0 1 1 81.81 -4.99Z"/>
+  </g>
+  <g id="Regular-L" transform="matrix(1 0 0 1 1406 1556)">
+   <path d="M4.00 -35.25A62.25 62.25 0 1 1 128.50 -35.25A62.25 62.25 0 1 1 4.00 -35.25ZM16.97 -35.25A49.28 49.28 0 1 0 115.53 -35.25A49.28 49.28 0 1 0 16.97 -35.25ZM93.05 -35.25L79.65 -12.04L52.85 -12.04L39.45 -35.25L52.85 -58.46L79.65 -58.46ZM87.00 -35.25L76.62 -53.22L55.87 -53.22L45.50 -35.25L55.88 -17.28L76.62 -17.28ZM39.45 -68.10A8.65 8.65 0 1 1 56.74 -68.10A8.65 8.65 0 1 1 39.45 -68.10ZM81.81 -4.99A5.19 5.19 0 1 1 92.19 -4.99A5.19 5.19 0 1 1 81.81 -4.99Z"/>
+  </g>
+ </g>
+</svg>
