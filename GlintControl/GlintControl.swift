@@ -10,12 +10,10 @@ struct GlintControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(action: GlintCaptureIntent()) {
-                Label {
-                    Text("Glint")
-                } icon: {
-                    Image("GlintControlIcon")
-                        .renderingMode(.template)
-                }
+                // A control is drawn by the system, which only accepts SF Symbols and custom symbols (a bitmap
+                // image shows as a question mark). glint.control is the app's icon redrawn as a custom symbol, in
+                // this extension's asset catalog.
+                Label("Glint", image: "glint.control")
             }
         }
         .displayName("Glint")
