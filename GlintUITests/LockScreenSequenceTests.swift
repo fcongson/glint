@@ -138,8 +138,8 @@ final class LockScreenSequenceTests: XCTestCase {
     /// leave test photos behind.
     private func capture(file: String, aspect: String) async throws -> (width: Int, height: Int) {
         let allow = addUIInterruptionMonitor(withDescription: "Photos access") { alert in
-            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] where alert.buttons[label].exists {
-                alert.buttons[label].tap()
+            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] where alert.buttons[label].firstMatch.exists {
+                alert.buttons[label].firstMatch.tap()
                 return true
             }
             return false
@@ -203,5 +203,68 @@ final class LockScreenSequenceTests: XCTestCase {
 
         let raw = try await capture(file: "RAW", aspect: "Square")
         XCTAssertEqual(ratio(raw), 4.0 / 3, accuracy: 0.01, "RAW came out \(raw.width) x \(raw.height), not full sensor")
+    }
+
+    /// Review shows photos from before this launch, and deleting one there deletes it from Photos. The photo is taken,
+    /// the app quit and opened again, and the photo deleted from review, so it's found there only by being on the
+    /// list of what Glint saved. Whatever happens it's deleted at the end.
+    func testReviewShowsEarlierPhotosAndDeletingThereDeletesFromPhotos() async throws {
+        let allow = addUIInterruptionMonitor(withDescription: "Photos access") { alert in
+            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] where alert.buttons[label].firstMatch.exists {
+                alert.buttons[label].firstMatch.tap()
+                return true
+            }
+            return false
+        }
+        defer { removeUIInterruptionMonitor(allow) }
+
+        launchApp()
+        app.tap()
+        openSettings()
+        choose("HEIC")
+        app.buttons["Done"].tap()
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        try XCTSkipUnless(status == .authorized, "The tests need access to Photos")
+        let before = photoIDs()
+        app.buttons["Take photo"].tap()
+        var taken: String?
+        for _ in 0..<40 {
+            taken = photoIDs().subtracting(before).first
+            if taken != nil { break }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        let id = try XCTUnwrap(taken, "no new photo reached Photos within 20 seconds")
+        sleep(1)   // the log is written once the save has finished
+        defer { if photoIDs().contains(id) { Task.detached { try? await Self.deletePhoto(id: id) } } }
+
+        app.terminate()
+        launchApp()
+        app.buttons["Review photos"].tap()
+        // The first time, Photos asks to let Glint read it; tapping the screen would close review, so answer it directly.
+        let prompt = springboard.alerts.firstMatch
+        if prompt.waitForExistence(timeout: 3) {
+            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] where prompt.buttons[label].firstMatch.exists {
+                prompt.buttons[label].firstMatch.tap()
+                break
+            }
+        }
+        let trash = app.buttons["Delete photo"]
+        if !trash.waitForExistence(timeout: 15) {
+            XCTFail("review didn't open with a photo from before this launch. The app shows:\n\(app.debugDescription)\nSpringboard alerts:\n\(springboard.alerts.debugDescription)")
+        }
+        trash.tap()
+        let confirm = springboard.alerts.firstMatch
+        if confirm.waitForExistence(timeout: 10) {
+            for label in ["Delete", "Delete Photo"] where confirm.buttons[label].exists {
+                confirm.buttons[label].tap()
+                break
+            }
+        }
+        var gone = false
+        for _ in 0..<20 {
+            if !photoIDs().contains(id) { gone = true; break }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        XCTAssertTrue(gone, "the photo deleted in review is still in Photos")
     }
 }
