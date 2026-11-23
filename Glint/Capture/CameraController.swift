@@ -1079,7 +1079,7 @@ final class CameraController {
     }
 
     /// For work running off the main actor (e.g. `MediaLibrary`) to report back through `post`.
-    private nonisolated var statusReporter: @Sendable (String) -> Void {
+    nonisolated private var statusReporter: @Sendable (String) -> Void {
         { [weak self] message in Task { @MainActor in self?.post(message) } }
     }
 }

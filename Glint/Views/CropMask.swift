@@ -33,13 +33,13 @@ private struct FrameCorners: Shape {
     func path(in _: CGRect) -> Path {
         var p = Path()
         let r = rect
-        p.move(to: CGPoint(x: r.minX, y: r.minY + length)); p.addLine(to: CGPoint(x: r.minX, y: r.minY));
+        p.move(to: CGPoint(x: r.minX, y: r.minY + length)); p.addLine(to: CGPoint(x: r.minX, y: r.minY))
         p.addLine(to: CGPoint(x: r.minX + length, y: r.minY))
-        p.move(to: CGPoint(x: r.maxX - length, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY));
+        p.move(to: CGPoint(x: r.maxX - length, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
         p.addLine(to: CGPoint(x: r.maxX, y: r.minY + length))
-        p.move(to: CGPoint(x: r.maxX, y: r.maxY - length)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY));
+        p.move(to: CGPoint(x: r.maxX, y: r.maxY - length)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
         p.addLine(to: CGPoint(x: r.maxX - length, y: r.maxY))
-        p.move(to: CGPoint(x: r.minX + length, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY));
+        p.move(to: CGPoint(x: r.minX + length, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
         p.addLine(to: CGPoint(x: r.minX, y: r.maxY - length))
         return p
     }

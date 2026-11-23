@@ -210,7 +210,7 @@ extension Color {
 extension Angle {
     /// True at ±90° (and 270°…): the content's width now runs along the screen's height.
     /// `rotationEffect` doesn't change layout, so rotated views need their frame swapped by hand.
-    var isQuarterTurn: Bool { Int((degrees / 90).rounded()) % 2 != 0 }
+    var isQuarterTurn: Bool { !Int((degrees / 90).rounded()).isMultiple(of: 2) }
 }
 
 extension View {

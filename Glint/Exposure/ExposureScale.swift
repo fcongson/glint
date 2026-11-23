@@ -22,7 +22,7 @@ enum ExposureScale {
     static let exposureBiasStops: [Float] = (-9...9).map { Float($0) / 3 }
 
     /// Whole stops of compensation (−3, −2 … +3), counting from the first.
-    static func isFullStopBias(index: Int) -> Bool { index % 3 == 0 }
+    static func isFullStopBias(index: Int) -> Bool { index.isMultiple(of: 3) }
 
     /// The ISO stops within a lens's range. Never empty: falls back to the minimum if no conventional stop fits.
     static func isoStops(min: Float, max: Float) -> [Float] {
@@ -31,7 +31,7 @@ enum ExposureScale {
     }
 
     /// The series starts on a full stop (1/8) with three steps per stop.
-    static func isFullStopShutter(index: Int) -> Bool { index % 3 == 0 }
+    static func isFullStopShutter(index: Int) -> Bool { index.isMultiple(of: 3) }
 
     /// 50, 100, 200, 400 …
     static func isFullStopISO(_ iso: Float) -> Bool {
@@ -40,7 +40,7 @@ enum ExposureScale {
     }
 
     /// Every 1000K.
-    static func isMajorWhiteBalance(_ kelvin: Float) -> Bool { Int(kelvin) % 1000 == 0 }
+    static func isMajorWhiteBalance(_ kelvin: Float) -> Bool { Int(kelvin).isMultiple(of: 1000) }
 
     /// Stops are ascending. A value exactly half-way between two stops goes to the higher one, like ordinary rounding.
     static func nearestIndex<T: BinaryFloatingPoint>(of value: T, in stops: [T]) -> Int {

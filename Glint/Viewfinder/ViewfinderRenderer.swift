@@ -199,7 +199,8 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let outlines = settings.outlines && !lock.withLock({ analysisPaused })
         let interval = lock.withLock { analysisInterval }
         frameIndex &+= 1
-        let analyse = outlines && (interval == 1 || frameIndex % interval == 0)  // otherwise reuse the last outlines
+        // Otherwise reuse the last outlines.
+        let analyse = outlines && (interval == 1 || frameIndex.isMultiple(of: interval))
         let level = outlines ? prepare(sensitivity, mode: mode) : nil
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),

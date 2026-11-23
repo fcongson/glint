@@ -113,7 +113,9 @@
         /// Deletes a photo from Photos, where iOS asks for confirmation first, and then Glint's own copy of it in
         /// Documents. False if it wasn't deleted (declined, or already gone). The photo stays in Recently Deleted.
         static func delete(assetID: String, log: SavedPhotoLog? = .shared) async -> Bool {
-            guard PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).count > 0 else { return false }
+            guard PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject != nil else {
+                return false
+            }
             do {
                 try await PHPhotoLibrary.shared().performChanges {
                     PHAssetChangeRequest.deleteAssets(

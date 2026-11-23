@@ -121,7 +121,7 @@ final class LockScreenSequenceTests: XCTestCase {
     // MARK: A captured photo
 
     /// Photos calls the change block on its own queue, so it can't be written inside this main-actor class.
-    private nonisolated static func deletePhoto(id: String) async throws {
+    nonisolated private static func deletePhoto(id: String) async throws {
         try await PHPhotoLibrary.shared().performChanges {
             let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
             PHAssetChangeRequest.deleteAssets(assets)

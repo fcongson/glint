@@ -16,7 +16,7 @@ struct HistogramContainer: View {
 
 struct HistogramView: View {
     let bins: [Float]
-    var channels: RGBBins? = nil  // red, green and blue instead of brightness
+    var channels: RGBBins?  // red, green and blue instead of brightness
     let clipsHighlights: Bool  // decided by Histogram; the view only picks colours
     let clipsShadows: Bool
 

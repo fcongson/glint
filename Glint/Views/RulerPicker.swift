@@ -16,7 +16,7 @@ struct RulerPicker: View {
     init(
         count: Int,
         index: Binding<Int>,
-        isMajor: @escaping (Int) -> Bool = { $0 % 3 == 0 },
+        isMajor: @escaping (Int) -> Bool = { $0.isMultiple(of: 3) },
         label: String,
         valueText: String
     ) {

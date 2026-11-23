@@ -7,16 +7,16 @@ struct CameraPreview: UIViewRepresentable {
     /// What a touch on the viewfinder does, for VoiceOver.
     var hint = "Touch the viewfinder to set the focus point"
     /// (device point 0...1, point in the preview view's coordinates, the view's size)
-    var onTap: ((CGPoint, CGPoint, CGSize) -> Void)? = nil
+    var onTap: ((CGPoint, CGPoint, CGSize) -> Void)?
     /// A long press, with the same three values: AE/AF lock.
-    var onLongPress: ((CGPoint, CGPoint, CGSize) -> Void)? = nil
+    var onLongPress: ((CGPoint, CGPoint, CGSize) -> Void)?
     /// A volume button or Camera Control was pressed and let go.
-    var onCaptureButton: (() -> Void)? = nil
-    var onLayerReady: ((AVCaptureVideoPreviewLayer) -> Void)? = nil
+    var onCaptureButton: (() -> Void)?
+    var onLayerReady: ((AVCaptureVideoPreviewLayer) -> Void)?
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-        var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        var previewLayer: AVCaptureVideoPreviewLayer { unsafeDowncast(layer, to: AVCaptureVideoPreviewLayer.self) }
     }
 
     @MainActor

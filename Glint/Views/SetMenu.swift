@@ -275,7 +275,7 @@ private struct SettingRow<Value: Hashable>: View {
     let options: [(title: String, value: Value)]
     let selection: Value
     let onSelect: (Value) -> Void
-    var spoken: ((Value) -> String)? = nil
+    var spoken: ((Value) -> String)?
     /// False greys a choice out: what the current lens can't record, or anything that can't change right now.
     var isAvailable: (Value) -> Bool = { _ in true }
 

@@ -135,7 +135,7 @@ struct FocusPeakingTests {
     @Test func shrinkingAveragesBlocks() throws {
         // 4100 wide shrinks by 2; each 2 × 2 block of a checkerboard averages to 127 and is flat: no detail at all.
         let renderer = try #require(ViewfinderRenderer.make())
-        let buffer = try frame(width: 4100, height: 12) { x, y in (x + y) % 2 == 0 ? 255 : 0 }
+        let buffer = try frame(width: 4100, height: 12) { x, y in (x + y).isMultiple(of: 2) ? 255 : 0 }
         let a = try #require(renderer.analyse(buffer, level: nil))
         #expect(a.width == 2050 && a.height == 6)
         #expect(a.mean < 0.01)
