@@ -11,6 +11,8 @@ Run `tools/check` before pushing. CI runs `tools/check --fast` only, because Git
 - Enable the hook once per clone: `git config core.hooksPath .githooks`.
 - Needs `brew install swiftlint`. swift-format comes with Xcode.
 
+- `tools/dead-code`: finds unused code with Periphery (`brew install periphery`). Local only: it needs a full build. `.periphery-baseline.json` holds findings that are false positives (SwiftUI `$` bindings, App Intent metadata); don't add to it without checking the code really is used.
+
 Warnings are build errors. Formatting is swift-format's job (`.swift-format`); SwiftLint (`.swiftlint.yml`) checks correctness. `.swiftlint-baseline.json` holds the existing size and complexity findings: don't add to it. Shrink it when you touch those functions.
 
 ## Conventions
