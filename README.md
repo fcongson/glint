@@ -7,138 +7,77 @@
 A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-frame fusion, gives you manual control of exposure and white balance, and records video with stabilization off. Captures are saved to Photos and to the app's Documents folder (Files > On My iPhone > Glint). Only the Photos copy carries the location tag, and the Documents copies are left out of iCloud and computer backups (Photos has its own).
 
 ## Features
-- **RAW (DNG) stills:** Bayer RAW, not Apple ProRAW.
-- **Photo format:** in SET, or tap the format shown in the top bar. FILE is RAW (the default), HEIC or RAW+HEIC; ASPECT is 4:3 (the full sensor), 3:2, 1:1 or 16:9. Other ratios dim the viewfinder outside the crop, with bright-line corners. The crop is applied to the HEIC when it's developed; a DNG always keeps the full sensor, so with FILE on RAW the ASPECT row is greyed out at 4:3 and nothing is masked (your choice comes back when you pick HEIC or RAW+HEIC). RAW+HEIC saves both files to Documents and one Photos asset (the HEIC, with the DNG as its RAW alternate).
-- **Neutral HEIC:** still shoots Bayer RAW, then develops it into a full-resolution HEIC with noise reduction, sharpening, contrast, detail, moire and boost turned off, so the result matches the DNG. In HEIC the developed file replaces the DNG; in RAW+HEIC both are kept. If developing fails the DNG is kept; if Bayer RAW isn't available the camera's own HEIC is saved (fusion off).
-- **AUTO | MANUAL:** a switch beside the shutter. In MANUAL, tap ISO, SHUTTER or WB to set it on one camera-style ruler (1/3-stop steps; shutter 1/8 to 1/8000; white balance in Kelvin). Exposure and white balance are locked. Only the latest setting is sent while the camera applies the last one, so a fast slide (say 1/8000 to 1/8) goes straight to where you stop. AUTO hides the manual exposure controls (focus stays, see below); switching back restores your manual settings, including white balance and which settings are on A.
-- **Per-setting A:** in MANUAL, the A at the end of the ruler hands the selected setting to the camera, like the A on a Leica dial; its readout gets a red A and shows what the camera chose. ISO on auto gives shutter priority, shutter on auto gives ISO priority, both give program. AVFoundation has no priority modes, so Glint corrects the auto setting from the meter. While ISO or shutter is on auto, the ruler sets exposure compensation (−3 to +3 EV in 1/3 stops). Turning an A off picks up from the camera's choice, so the picture doesn't jump.
-- **Manual focus:** separate from AUTO and MANUAL, which are about exposure, as a camera's AF/MF switch is separate from its mode dial. A rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. The two labels are presets: tap ∞ or NEAR to send the lens straight to that end (the far stop is as near to infinity as the lens position goes; like the rest of the rail it isn't a calibrated distance). Touching the rail or turning AF off takes over from wherever autofocus left the lens, so the picture doesn't jump; AF hands focus back to autofocus (in manual focus a tap on the viewfinder moves the magnifier instead, see below). The rail fades when idle (it stays visible with VoiceOver, where it's adjustable by swiping up and down).
-- **AE/AF lock:** touch and hold the viewfinder to focus and meter once at that point and hold both, like a camera's AE-L/AF-L button, so recomposing or a changing scene doesn't move them. An amber AE/AF LOCK label and the focus box stay up while it's held; a tap on the viewfinder releases it. Only what the camera is choosing is held: with manual focus it's AE LOCK alone, and with ISO and shutter both set by hand it's AF LOCK alone (in shutter or ISO priority, holding exposure stops Glint's correction from the meter). Changing lens, mode or exposure settings releases it, and so does the end of a recording.
-- **Focus peaking:** while focusing by hand (AF off), as on a camera in MF, a PK switch in the tool row (on by default) outlines the sharpest fine detail. SET has its mode (Standard, Sweep), sensitivity (Low, Medium, High), colour (amber, red, white, blue, so the outlines stay visible against any subject and for different colour vision) and line weight (Bold, Fine). With VoiceOver, swipe up or down on PK for sensitivity.
-- **How peaking works:** as on a camera, the outlines are drawn into the viewfinder image itself, so they can't lag the picture: while peaking is shown, you're magnifying or zebras are on, Glint draws the viewfinder on the GPU from the camera's video frames, each with its own outlines; otherwise it's the system preview, which costs nothing extra. Frames are analysed at full resolution (48 MP at half), so the test matches what you'll see zoomed into the photo: lightly blurred, high-passed with a Laplacian (which responds to fine detail and falls away fast as edges blur), averaged over 3 × 3 so edges come out as lines rather than dots, and marked above the frame's mean plus 4, 3 or 2 standard deviations (and at least 2.5× the mean, which keeps noise out of plain frames), with the threshold eased over frames so it doesn't flicker. Stray single pixels are dropped. Like any camera's peaking it marks the sharpest detail rather than focus as such, so with a phone's deep depth of field a lot can be marked at once; it's most telling close up. Outlines pause from the shutter press until the photo is developed and its review image drawn, so peaking doesn't slow either down.
-- **Sweep peaking:** standard peaking favours contrast: a bold edge that's slightly soft can be outlined while fine, low-contrast detail that's perfectly sharp isn't. Sweep mode instead compares each 16 × 16 tile of the picture with itself as you focus (the idea behind contrast-detect autofocus) and outlines the detail in tiles that are at their sharpest now, at any contrast; tiles past their sharpest get no outlines. Rack focus past your subject and back. Until a tile has changed with focus it gets standard peaking; sharpness is taken relative to brightness, so exposure changes don't count; and it starts over when the picture moves.
-- **Focus magnifier:** as on a camera, the viewfinder punches in on the focus point to check focus by eye. While MAG is on (the default), touching the focus rail magnifies, and it zooms back out a second after you let go, like Sony's MF Assist; with VoiceOver, adjusting the rail does the same. MAG off, the rail never magnifies. It starts at 1:1 (one frame pixel per screen pixel, about 2.6× on a 12 MP frame); tap while magnified for 2:1. In manual focus a tap on the viewfinder moves the magnifier's frame instead of switching back to autofocus (AF does that); in autofocus it follows the tapped focus point. It's drawn by the GPU viewfinder from the full-resolution frame, with peaking outlines if they're on.
-- **Responsiveness:** controls that change many times a second (the meter, the focus rail under autofocus, the ISO and shutter the camera picks on A, the microphone level) are separate views that read only what they show, so a meter tick redraws the meter rather than the whole screen. The photo output prepares its buffers for the next shot after launch and after each lens, format or mode change, rather than after the shutter press. On iOS 26 and later, launch brings up the preview first and starts the rest (the photo output, the frame output for HIST, ZEB and peaking, and in PHOTO the movie output) just after its first frame, with the other controls fading in once the camera is running; the shutter is there from the start, and responsive capture buffers a shot taken before the photo output is ready (where the lens supports it), and lets you take the next shot while the last is still processing. In VIDEO the movie output starts with the session, so the first take (notably ProRes RAW) isn't missing its encoder. Debug builds can show timings over the viewfinder (DEBUG INFO in SET's DEVELOPER section, off by default; release builds don't have it): launch to the preview running and to every output having started, a lens or PHOTO · VIDEO tap to the change being live, closing review to the camera running again, and for each shot the capture, the thumbnail, the develop and the review render. At launch they also say whether responsive capture is on.
-- **Heat and load:** Glint watches the camera's system pressure and gives things up in order, as Apple recommends: at *fair*, focus peaking analyses every other frame; at *serious*, peaking and zebras switch off (the viewfinder goes back to the system preview) and come back when the phone cools; at *critical*, PHOTO's preview drops to 15 fps. VIDEO keeps its frame rate. A video format the camera hardware can't sustain gets a warning.
-- **Thumbnail:** each capture brings a small preview image with it, so the thumbnail appears as soon as the shot is taken rather than after the RAW decode or HEIC develop. It's the camera's processed rendering, so for a moment it can look brighter or punchier than the review image that replaces it; the saved files are unchanged.
-- **First shot:** the first RAW decode after launch is slow while Core Image prepares its RAW pipeline, so Glint decodes a tiny bundled DNG (`Resources/WarmUp.dng`, 64 × 64) a second after launch; the first real shot then reviews and develops as quickly as the rest.
-- **Layout:** nothing covers the picture but the AF switch and focus rail on its right edge, where the thumb reaches them while you look at the subject (and the grid and level, if you turn them on). Everything else is in a tool row under it, grouped by purpose as on a camera: HIST, ZEB · lenses · PK, MAG. Chips are a dark pill when off and amber when on, so they read over any scene. **SET** is the quick menu (like Fuji and Canon's Q or Sony's Fn) for what you set once a session, one row per setting with every choice on show: focus peaking (mode, sensitivity, colour, lines), viewfinder (histogram style, zebra level, grid, level, focus rail side), and the capture format first: in PHOTO the file type, aspect and flash, in VIDEO the video format and the light. Tap a choice and it applies. Held sideways, the controls stay put, as on a camera; only the focus rail moves, to the edge of the picture that's on your side (right by default, or left: FOCUS RAIL in SET), turned so ∞ is still up. The top bar has SET and the current format (as a plain readout, like a camera's info display) on the left of the Dynamic Island and the exposure meter on the right; tapping the format opens SET.
-- **Flash and light:** FLASH in SET's PHOTO rows is Off (the default), Auto or On; LIGHT in the VIDEO rows turns the same LED on as a steady light, lit whenever you're in VIDEO so exposure can be set with it, and it can be switched mid-recording. A small ⚡ after the format in the top bar (⚡A for auto) shows when the flash can fire or the light is on. The rows are greyed out on a lens with no flash. The flash setting is remembered; the light always starts off.
-- **Hardware buttons:** either volume button, and Camera Control on iPhones that have it, works the capture button: a photo in PHOTO, start and stop in VIDEO (iOS 17.2 and later). The buttons go back to their usual job behind the review screen.
-- **Lock Screen:** add the Glint control to one of the Lock Screen's two corner buttons (touch and hold the Lock Screen, Customise), to Control Centre or to the Action button, and it opens Glint's camera without unlocking (iOS 18 and later). It's the same camera screen, running as a capture extension built from the app's own source. Photos and video are saved to Photos straight away; the copies Glint keeps in Documents wait in the session's folder and are moved in the next time the app is opened. On the Lock Screen there are no location tags, and nothing can ask for a permission: allow the camera, microphone and Photos in the app first.
-- **Grid and level:** GRID in SET draws rule-of-thirds lines over the frame that will be kept (the crop for the chosen aspect, or video's 16:9), and LEVEL a horizon level in the middle of the picture: two marks fixed to the phone and a line that stays with the horizon, turning amber within a degree of level. It works held either way, and hides when the phone points too far up or down. Gravity is read only while the level is on (or VoiceOver is describing the picture), and not behind the review screen.
-- **RGB histogram:** HISTOGRAM in SET switches HIST between Luma and RGB: red, green and blue drawn over each other (white where all three overlap), which shows one colour clipping, a red flower or a blue sky, while brightness still looks safe. It's worked out from the same sampled frames, five times a second; the clipping warning is still judged from brightness and shows as a line down the edge.
-- **Zebras:** a ZEB switch in the tool row (off by default) puts diagonal black and white stripes over the parts of the picture at or above a brightness level, as on a camera: 100% (the default) shows what the viewfinder is clipping, and lower levels (95, 90, 80, 70%) help place highlights or skin. Levels are relative to where the frames' white actually is: the iPhone's processing puts clipped white at about 235 of 255, so Glint finds it from the clipping spike at the top of the histogram (an evenly lit bright surface spreads over several levels instead), and the histogram's clipping warning uses the same test. The level is remembered for each lens and format, so zebras are right from the first frame next time. The level is in SET; with VoiceOver, swipe up or down on ZEB. Drawn by the GPU viewfinder from screen-sized frames, so it costs much less than peaking, and HIST and ZEB switch on instantly (the frame output stays attached; only its frames are switched on and off). The viewfinder is processed video, so a RAW file keeps some highlight detail beyond what 100% shows.
-- **Spoken descriptions:** with VoiceOver on, Glint says what the camera sees, as the system Camera does: how many faces and where ("One face, centre", "Two faces, left", "close up"), and the horizon ("Level", "Tilted right, 4 degrees"). The camera hardware finds the faces; the detector is attached only while VoiceOver is running. Descriptions are spoken when they change, a few seconds apart at most, and follow how the phone is held, so left is your left.
-- **Remembered settings:** like a camera, Glint keeps its settings when it's closed: PHOTO or VIDEO, the photo and video formats, AUTO or MANUAL with your ISO, shutter, white balance and A choices, HIST, ZEB, PK and MAG, and everything in SET (except VIDEO's light). It starts on the main lens with autofocus, so the first frame is sharp.
-- **Battery:** the camera, location updates and the level's motion updates stop while the review screen is open (the camera not while recording). The microphone is attached only in VIDEO, so stills don't keep the audio system recording (or show the orange indicator); Glint asks for microphone access the first time you choose VIDEO, not at launch. The histogram, peaking and zebras are the only per-frame work Glint adds, and the GPU viewfinder runs only while peaking is shown (AF off), you're magnifying, or zebras are on (from screen-sized frames when they're alone). Low Power Mode turns all three off; turning one back on keeps it on, and they return when Low Power Mode ends.
-- **Interruptions and errors:** when the system takes the camera away (another app is using it, a call has the microphone, the phone is too hot) the viewfinder says why until it's back, and VoiceOver announces it. If the system's media services restart, Glint restarts the camera. The screen stays awake while recording, so a long take isn't ended by the phone locking. A recording that stops by itself (storage down to 500 MB, an interruption) says why and still saves what it has; one with no usable file is discarded with a message. Opening review straight after the shutter waits for that shot before stopping the camera. If camera access was refused, the viewfinder offers a button to Glint's page in Settings.
-- **Exposure meter:** Leica-style LEDs in the top bar (▶ under, ● on target, ◀ over) with the offset in stops, from the camera's own metering.
-- **PHOTO · VIDEO:** left of the shutter, under AUTO | MANUAL, like the photo/video collar under a Sony's mode dial; in VIDEO the shutter becomes the record button and the top bar shows the recording time and a microphone level meter. Neither switch can change mid-recording.
-- **Video format:** in VIDEO, SET's VIDEO rows (or tap the format, "4K 24 HEVC", in the top bar): RESOLUTION (4K, 1080p), FRAME RATE (24, 25, 30, 60), FORMAT (HEVC, ProRes, ProRes RAW), ENCODING (Standard, Apple Log with ProRes) and REC EXPOSURE, the exposure while recording (Adjustable, Locked). The format rows are greyed out during a recording, when the format can't change; LIGHT, under them, stays live. Choices the lens can't record are greyed out; ProRes needs a Pro iPhone and ProRes RAW an iPhone 17 Pro on iOS 26 (Apple recommends an external drive for it). The viewfinder shows the 16:9 frame. In MANUAL, shutter on A follows the 180° rule (1/48 at 24 fps), and no shutter is slower than a frame. White balance holds still while recording.
-- **Tone mapping:** video HDR is off and the whole frame gets one tone curve, so the viewfinder, histogram and zebras settle as soon as an exposure change lands, rather than easing into it over seconds. RAW stills aren't affected; video looks flatter and more literal.
-- **Lens switching:** all rear lenses, labelled by zoom factor (0.5x, 1x, 3x...), with a read-only aperture readout.
-- **Tap to focus** (in autofocus), lens buttons over the bottom of the viewfinder, a live histogram with clipping warnings (HIST chip, off by default), and a review thumbnail rendered from the saved DNG.
-- **Memory:** this session's review images are kept compressed and decoded only for the page on screen, and the GPU viewfinder's scratch textures are freed when it stops drawing or the camera stops. Review images are drawn one at a time, queued with the HEIC develops, so a burst doesn't decode several RAWs at once.
-- **Photo review:** swipe through this session's shots. An info card shows the capture date, camera and lens, format, resolution and file size, the exposure settings (ISO, shutter, aperture, focal length, EV, white balance), and where the photo was taken.
-- **Location tagging:** photos are tagged with where they were taken, so they show on the map in Photos. Glint uses the latest fix, or the system's cached one, only if it is under 5 minutes old and accurate to 300 m; otherwise the photo is saved untagged. Place names in review come from reverse geocoding and need a network connection. Location access is optional.
-- **Video:** stabilization off, saved to Photos and Documents.
+
+**Capture**
+- **RAW (DNG) stills:** Bayer RAW, not Apple ProRAW, with no multi-frame fusion. FILE in SET chooses RAW (the default), HEIC or RAW+HEIC; ASPECT chooses 4:3, 3:2, 1:1 or 16:9. A DNG always keeps the full sensor; the crop is applied to the HEIC.
+- **Neutral HEIC:** developed from the RAW with noise reduction, sharpening, contrast, detail, moire and boost off, so it matches the DNG. If developing fails the DNG is kept; if Bayer RAW isn't available the camera's own HEIC is saved (fusion off).
+- **AUTO | MANUAL:** in MANUAL, ISO, shutter and white balance are set on a camera-style ruler in 1/3-stop steps. The A at the end of the ruler hands one setting back to the camera, giving shutter priority, ISO priority or program; the ruler then sets exposure compensation.
+- **Manual focus:** a rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail takes over from where autofocus left the lens.
+- **AE/AF lock:** touch and hold the viewfinder to focus and meter once and hold both; a tap releases it.
+- **Lenses:** all rear lenses, labelled by zoom factor, with a read-only aperture readout.
+- **Flash and light:** FLASH in SET is Off (default), Auto or On for stills; LIGHT in VIDEO turns the same LED on as a steady light.
+- **Hardware buttons:** either volume button, and Camera Control where there is one, works as the capture button (iOS 17.2 and later).
+- **Lock Screen:** a Lock Screen, Control Centre or Action button control opens Glint's camera without unlocking (iOS 18 and later). Photos and video go to Photos at once; the Documents copies are moved in the next time the app opens. There are no location tags there, and permissions have to be granted in the app first.
+
+**Video**
+- **Formats:** in VIDEO, SET offers resolution (4K, 1080p), frame rate (24, 25, 30, 60), format (HEVC, ProRes, ProRes RAW) and encoding (Standard, Apple Log). Choices the lens can't record are greyed out. Stabilization is off and video HDR is off.
+- **Exposure while recording:** Adjustable or Locked. In MANUAL, shutter on A follows the 180° rule.
+
+**Viewfinder aids**
+- **Histogram:** HIST, Luma or RGB, with a clipping warning.
+- **Zebras:** ZEB marks areas at or above a level (100% by default), relative to where the frames' white actually is. The level is remembered per lens and format.
+- **Focus peaking:** PK outlines the sharpest detail while focusing by hand. Mode (Standard, Sweep), sensitivity, colour and line weight are in SET.
+- **Focus magnifier:** MAG punches in on the focus point while you touch the focus rail, and zooms back out a second after you let go.
+- **Grid and level:** GRID draws rule-of-thirds lines over the frame that will be kept; LEVEL shows a horizon line that turns amber within a degree of level.
+- **Exposure meter:** Leica-style LEDs in the top bar, with the offset in stops.
+
+**Review**
+- **Photo review:** swipe through every photo Glint has saved, with an info card (date, camera and lens, format, resolution, file size, exposure settings, place) and delete from review, which deletes from Photos.
+- **Location tagging:** photos are tagged with the latest fix only if it is under 5 minutes old and accurate to 300 m; otherwise they're saved untagged. Place names need a network connection. Location access is optional.
+- **Files:** captures are saved to Photos and to the app's Documents folder (Files > On My iPhone > Glint). Only the Photos copy carries the location tag, and the Documents copies are left out of iCloud and computer backups.
+
+**Behaviour**
+- **Remembered settings:** PHOTO or VIDEO, the formats, AUTO or MANUAL and its values, the viewfinder aids and everything in SET (except VIDEO's light) come back at launch. It starts on the main lens with autofocus.
+- **Heat and load:** Glint watches the camera's system pressure and gives things up in order: at *fair*, peaking analyses every other frame; at *serious*, peaking and zebras switch off; at *critical*, PHOTO's preview drops to 15 fps. Low Power Mode switches off the histogram, peaking and zebras.
+- **Interruptions:** when the system takes the camera away, the viewfinder says why until it's back. A recording that stops by itself still saves what it has.
+- **VoiceOver:** Glint describes faces and the horizon, and the focus rail, PK and ZEB are adjustable by swiping.
+- **Battery and memory:** the camera, location and motion updates stop behind the review screen; the microphone is attached only in VIDEO; review images are kept compressed.
 
 ## Project layout
 ```
 Glint.xcodeproj
-Shared/                        GlintCaptureIntent.swift, "open Glint's camera": in the app, the control and the capture extension
-GlintControl/                  the Lock Screen control (a widget extension)
-GlintCapture/                  the Lock Screen camera (a capture extension): Glint/ without GlintApp.swift, built with LOCKED_CAPTURE
-Glint/
-  App/
-    GlintApp.swift             app entry point
-    ContentView.swift          the camera screen: puts the top bar, viewfinder, tool row and capture controls together
-  Capture/                     the camera itself and the screen's state
-    CameraController.swift     observable state for the camera screen; sends changes to the session, handles its events
-    CaptureSession.swift       actor that owns the AVCaptureSession and the camera device
-    CaptureEvent.swift         what the session reports back: events, device info, a captured photo
-    CaptureDelegates.swift     the photo, recording and deferred-start delegates, which turn callbacks into events
-    CameraPreview.swift        preview layer, tap to focus, long press to lock, and the hardware capture buttons
-    Flash.swift                the flash setting for stills
-    ViewfinderLock.swift       what a long press holds: AE/AF lock
-    FaceDetector.swift         the faces the camera finds, for VoiceOver
-    Lens.swift                 lens model and zoom labels
-    Throttled.swift            rate-limits KVO updates (meter, lens position)
-    SystemPressure.swift       heat and load levels, and what Glint gives up at each
-    CameraInterruption.swift   why the system has taken the camera away, and what to say
-    SavedSettings.swift        the settings remembered between launches
-    DebugTimings.swift         the dev-only timing readout
-  Exposure/
-    ExposureScale.swift        ISO, shutter and WB stops
-    ExposureMeter.swift        meter reading, the focus rail's scale and its presets
-    AutoExposure.swift         per-setting auto, and the shutter/ISO priority correction
-    ExposureQueue.swift        custom exposure changes, one at a time, latest wins
-  Viewfinder/                  what's drawn from the preview frames: histogram, peaking, zebras, magnifier
-    FrameAnalyzer.swift        the video frames shared by the histogram and the GPU viewfinder
-    Histogram.swift            histogram and clipping, from a frame's luma; red, green and blue from its chroma
-    Level.swift                how far the phone is from level, from gravity
-    LevelSensor.swift          reads gravity while the level or VoiceOver wants it
-    WhiteLevelStore.swift      where clipped white sits, remembered per lens and format
-    ViewfinderRenderer.swift   the GPU viewfinder, with peaking outlines, magnifying and zebras, while any is in use
-    Viewfinder.metal           its shaders: blur, high-pass, smooth, mark, pool to screen size, draw, magnify and zebra stripes
-    FocusPeaking.swift         peaking settings (mode, sensitivity, colour, lines), the eased threshold, sweep tracking
-    Magnifier.swift            focus magnifier settings and geometry, and what the GPU viewfinder draws
-    Zebras.swift               zebra levels
-    ViewfinderAidPauses.swift  which of HIST, PK and ZEB Low Power Mode or heat switched off, to bring back after
-  Accessibility/
-    SceneDescription.swift     what VoiceOver says about the picture (faces, level), and how often
-  Photo/                       a photo after capture
-    CapturePlan.swift          decides DNG vs developed HEIC vs processed HEIC
-    PhotoProcessor.swift       a captured photo's develop, save and review image, in order
-    PhotoDeveloper.swift       the serial queue RAW develops and review renders run on, and the launch warm-up
-    ReviewImageRenderer.swift  DNG to HEIC, and review images (kept compressed, with a thumbnail)
-    PhotoInfo.swift            settings and capture details of a photo, and a reviewed shot
-    MediaLibrary.swift         saves photos and video to Documents and Photos
-    LockScreenCaptures.swift   the Documents copies of Lock Screen captures, moved in when the app next opens
-    LocationProvider.swift     location fixes for photo tagging, place names
-  Video/
-    VideoFormat.swift          video resolutions, frame rates, codecs, the 180° shutter and settling choices to what a lens supports
-    DeviceVideoFormats.swift   what a lens can record, and which device format a video choice needs
-    RecordingOutcome.swift     whether a finished recording is worth saving, and why it stopped
-  Views/
-    TopBar.swift               SET, the format readout, the meter; the recording time
-    CameraViewfinder.swift     the picture and everything on it
-    GPUViewfinder.swift        the Metal view the GPU viewfinder draws into
-    ToolRow.swift              HIST, ZEB · lenses · PK, MAG
-    CaptureControls.swift      MANUAL's ruler, the mode switches, shutter or record button, thumbnail
-    Controls.swift             chips, switches, readouts and the meter's LEDs
-    LiveControls.swift         the fast-updating controls, each reading only what it shows
-    (and)                      ruler picker, focus rail, SET menu, crop mask, grid, level,
-                               histogram, focus box, magnifier frame, camera access prompt, review screen, device
-                               angle tracking, settings text
-  Resources/WarmUp.dng         64 × 64 DNG decoded at launch to prepare RAW decoding
-  Assets.xcassets              app icon (light, dark, tinted) and accent color
-tools/make_warmup_dng.py       regenerates Resources/WarmUp.dng (needs tifffile)
-tools/make_control_symbol.py   regenerates the Lock Screen control's icon (a custom symbol) from the app icon's measurements
-GlintTests/                    Swift Testing coverage of the logic, and of the peaking shaders on synthetic frames
+Glint/            the app
+  App/            app entry point and the camera screen
+  Capture/        the camera session and the screen's state
+  Exposure/       ISO, shutter and white balance scales, the meter, auto-exposure
+  Viewfinder/     histogram, focus peaking, zebras, magnifier and the Metal viewfinder
+  Accessibility/  VoiceOver descriptions
+  Photo/          what happens to a photo after capture: develop, save, review, history
+  Video/          video formats and recording outcomes
+  Views/          SwiftUI views
+  Resources/      the DNG decoded at launch to prepare RAW decoding
+Shared/           the intent that opens Glint's camera, shared by the app and its extensions
+GlintControl/     the Lock Screen control (a widget extension)
+GlintCapture/     the Lock Screen camera (a capture extension): Glint/ without GlintApp.swift, built with LOCKED_CAPTURE
+GlintTests/       unit tests; these are the specification of the logic
+GlintUITests/     UI tests
+tools/            check script and generators for the bundled DNG and the control's icon
 ```
 
 ## Running it
-1. Open `Glint.xcodeproj` in Xcode.
+1. Open `Glint.xcodeproj` in Xcode (27 or later).
 2. Under Signing & Capabilities, choose your team for all three targets: Glint, GlintCapture and GlintControlExtension.
 3. Run on a real iPhone (iOS 17+). The Simulator has no camera. The volume buttons need iOS 17.2, and the Lock Screen control and camera iOS 18.
 4. Allow camera and Photos access when asked. Allow location too if you want photos tagged. Microphone access is asked for the first time you switch to VIDEO.
-5. For the Lock Screen: after that, touch and hold the Lock Screen, tap Customise and put Glint on one of the two corner buttons (or add it in Control Centre).
+5. For the Lock Screen: touch and hold the Lock Screen, tap Customise and put Glint on one of the two corner buttons (or add it in Control Centre).
 
 For performance testing, run from the Home Screen or use a Release build. Debug builds from Xcode (debugger plus Metal validation) make image work much slower.
 
-## Tests
-Run the `GlintTests` scheme (Cmd-U). The tests cover capture planning, exposure scales, the meter and focus scale, priority exposure, video formats, the histogram (including finding clipped white from its plateau), lenses, photo info, settings text, location freshness rules, camera interruptions, recording outcomes, the exposure queue, what Low Power Mode and heat pause and bring back, the device angle and focus rail side, the debug timings and the remembered white levels as pure logic, the flash setting, what an AE/AF lock holds, the focus presets, the grid's lines, the level (rotation and tilt from gravity, either way up), the RGB histogram (on synthetic colour frames, with each Y′CbCr matrix), the wording, placing and pacing of VoiceOver's descriptions and of the face reports behind them, moving Lock Screen captures into Documents, and that review images are kept compressed with a thumbnail of the right size. Focus peaking's tests run the real GPU shaders on synthetic frames (the Simulator's Metal is enough), including that outlines come out the same after the viewfinder's scratch textures are freed; sweep tracking, the magnifier's geometry and zebra levels are tested as logic, and the warm-up tests decode the bundled DNG, directly and through the developer's queue as a real shot does (on a device only: Core Image doesn't decode RAW in the Simulator, so run them on your iPhone after changing the DNG). None need a camera.
+## Checks and tests
+`tools/check` runs format, lint, build and the unit tests; `tools/check --fast` runs only format and lint. See `CLAUDE.md` for setup and conventions. In Xcode, run the `GlintTests` scheme (Cmd-U). The focus-peaking tests run the real GPU shaders on synthetic frames, which the Simulator's Metal is enough for.
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.
 - The viewfinder is processed video (drawn by the system, or by Glint while peaking, magnifying or zebras are on); only the saved DNG is true RAW. Use the histogram and review thumbnail as a guide, not as ground truth.
 - iPhone lenses have fixed apertures, so aperture is display-only.
 - Lens distortion correction is disabled only on lenses that allow it (mainly Ultra Wide).
-
-## Ideas
-- **Capture:** a 48MP RAW option and a 2x sensor-crop button, a self-timer, exposure bracketing, burst, and 10-bit HEIC.
-- **Video:** recording to external storage for ProRes, audio input selection and gain, and stabilisation as an option.
-- **Housekeeping:** a storage screen for the Documents copies, and a front camera.
-- **Composition:** a waveform beside the RGB histogram.
