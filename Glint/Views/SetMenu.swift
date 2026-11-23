@@ -194,8 +194,9 @@ struct SetMenu: View {
                        selection: cam.fileType, onSelect: { cam.setFileType($0) })
         case .aspect:
             SettingRow(tile: tile, options: AspectRatio.allCases.map { (title: SettingsText.aspect($0), value: $0) },
-                       selection: cam.aspect, onSelect: { cam.setAspect($0) },
-                       spoken: { SettingsText.aspectSpoken($0) })
+                       selection: cam.appliedAspect, onSelect: { cam.setAspect($0) },
+                       spoken: { SettingsText.aspectSpoken($0) },
+                       isAvailable: { _ in cam.canChooseAspect })   // RAW keeps the full sensor, so there's no crop to choose
         case .resolution:
             SettingRow(tile: tile, options: VideoResolution.allCases.map { (title: SettingsText.resolution($0), value: $0) },
                        selection: format.recordedResolution, onSelect: { r in updateVideo { $0.resolution = r } },

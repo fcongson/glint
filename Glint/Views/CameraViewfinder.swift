@@ -73,8 +73,8 @@ struct CameraViewfinder: View {
                 EmptyView()
             } else if cam.captureMode == .video {
                 CropMask(aspect: .sixteenNine)   // video is 16:9 from the 4:3 sensor
-            } else if !cam.aspect.isFullSensor {
-                CropMask(aspect: cam.aspect)
+            } else if !cam.appliedAspect.isFullSensor {
+                CropMask(aspect: cam.appliedAspect)
             }
         }
         .overlay {
@@ -168,7 +168,7 @@ struct CameraViewfinder: View {
 
     /// The frame that's kept: video's 16:9, or the photo aspect.
     private var frameAspect: AspectRatio {
-        cam.captureMode == .video ? .sixteenNine : cam.aspect
+        cam.captureMode == .video ? .sixteenNine : cam.appliedAspect
     }
 
     private var viewfinderHint: String {

@@ -389,6 +389,13 @@ final class CameraController {
 
     func setAspect(_ aspect: AspectRatio) { self.aspect = aspect }
 
+    /// The crop that will really be applied. A RAW photo is a DNG, which always keeps the full sensor, so while FILE
+    /// is RAW the chosen aspect is kept for later but does nothing (HEIC and RAW+HEIC crop the HEIC).
+    var appliedAspect: AspectRatio { fileType == .raw ? .fourThree : aspect }
+
+    /// Whether ASPECT can be changed, for SET to grey it out otherwise.
+    var canChooseAspect: Bool { fileType != .raw }
+
     /// Switch between manual exposure + locked white balance, and continuous auto.
     /// The first time into manual, white balance starts from whatever auto has chosen; after that, returning to
     /// manual restores your Kelvin setting, like ISO and shutter.
@@ -791,7 +798,7 @@ final class CameraController {
     func capturePhoto() {
         shutterPresses += 1
         photoProcessing(started: true)
-        let fileType = fileType, aspect = aspect, flash = flash.available(hasFlash: hasFlash)
+        let fileType = fileType, aspect = appliedAspect, flash = flash.available(hasFlash: hasFlash)
         let whiteBalance: WhiteBalanceSetting = manual && !auto.whiteBalance ? .kelvin(Int(whiteBalanceKelvin)) : .auto
         let requestedAt = CFAbsoluteTimeGetCurrent()
         capture.enqueue {

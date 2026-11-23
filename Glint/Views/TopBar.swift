@@ -34,7 +34,7 @@ struct TopBar: View {
         let photo = cam.captureMode == .photo
         let file = SettingsText.fileType(cam.fileType)
         let format = photo
-            ? "\(file) \(SettingsText.aspect(cam.aspect))"   // always both, so the readout doesn't change shape
+            ? "\(file) \(SettingsText.aspect(cam.appliedAspect))"   // always both, so the readout doesn't change shape
             : SettingsText.videoFormat(cam.videoFormat)
         // A flash mark after it while the flash will fire or the light is on, since SET is usually closed.
         let flash = photo ? cam.flash.available(hasFlash: cam.hasFlash)
@@ -52,7 +52,7 @@ struct TopBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(photo ? "Photo format" : "Video format")
-        .accessibilityValue((photo ? "\(file), \(SettingsText.aspectSpoken(cam.aspect))" : format)
+        .accessibilityValue((photo ? "\(file), \(SettingsText.aspectSpoken(cam.appliedAspect))" : format)
                             + SettingsText.flashSpoken(flash, isVideo: !photo))
         .accessibilityHint(photo ? "Opens Settings, where file type, aspect ratio and flash are"
                                  : "Opens Settings, where resolution, frame rate, codec, exposure lock and the light are")
