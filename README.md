@@ -81,9 +81,3 @@ For performance testing, run from the Home Screen or use a Release build. Debug 
 - The viewfinder is processed video (drawn by the system, or by Glint while peaking, magnifying or zebras are on); only the saved DNG is true RAW. Use the histogram and review thumbnail as a guide, not as ground truth.
 - iPhone lenses have fixed apertures, so aperture is display-only.
 - Lens distortion correction is disabled only on lenses that allow it (mainly Ultra Wide).
-
-## Ideas
-- **Capture:** a 48MP RAW option and a 2x sensor-crop button, a self-timer, exposure bracketing, burst, and 10-bit HEIC.
-- **Video:** recording to external storage for ProRes, audio input selection and gain, and stabilisation as an option.
-- **Housekeeping:** a storage screen for the Documents copies, and a front camera.
-- **Composition:** a waveform beside the RGB histogram.
