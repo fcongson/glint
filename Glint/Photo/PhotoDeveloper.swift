@@ -18,6 +18,10 @@ actor PhotoDeveloper {
         renderer.developHEIC(from: dng, aspect: aspect)
     }
 
+    func crop(_ heic: Data, aspect: AspectRatio) -> Data? {
+        renderer.cropHEIC(heic, aspect: aspect)
+    }
+
     /// The review image for a saved photo's data, in the form a `Shot` keeps.
     func review(_ data: Data, isRAW: Bool) -> ReviewImage? {
         renderer.render(data, isRAW: isRAW).flatMap(ReviewImage.init)
