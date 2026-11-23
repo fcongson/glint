@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 /// How the camera screen keeps its settings in step with the other copy of Glint (the app and the Lock Screen
@@ -48,7 +49,7 @@ struct CameraControllerSettingsTests {
         cam.setFileType(.heic)
         cam.setAspect(.threeTwo)
         cam.setFileType(.raw)
-        #expect(cam.aspect == .threeTwo)   // still remembered (and saved)
+        #expect(cam.aspect == .threeTwo)  // still remembered (and saved)
         cam.setFileType(.heic)
         #expect(cam.appliedAspect == .threeTwo)
     }
@@ -80,7 +81,7 @@ struct CameraControllerSettingsTests {
     @Test func aChangeMadeHereIsSavedWhenTheScreenIsLeft() async throws {
         let defaults = try emptyDefaults()
         let cam = CameraController(defaults: defaults)
-        cam.saveDelay = .seconds(60)   // so only leaving the screen can have saved it
+        cam.saveDelay = .seconds(60)  // so only leaving the screen can have saved it
         cam.saveSettingsAsTheyChange()
 
         cam.setFileType(.heic)
@@ -102,7 +103,7 @@ struct CameraControllerSettingsTests {
 
         let saved = await eventually { SavedSettings.load(from: defaults)?.aspect == .sixteenNine }
         #expect(saved)
-        #expect(SavedSettings.load(from: defaults)?.fileType == .rawAndHEIC)   // both in the one save
+        #expect(SavedSettings.load(from: defaults)?.fileType == .rawAndHEIC)  // both in the one save
     }
 
     @Test func nothingIsSavedUntilSomethingChanges() async throws {

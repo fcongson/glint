@@ -1,11 +1,13 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 @Suite("Lock Screen captures")
 struct LockScreenCapturesTests {
     private func folder(_ name: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("LockScreenCapturesTests-\(name)-\(UUID().uuidString)")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "LockScreenCapturesTests-\(name)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -28,7 +30,9 @@ struct LockScreenCapturesTests {
         defer { [session, documents].forEach { try? FileManager.default.removeItem(at: $0) } }
         try Data("clip".utf8).write(to: session.appendingPathComponent("clip-1.mov"))
         LockScreenCaptures.moveFiles(from: session, to: documents)
-        let values = try documents.appendingPathComponent("clip-1.mov").resourceValues(forKeys: [.isExcludedFromBackupKey])
+        let values = try documents.appendingPathComponent("clip-1.mov").resourceValues(forKeys: [
+            .isExcludedFromBackupKey
+        ])
         #expect(values.isExcludedFromBackup == true)
     }
 

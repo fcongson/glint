@@ -3,8 +3,8 @@ import os
 
 /// One photo Glint saved to Photos: which asset it became and which copies it left in Documents.
 struct SavedPhoto: Codable, Equatable, Sendable {
-    let assetID: String        // the Photos asset's local identifier
-    let files: [String]        // names of the app's own copies in Documents (a RAW+HEIC pair has two)
+    let assetID: String  // the Photos asset's local identifier
+    let files: [String]  // names of the app's own copies in Documents (a RAW+HEIC pair has two)
     let savedAt: Date
 }
 

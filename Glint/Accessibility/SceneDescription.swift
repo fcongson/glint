@@ -47,11 +47,11 @@ enum SceneDescription {
     /// `quarterTurns` is `Level.quarterTurns`: clockwise from portrait, so 1 has the top of the phone to the right.
     static func rotated(_ rect: CGRect, quarterTurns: Int) -> CGRect {
         switch ((quarterTurns % 4) + 4) % 4 {
-        case 1:   // the screen's top is on the right, its left edge at the top
+        case 1:  // the screen's top is on the right, its left edge at the top
             return CGRect(x: 1 - rect.maxY, y: rect.minX, width: rect.height, height: rect.width)
         case 2:
             return CGRect(x: 1 - rect.maxX, y: 1 - rect.maxY, width: rect.width, height: rect.height)
-        case 3:   // the screen's top is on the left, its left edge at the bottom
+        case 3:  // the screen's top is on the left, its left edge at the bottom
             return CGRect(x: rect.minY, y: 1 - rect.maxX, width: rect.height, height: rect.width)
         default:
             return rect

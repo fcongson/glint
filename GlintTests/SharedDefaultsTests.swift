@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 @Suite("Shared defaults")
@@ -29,7 +30,7 @@ struct SharedDefaultsTests {
     @Test func aSettingTheGroupAlreadyHoldsIsNotBroughtBackByTheOldValue() throws {
         let old = try emptyDefaults(), shared = try emptyDefaults()
         old.set("left", forKey: RailSide.key)
-        shared.set("right", forKey: RailSide.key)   // changed since, in either copy
+        shared.set("right", forKey: RailSide.key)  // changed since, in either copy
 
         SharedDefaults.migrate(from: old, to: shared)
 
@@ -43,7 +44,7 @@ struct SharedDefaultsTests {
         SharedDefaults.migrate(from: old, to: shared)
 
         #expect(shared.object(forKey: "somethingElse") == nil)
-        #expect(shared.object(forKey: SavedSettings.key) == nil)   // nothing to copy, nothing invented
+        #expect(shared.object(forKey: SavedSettings.key) == nil)  // nothing to copy, nothing invented
     }
 
     /// An app group that's missing from a target's entitlements doesn't fail: `UserDefaults(suiteName:)` still hands

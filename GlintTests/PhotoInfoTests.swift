@@ -1,20 +1,25 @@
 import Foundation
 import ImageIO
 import Testing
+
 @testable import Glint
 
 struct PhotoInfoTests {
     private func metadata(_ exif: [CFString: Any]) -> [String: Any] {
-        [kCGImagePropertyExifDictionary as String: Dictionary(uniqueKeysWithValues: exif.map { ($0.key as String, $0.value) })]
+        [
+            kCGImagePropertyExifDictionary as String: Dictionary(
+                uniqueKeysWithValues: exif.map { ($0.key as String, $0.value) })
+        ]
     }
 
     @Test func readsExifValues() {
-        let info = PhotoInfo(metadata: metadata([
-            kCGImagePropertyExifISOSpeedRatings: [NSNumber(value: 400)],
-            kCGImagePropertyExifExposureTime: NSNumber(value: 1.0 / 250),
-            kCGImagePropertyExifFNumber: NSNumber(value: 1.78),
-            kCGImagePropertyExifFocalLenIn35mmFilm: NSNumber(value: 24),
-        ]), format: .heic, whiteBalance: .kelvin(5500), fileBytes: 0)
+        let info = PhotoInfo(
+            metadata: metadata([
+                kCGImagePropertyExifISOSpeedRatings: [NSNumber(value: 400)],
+                kCGImagePropertyExifExposureTime: NSNumber(value: 1.0 / 250),
+                kCGImagePropertyExifFNumber: NSNumber(value: 1.78),
+                kCGImagePropertyExifFocalLenIn35mmFilm: NSNumber(value: 24),
+            ]), format: .heic, whiteBalance: .kelvin(5500), fileBytes: 0)
 
         #expect(info.iso == 400)
         #expect(info.exposureSeconds == 1.0 / 250)
@@ -25,29 +30,31 @@ struct PhotoInfoTests {
     }
 
     @Test func zeroMeansUnknownForExposureAndFocalLength() {
-        let info = PhotoInfo(metadata: metadata([
-            kCGImagePropertyExifExposureTime: NSNumber(value: 0),
-            kCGImagePropertyExifFocalLenIn35mmFilm: NSNumber(value: 0),
-        ]), format: .raw, whiteBalance: .auto, fileBytes: 0)
+        let info = PhotoInfo(
+            metadata: metadata([
+                kCGImagePropertyExifExposureTime: NSNumber(value: 0),
+                kCGImagePropertyExifFocalLenIn35mmFilm: NSNumber(value: 0),
+            ]), format: .raw, whiteBalance: .auto, fileBytes: 0)
 
         #expect(info.exposureSeconds == nil)
         #expect(info.focalLength35mm == nil)
     }
 
     @Test func readsCaptureDetails() throws {
-        let info = PhotoInfo(metadata: [
-            kCGImagePropertyPixelWidth as String: NSNumber(value: 3024),
-            kCGImagePropertyPixelHeight as String: NSNumber(value: 4032),
-            kCGImagePropertyTIFFDictionary as String: [
-                kCGImagePropertyTIFFMake as String: "Apple",
-                kCGImagePropertyTIFFModel as String: "iPhone 15 Pro",
-            ],
-            kCGImagePropertyExifDictionary as String: [
-                kCGImagePropertyExifExposureBiasValue as String: NSNumber(value: -0.7),
-                kCGImagePropertyExifLensModel as String: "iPhone 15 Pro back triple camera",
-                kCGImagePropertyExifDateTimeOriginal as String: "2026:11:04 15:53:07",
-            ],
-        ], format: .heic, whiteBalance: .auto, fileBytes: 3_100_000)
+        let info = PhotoInfo(
+            metadata: [
+                kCGImagePropertyPixelWidth as String: NSNumber(value: 3024),
+                kCGImagePropertyPixelHeight as String: NSNumber(value: 4032),
+                kCGImagePropertyTIFFDictionary as String: [
+                    kCGImagePropertyTIFFMake as String: "Apple",
+                    kCGImagePropertyTIFFModel as String: "iPhone 15 Pro",
+                ],
+                kCGImagePropertyExifDictionary as String: [
+                    kCGImagePropertyExifExposureBiasValue as String: NSNumber(value: -0.7),
+                    kCGImagePropertyExifLensModel as String: "iPhone 15 Pro back triple camera",
+                    kCGImagePropertyExifDateTimeOriginal as String: "2026:11:04 15:53:07",
+                ],
+            ], format: .heic, whiteBalance: .auto, fileBytes: 3_100_000)
 
         #expect(info.pixelWidth == 3024)
         #expect(info.pixelHeight == 4032)
@@ -64,26 +71,29 @@ struct PhotoInfoTests {
     }
 
     @Test func cameraModelNotPrefixedTwiceWhenItAlreadyHasTheMake() {
-        let info = PhotoInfo(metadata: [
-            kCGImagePropertyTIFFDictionary as String: [
-                kCGImagePropertyTIFFMake as String: "Canon",
-                kCGImagePropertyTIFFModel as String: "Canon EOS R5",
-            ],
-        ], format: .raw, whiteBalance: .auto, fileBytes: 0)
+        let info = PhotoInfo(
+            metadata: [
+                kCGImagePropertyTIFFDictionary as String: [
+                    kCGImagePropertyTIFFMake as String: "Canon",
+                    kCGImagePropertyTIFFModel as String: "Canon EOS R5",
+                ]
+            ], format: .raw, whiteBalance: .auto, fileBytes: 0)
         #expect(info.cameraModel == "Canon EOS R5")
     }
 
     @Test func modelWithoutMakeIsKeptAsIs() {
-        let info = PhotoInfo(metadata: [
-            kCGImagePropertyTIFFDictionary as String: [kCGImagePropertyTIFFModel as String: "X100V"],
-        ], format: .raw, whiteBalance: .auto, fileBytes: 0)
+        let info = PhotoInfo(
+            metadata: [
+                kCGImagePropertyTIFFDictionary as String: [kCGImagePropertyTIFFModel as String: "X100V"]
+            ], format: .raw, whiteBalance: .auto, fileBytes: 0)
         #expect(info.cameraModel == "X100V")
     }
 
     @Test func malformedDateIsIgnored() {
-        let info = PhotoInfo(metadata: [
-            kCGImagePropertyExifDictionary as String: [kCGImagePropertyExifDateTimeOriginal as String: "yesterday"],
-        ], format: .raw, whiteBalance: .auto, fileBytes: 0)
+        let info = PhotoInfo(
+            metadata: [
+                kCGImagePropertyExifDictionary as String: [kCGImagePropertyExifDateTimeOriginal as String: "yesterday"]
+            ], format: .raw, whiteBalance: .auto, fileBytes: 0)
         #expect(info.capturedAt == nil)
     }
 

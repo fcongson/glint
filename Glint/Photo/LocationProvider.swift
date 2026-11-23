@@ -10,7 +10,7 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
 
     /// A fix older or vaguer than this would put a photo in the wrong place, so it's better to leave the photo untagged.
     nonisolated static let maxAge: TimeInterval = 5 * 60
-    nonisolated static let maxHorizontalAccuracy: CLLocationAccuracy = 300   // metres
+    nonisolated static let maxHorizontalAccuracy: CLLocationAccuracy = 300  // metres
 
     /// The best location to tag a photo with right now, or nil if none is recent and accurate enough.
     /// `manager.location` is the system's cached fix, which can exist before the first live update arrives.
@@ -38,7 +38,7 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
     /// Asks for permission the first time, then starts updates once it's granted.
     func start() {
         if manager.authorizationStatus == .notDetermined {
-            manager.requestWhenInUseAuthorization()   // the delegate starts updates once the user answers
+            manager.requestWhenInUseAuthorization()  // the delegate starts updates once the user answers
         } else {
             startIfAuthorized()
         }

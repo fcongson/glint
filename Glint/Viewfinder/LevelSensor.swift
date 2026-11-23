@@ -23,7 +23,7 @@ final class LevelSensor {
         motion.startDeviceMotionUpdates(to: .main) { [weak self] data, _ in
             guard let gravity = data?.gravity else { return }
             let x = gravity.x, y = gravity.y
-            MainActor.assumeIsolated {   // delivered on the main queue, as asked
+            MainActor.assumeIsolated {  // delivered on the main queue, as asked
                 self?.onLevel(Level(gravityX: x, gravityY: y))
             }
         }

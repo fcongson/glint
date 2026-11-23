@@ -15,29 +15,29 @@ enum CaptureMode: Sendable, Codable { case photo, video }
 @Observable
 final class CameraController {
     private(set) var captureMode: CaptureMode = .photo
-    private(set) var fileType: PhotoFileType = .raw   // RAW by default: the point of Glint
-    private(set) var aspect: AspectRatio = .fourThree    // the full sensor
+    private(set) var fileType: PhotoFileType = .raw  // RAW by default: the point of Glint
+    private(set) var aspect: AspectRatio = .fourThree  // the full sensor
     private(set) var manual = false
     private(set) var iso: Float = 100
-    private(set) var shutterDenominator: Double = 125   // 1/x seconds
+    private(set) var shutterDenominator: Double = 125  // 1/x seconds
     private(set) var minISO: Float = 25
     private(set) var maxISO: Float = 1600
-    private(set) var isRecording = false   // true only once the movie output confirms recording has started
+    private(set) var isRecording = false  // true only once the movie output confirms recording has started
     private(set) var recordingStartedAt: Date?
     /// Manual focus is only used in manual mode; auto mode always autofocuses. The choice is kept, so returning to
     /// manual restores it, like the other manual settings.
     private(set) var isAutofocus = true
-    private(set) var lensPosition: Float = 0.5   // 0 nearest … 1 farthest
-    private(set) var exposureOffset: Float = 0   // the meter, in stops
+    private(set) var lensPosition: Float = 0.5  // 0 nearest … 1 farthest
+    private(set) var exposureOffset: Float = 0  // the meter, in stops
     /// In manual, the settings handed back to the camera with their A buttons. Kept while in auto mode, so
     /// returning to manual restores them.
     private(set) var auto = AutoSettings()
-    private(set) var exposureBias: Float = 0     // exposure compensation in stops, while the camera chooses some exposure
-    private var hasManualWhiteBalance = false    // false until manual WB has been seeded from auto once
+    private(set) var exposureBias: Float = 0  // exposure compensation in stops, while the camera chooses some exposure
+    private var hasManualWhiteBalance = false  // false until manual WB has been seeded from auto once
     private(set) var videoFormat = VideoFormat()
     private(set) var videoCapabilities = VideoCapabilities()
-    private(set) var audioLevel: Float = 0       // 0 … 1, while recording
-    private(set) var status = ""           // transient message; cleared automatically by `post`
+    private(set) var audioLevel: Float = 0  // 0 … 1, while recording
+    private(set) var status = ""  // transient message; cleared automatically by `post`
     private(set) var lenses: [Lens] = []
     private(set) var currentLensID = ""
     private(set) var aperture: Float = 0
@@ -45,13 +45,13 @@ final class CameraController {
     private(set) var isHistogramEnabled = false
     private(set) var histogramStyle = HistogramStyle.luma
     let histogramModel = HistogramModel()
-    private(set) var isGridEnabled = false    // rule-of-thirds lines over the picture
-    private(set) var isLevelEnabled = false   // the horizon level over the picture
+    private(set) var isGridEnabled = false  // rule-of-thirds lines over the picture
+    private(set) var isLevelEnabled = false  // the horizon level over the picture
     let levelModel = LevelModel()
     @ObservationIgnored private lazy var levelSensor = LevelSensor { [weak self] in self?.levelChanged($0) }
-    private(set) var flash = FlashSetting.off   // stills
-    private(set) var isVideoLightOn = false     // the same LED, steady, in VIDEO; not remembered between launches
-    private(set) var hasFlash = false           // whether the current lens has them
+    private(set) var flash = FlashSetting.off  // stills
+    private(set) var isVideoLightOn = false  // the same LED, steady, in VIDEO; not remembered between launches
+    private(set) var hasFlash = false  // whether the current lens has them
     private(set) var hasVideoLight = false
     /// What a long press on the viewfinder is holding (AE/AF lock), if anything.
     private(set) var viewfinderLock: ViewfinderLock?
@@ -63,7 +63,7 @@ final class CameraController {
     @ObservationIgnored private var faceSpeech = SceneAnnouncer(saidAlready: SceneDescription.noFaces)
     @ObservationIgnored private var levelSpeech = SceneAnnouncer()
     @ObservationIgnored private var spokenTilt: SceneDescription.Tilt?
-    @ObservationIgnored private var heldQuarterTurns = 0   // how the phone was last held, from the level
+    @ObservationIgnored private var heldQuarterTurns = 0  // how the phone was last held, from the level
     @ObservationIgnored private var latestFaces = SceneDescription.noFaces
     @ObservationIgnored private var faceRetry: Task<Void, Never>?
     /// Draws the viewfinder with peaking outlines, on the GPU. Nil without Metal, which leaves peaking off.
@@ -84,10 +84,10 @@ final class CameraController {
 
     // Focus magnifier (see Magnifier.swift). The point is where the viewfinder punches in: in manual focus a tap
     // moves it, in autofocus it follows the tapped focus point.
-    private(set) var magnifyPoint = CGPoint(x: 0.5, y: 0.5)   // 0…1 across and down the viewfinder
+    private(set) var magnifyPoint = CGPoint(x: 0.5, y: 0.5)  // 0…1 across and down the viewfinder
     private(set) var magnification = Magnification.actual
-    private(set) var isMagnifierEnabled = true                // MAG: whether touching the rail magnifies
-    private(set) var isRailHeld = false                       // on while the focus rail is touched, and a moment after
+    private(set) var isMagnifierEnabled = true  // MAG: whether touching the rail magnifies
+    private(set) var isRailHeld = false  // on while the focus rail is touched, and a moment after
     @ObservationIgnored private var railReleaseTask: Task<Void, Never>?
     var isMagnifierAvailable: Bool { viewfinderRenderer != nil }
     var isMagnifying: Bool { isMagnifierAvailable && isMagnifierEnabled && isRailHeld }
@@ -95,13 +95,13 @@ final class CameraController {
     var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying || isZebraShown }
     var isZebraShown: Bool { isZebraEnabled && viewfinderRenderer != nil }
     private(set) var timing = ""
-    private(set) var isCameraReady = false   // the preview is running; secondary controls fade in then
+    private(set) var isCameraReady = false  // the preview is running; secondary controls fade in then
     private(set) var isCameraDenied = false  // camera access refused: the viewfinder offers the way to Settings
-    private(set) var interruption: CameraInterruption?   // why the preview is frozen, while the system has the camera
-    @ObservationIgnored private var timings = DebugTimings()   // dev-only; `timing` is its readout
+    private(set) var interruption: CameraInterruption?  // why the preview is frozen, while the system has the camera
+    @ObservationIgnored private var timings = DebugTimings()  // dev-only; `timing` is its readout
     private(set) var lastThumbnail: UIImage?
-    private(set) var shots: [Shot] = []   // this session's photos, oldest first, for swiping through in review
-    private let maxShots = 30             // each keeps a compressed review image (`ReviewImage`), so memory stays bounded
+    private(set) var shots: [Shot] = []  // this session's photos, oldest first, for swiping through in review
+    private let maxShots = 30  // each keeps a compressed review image (`ReviewImage`), so memory stays bounded
 
     private let capture: CaptureSession
     private let locationProvider = LocationProvider()
@@ -111,7 +111,8 @@ final class CameraController {
     /// How long after a change its save waits, so a slider drag is one save. Short in tests.
     @ObservationIgnored var saveDelay = Duration.milliseconds(400)
     @ObservationIgnored private var hasUnsavedSettings = false
-    @ObservationIgnored private var modeGeneration = 0   // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
+    // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
+    @ObservationIgnored private var modeGeneration = 0
     @ObservationIgnored private var statusGeneration = 0
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
 
@@ -126,7 +127,9 @@ final class CameraController {
         isPeakingEnabled = renderer != nil
         if let saved = SavedSettings.load(from: defaults) {
             restore(saved)
-            Log.settings.notice("[\(Log.copy, privacy: .public)] loaded at start: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)")
+            Log.settings.notice(
+                "[\(Log.copy, privacy: .public)] loaded at start: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)"
+            )
         } else {
             Log.settings.notice("[\(Log.copy, privacy: .public)] nothing saved yet, starting from the defaults")
         }
@@ -136,14 +139,15 @@ final class CameraController {
 
     /// What to remember between launches; see `SavedSettings`.
     var savedSettings: SavedSettings {
-        SavedSettings(captureMode: captureMode, fileType: fileType, aspect: aspect, manual: manual, iso: iso,
-                      shutterDenominator: shutterDenominator, whiteBalanceKelvin: whiteBalanceKelvin,
-                      hasManualWhiteBalance: hasManualWhiteBalance, auto: auto, exposureBias: exposureBias,
-                      videoFormat: videoFormat, isHistogramEnabled: isHistogramEnabled,
-                      isPeakingEnabled: isPeakingEnabled, peakingSensitivity: peakingSensitivity,
-                      peakingAppearance: peakingAppearance, peakingMode: peakingMode, isZebraEnabled: isZebraEnabled,
-                      zebraLevel: zebraLevel, isMagnifierEnabled: isMagnifierEnabled, flash: flash,
-                      histogramStyle: histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
+        SavedSettings(
+            captureMode: captureMode, fileType: fileType, aspect: aspect, manual: manual, iso: iso,
+            shutterDenominator: shutterDenominator, whiteBalanceKelvin: whiteBalanceKelvin,
+            hasManualWhiteBalance: hasManualWhiteBalance, auto: auto, exposureBias: exposureBias,
+            videoFormat: videoFormat, isHistogramEnabled: isHistogramEnabled,
+            isPeakingEnabled: isPeakingEnabled, peakingSensitivity: peakingSensitivity,
+            peakingAppearance: peakingAppearance, peakingMode: peakingMode, isZebraEnabled: isZebraEnabled,
+            zebraLevel: zebraLevel, isMagnifierEnabled: isMagnifierEnabled, flash: flash,
+            histogramStyle: histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
     }
 
     /// Writes any change that hasn't been saved yet, when the screen is left: the last chance before the app is
@@ -151,7 +155,8 @@ final class CameraController {
     /// let a copy that's been waiting in memory overwrite what the other copy saved in the meantime.
     func flushSettings() {
         guard hasUnsavedSettings else {
-            Log.settings.notice("[\(Log.copy, privacy: .public)] leaving the screen: nothing changed here, nothing written")
+            Log.settings.notice(
+                "[\(Log.copy, privacy: .public)] leaving the screen: nothing changed here, nothing written")
             return
         }
         Log.settings.notice("[\(Log.copy, privacy: .public)] leaving the screen with a change not yet saved")
@@ -164,9 +169,12 @@ final class CameraController {
         let current = savedSettings
         if current != SavedSettings.load(from: defaults) {
             current.save(to: defaults)
-            Log.settings.notice("[\(Log.copy, privacy: .public)] saved: file \(String(describing: current.fileType), privacy: .public), aspect \(String(describing: current.aspect), privacy: .public)")
+            Log.settings.notice(
+                "[\(Log.copy, privacy: .public)] saved: file \(String(describing: current.fileType), privacy: .public), aspect \(String(describing: current.aspect), privacy: .public)"
+            )
         } else {
-            Log.settings.notice("[\(Log.copy, privacy: .public)] save skipped: what's saved is already this")   // taking up the other copy's save isn't a change to write back
+            // taking up the other copy's save isn't a change to write back
+            Log.settings.notice("[\(Log.copy, privacy: .public)] save skipped: what's saved is already this")
         }
     }
 
@@ -196,17 +204,23 @@ final class CameraController {
     /// when nothing differs, which includes this copy's own save. Left alone mid-recording and in review.
     func reloadSavedSettings() {
         guard isCameraReady, !isRecording, !isReviewing else {
-            Log.settings.notice("[\(Log.copy, privacy: .public)] active: no reload (camera ready \(self.isCameraReady), recording \(self.isRecording), review \(self.isReviewing))")
+            Log.settings.notice(
+                "[\(Log.copy, privacy: .public)] active: no reload (camera ready \(self.isCameraReady), recording \(self.isRecording), review \(self.isReviewing))"
+            )
             return
         }
         guard let saved = SavedSettings.load(from: defaults), saved != savedSettings else {
             Log.settings.notice("[\(Log.copy, privacy: .public)] active: saved settings match, nothing to take up")
             return
         }
-        Log.settings.notice("[\(Log.copy, privacy: .public)] active: taking up the other copy's settings: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)")
+        Log.settings.notice(
+            "[\(Log.copy, privacy: .public)] active: taking up the other copy's settings: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)"
+        )
         let before = savedSettings
-        let exposureChanged = saved.manual != before.manual || saved.iso != before.iso
-            || saved.shutterDenominator != before.shutterDenominator || saved.whiteBalanceKelvin != before.whiteBalanceKelvin
+        let exposureChanged =
+            saved.manual != before.manual || saved.iso != before.iso
+            || saved.shutterDenominator != before.shutterDenominator
+            || saved.whiteBalanceKelvin != before.whiteBalanceKelvin
             || saved.hasManualWhiteBalance != before.hasManualWhiteBalance || saved.auto != before.auto
             || saved.exposureBias != before.exposureBias
 
@@ -221,7 +235,11 @@ final class CameraController {
         updateLevelSensor()
 
         if let format = saved.videoFormat {
-            if captureMode == .video, (saved.captureMode ?? .video) == .video { setVideoFormat(format) } else { videoFormat = format }
+            if captureMode == .video, (saved.captureMode ?? .video) == .video {
+                setVideoFormat(format)
+            } else {
+                videoFormat = format
+            }
         }
         if let mode = saved.captureMode { setCaptureMode(mode) }
     }
@@ -262,7 +280,7 @@ final class CameraController {
         updateLevelSensor()
         voiceOverChanged(UIAccessibility.isVoiceOverRunning)
         if captureMode == .video {
-            captureMode = .photo   // what the session is actually in
+            captureMode = .photo  // what the session is actually in
             setCaptureMode(.video)
         }
     }
@@ -281,12 +299,12 @@ final class CameraController {
         saveSettingsAsTheyChange()
         startTimer("launch")
         startTimer("outputs")
-        #if !LOCKED_CAPTURE   // location permission belongs to the app; Lock Screen shots are saved untagged
-        locationProvider.start()
-        if #available(iOS 18.0, *) {
-            Task.detached(priority: .utility) { await LockScreenCaptures.collect() }
-        }
-        Task { await showLatestSavedPhoto(onlyIfNone: true) }   // the thumbnail isn't empty on opening
+        #if !LOCKED_CAPTURE  // location permission belongs to the app; Lock Screen shots are saved untagged
+            locationProvider.start()
+            if #available(iOS 18.0, *) {
+                Task.detached(priority: .utility) { await LockScreenCaptures.collect() }
+            }
+            Task { await showLatestSavedPhoto(onlyIfNone: true) }  // the thumbnail isn't empty on opening
         #endif
         Task {
             for await event in capture.events { handle(event) }
@@ -298,7 +316,9 @@ final class CameraController {
             }
         }
         Task {
-            for await _ in NotificationCenter.default.notifications(named: UIAccessibility.voiceOverStatusDidChangeNotification) {
+            for await _ in NotificationCenter.default.notifications(
+                named: UIAccessibility.voiceOverStatusDidChangeNotification)
+            {
                 voiceOverChanged(UIAccessibility.isVoiceOverRunning)
             }
         }
@@ -327,7 +347,7 @@ final class CameraController {
     private func handle(_ event: CaptureEvent) {
         switch event {
         case .ready(let lenses, let device):
-            stopTimer("launch", appending: true)   // the deferred outputs can finish first
+            stopTimer("launch", appending: true)  // the deferred outputs can finish first
             let firstStart = !isCameraReady
             isCameraReady = true
             self.lenses = lenses
@@ -337,7 +357,7 @@ final class CameraController {
             stopTimer("lens")
             stopTimer("mode")
             apply(device)
-            viewfinderLock = nil   // a new lens or format starts in auto
+            viewfinderLock = nil  // a new lens or format starts in auto
             // A new device or format starts in auto, so re-lock exposure/WB if in MANUAL, and focus if by hand.
             if manual || !isAutofocus { sendExposureMode(keepWhiteBalance: true) }
         case .videoCapabilities(let caps):
@@ -366,27 +386,30 @@ final class CameraController {
                 shutterDenominator = ExposureScale.nearest(1 / shutterSeconds, in: ExposureScale.shutterDenominators)
             }
         case .autoWhiteBalance(let kelvin):
-            if auto.whiteBalance { whiteBalanceKelvin = ExposureScale.nearest(kelvin, in: ExposureScale.whiteBalanceKelvins) }
+            if auto.whiteBalance {
+                whiteBalanceKelvin = ExposureScale.nearest(kelvin, in: ExposureScale.whiteBalanceKelvins)
+            }
         case .whiteBalanceSeeded(let kelvin):
             hasManualWhiteBalance = true
-            whiteBalanceKelvin = kelvin   // display only; the device already has auto's exact gains locked
+            whiteBalanceKelvin = kelvin  // display only; the device already has auto's exact gains locked
         case .previewRotation(let angle):
             if let conn = previewLayer?.connection, conn.isVideoRotationAngleSupported(angle) {
                 conn.videoRotationAngle = angle
             }
         case .histogram(let histogram):
-            if isHistogramEnabled { histogramModel.show(histogram) }   // drop frames that were in flight when it was switched off
+            // drop frames that were in flight when it was switched off
+            if isHistogramEnabled { histogramModel.show(histogram) }
         case .faces(let faces):
             describeFaces(faces)
         case .photoPreview(let image, let requestedAt):
-            lastThumbnail = image   // the review image replaces it once it's rendered (`addShot`)
+            lastThumbnail = image  // the review image replaces it once it's rendered (`addShot`)
             #if DEBUG
-            timings.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
+                timings.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
             #endif
         case .photoCaptured(let photo):
             photoCaptured(photo)
         case .deferredStartFinished:
-            stopTimer("outputs", appending: true)   // under launch's line: preview first, then everything else
+            stopTimer("outputs", appending: true)  // under launch's line: preview first, then everything else
         case .debug(let message):
             if DebugInfo.isOn { post(message) }
         case .systemPressure(let level):
@@ -404,7 +427,8 @@ final class CameraController {
             sendExposureMode(keepWhiteBalance: true)
             recordingFinished(url, outcome)
         case .interrupted(let reason):
-            Log.camera.notice("[\(Log.copy, privacy: .public)] interrupted: \(String(describing: reason), privacy: .public)")
+            Log.camera.notice(
+                "[\(Log.copy, privacy: .public)] interrupted: \(String(describing: reason), privacy: .public)")
             interruption = reason
             if let message = reason.message { AccessibilityNotification.Announcement(message).post() }
         case .interruptionEnded:
@@ -451,7 +475,7 @@ final class CameraController {
         let generation = modeGeneration
         Task {
             let mic = await AVCaptureDevice.requestAccess(for: .audio)
-            guard generation == modeGeneration else { return }   // switched again while the prompt was up
+            guard generation == modeGeneration else { return }  // switched again while the prompt was up
             capture.enqueue { $0.setCaptureMode(video: true, format: format, withAudio: mic) }
         }
     }
@@ -473,7 +497,8 @@ final class CameraController {
     /// The shutter actually in use: in video, A means the 180° rule and nothing is slower than a frame.
     var effectiveShutterDenominator: Double {
         guard captureMode == .video else { return shutterDenominator }
-        return videoFormat.exposure(auto: manual ? auto : AutoSettings(), shutterDenominator: shutterDenominator).shutterDenominator
+        return videoFormat.exposure(auto: manual ? auto : AutoSettings(), shutterDenominator: shutterDenominator)
+            .shutterDenominator
     }
 
     // The photo format is read at capture time; nothing to send to the device.
@@ -495,7 +520,7 @@ final class CameraController {
     func setManual(_ on: Bool) {
         guard on != manual else { return }
         manual = on
-        sendExposureMode(keepWhiteBalance: hasManualWhiteBalance)   // focus is left as it is
+        sendExposureMode(keepWhiteBalance: hasManualWhiteBalance)  // focus is left as it is
     }
 
     /// Hands one manual setting to the camera (A on) or takes it back (A off). Taking it back starts from what the
@@ -536,13 +561,14 @@ final class CameraController {
     }
 
     private func sendExposureMode(keepWhiteBalance: Bool) {
-        if viewfinderLock != nil { viewfinderLock = nil }   // setting the modes afresh ends a long press's lock
+        if viewfinderLock != nil { viewfinderLock = nil }  // setting the modes afresh ends a long press's lock
         let manual = manual, iso = iso, denom = shutterDenominator, kelvin = whiteBalanceKelvin
         let manualFocus: Float? = isAutofocus ? nil : lensPosition
         let auto = auto, bias = exposureBias
         capture.enqueue {
-            $0.setExposureMode(manual: manual, iso: iso, shutterDenominator: denom, kelvin: kelvin,
-                               keepWhiteBalance: keepWhiteBalance, manualFocus: manualFocus, auto: auto, bias: bias)
+            $0.setExposureMode(
+                manual: manual, iso: iso, shutterDenominator: denom, kelvin: kelvin,
+                keepWhiteBalance: keepWhiteBalance, manualFocus: manualFocus, auto: auto, bias: bias)
         }
     }
 
@@ -622,12 +648,15 @@ final class CameraController {
     /// `faces` are in the metadata output's coordinates. The preview layer turns them into the screen's, and how
     /// the phone is held into the picture's, so "left" is your left.
     private func describeFaces(_ faces: [CGRect]) {
-        guard isDescribingScene, let layer = previewLayer, layer.bounds.width > 0, layer.bounds.height > 0 else { return }
+        guard isDescribingScene, let layer = previewLayer, layer.bounds.width > 0, layer.bounds.height > 0 else {
+            return
+        }
         let size = layer.bounds.size
         let frames = faces.map { face -> CGRect in
             let onScreen = layer.layerRectConverted(fromMetadataOutputRect: face)
-            let unit = CGRect(x: onScreen.minX / size.width, y: onScreen.minY / size.height,
-                              width: onScreen.width / size.width, height: onScreen.height / size.height)
+            let unit = CGRect(
+                x: onScreen.minX / size.width, y: onScreen.minY / size.height,
+                width: onScreen.width / size.width, height: onScreen.height / size.height)
             return SceneDescription.rotated(unit, quarterTurns: heldQuarterTurns)
         }
         latestFaces = SceneDescription.faces(frames)
@@ -767,7 +796,7 @@ final class CameraController {
         guard level != old else { return }
         systemPressure = level
         #if DEBUG
-        if DebugInfo.isOn { post("System pressure: \(level)") }   // a message below, if any, replaces it
+            if DebugInfo.isOn { post("System pressure: \(level)") }  // a message below, if any, replaces it
         #endif
         viewfinderRenderer?.setAnalysisInterval(level.peakingInterval)
         if level.reducesFrameRate != old.reducesFrameRate {
@@ -807,7 +836,7 @@ final class CameraController {
         updateLevelSensor()
         let running = !isReviewing && isInForeground
         if running { startTimer("resume") }
-        locationProvider.setPaused(isReviewing)   // no photo can be taken from review
+        locationProvider.setPaused(isReviewing)  // no photo can be taken from review
         capture.enqueue { $0.setRunning(running) }
     }
 
@@ -827,11 +856,13 @@ final class CameraController {
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
         let histogram = isHistogramEnabled, rgb = histogramStyle == .rgb
-        let viewfinder: ViewfinderSettings? = isViewfinderDrawn
-            ? ViewfinderSettings(outlines: isPeakingShown, sensitivity: peakingSensitivity,
-                                 appearance: peakingAppearance, mode: peakingMode,
-                                 magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil,
-                                 zebras: isZebraShown ? zebraLevel : nil)
+        let viewfinder: ViewfinderSettings? =
+            isViewfinderDrawn
+            ? ViewfinderSettings(
+                outlines: isPeakingShown, sensitivity: peakingSensitivity,
+                appearance: peakingAppearance, mode: peakingMode,
+                magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil,
+                zebras: isZebraShown ? zebraLevel : nil)
             : nil
         capture.enqueue { $0.setAnalysis(histogram: histogram, rgb: rgb, viewfinder: viewfinder) }
     }
@@ -843,7 +874,7 @@ final class CameraController {
         if viewfinderLock != nil { viewfinderLock = nil }
         if !isAutofocus {
             isAutofocus = true
-            sendAnalysis()   // peaking is for manual focus
+            sendAnalysis()  // peaking is for manual focus
         }
         capture.enqueue { $0.focus(at: point) }
     }
@@ -908,8 +939,9 @@ final class CameraController {
         let whiteBalance: WhiteBalanceSetting = manual && !auto.whiteBalance ? .kelvin(Int(whiteBalanceKelvin)) : .auto
         let requestedAt = CFAbsoluteTimeGetCurrent()
         capture.enqueue {
-            $0.capturePhoto(fileType: fileType, aspect: aspect, whiteBalance: whiteBalance, flash: flash,
-                            requestedAt: requestedAt)
+            $0.capturePhoto(
+                fileType: fileType, aspect: aspect, whiteBalance: whiteBalance, flash: flash,
+                requestedAt: requestedAt)
         }
     }
 
@@ -917,9 +949,9 @@ final class CameraController {
     /// asked for read access yet, which opening review does.
     var canOpenReview: Bool {
         #if LOCKED_CAPTURE
-        lastThumbnail != nil
+            lastThumbnail != nil
         #else
-        lastThumbnail != nil || PhotoHistory.canAskForReadAccess
+            lastThumbnail != nil || PhotoHistory.canAskForReadAccess
         #endif
     }
 
@@ -929,20 +961,20 @@ final class CameraController {
     }
 
     #if !LOCKED_CAPTURE
-    /// Shows the newest photo Glint has saved on the thumbnail button, from the library, when it can be read without
-    /// asking. After one is deleted this brings the one before it forward (or empties the button).
-    func showLatestSavedPhoto(onlyIfNone: Bool = false) async {
-        guard !onlyIfNone || lastThumbnail == nil, PhotoHistory.canRead else { return }
-        let latest = await PhotoHistory.latestThumbnail()
-        if !onlyIfNone || lastThumbnail == nil { lastThumbnail = latest }
-    }
+        /// Shows the newest photo Glint has saved on the thumbnail button, from the library, when it can be read without
+        /// asking. After one is deleted this brings the one before it forward (or empties the button).
+        func showLatestSavedPhoto(onlyIfNone: Bool = false) async {
+            guard !onlyIfNone || lastThumbnail == nil, PhotoHistory.canRead else { return }
+            let latest = await PhotoHistory.latestThumbnail()
+            if !onlyIfNone || lastThumbnail == nil { lastThumbnail = latest }
+        }
     #endif
 
     /// Developing, saving and drawing the review image run off the main actor (`PhotoProcessor`); the result is
     /// added to `shots` here.
     private func photoCaptured(_ photo: CapturedPhoto) {
         let shotTime = CFAbsoluteTimeGetCurrent() - photo.requestedAt
-        let location = locationProvider.current   // the fix at the moment the photo arrives
+        let location = locationProvider.current  // the fix at the moment the photo arrives
         let report = statusReporter
         let processor = photoProcessor
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -977,8 +1009,8 @@ final class CameraController {
         }
         photoProcessing(started: false)
         #if DEBUG
-        timings.shotFinished(shotTime: shotTime, developTime: result.developTime, renderTime: result.renderTime)
-        timing = timings.readout
+            timings.shotFinished(shotTime: shotTime, developTime: result.developTime, renderTime: result.renderTime)
+            timing = timings.readout
         #endif
     }
 
@@ -986,14 +1018,14 @@ final class CameraController {
     /// here, at the call, so a release build does no work for them at all.
     private func startTimer(_ name: String) {
         #if DEBUG
-        timings.start(name)
+            timings.start(name)
         #endif
     }
 
     private func stopTimer(_ name: String, appending: Bool = false) {
         #if DEBUG
-        timings.stop(name, appending: appending)
-        timing = timings.readout
+            timings.stop(name, appending: appending)
+            timing = timings.readout
         #endif
     }
 
@@ -1001,7 +1033,8 @@ final class CameraController {
     private func resolvePlace(for id: UUID, at location: CLLocation) {
         Task {
             guard let place = await LocationProvider.placeName(for: location),
-                  let index = shots.firstIndex(where: { $0.id == id }) else { return }
+                let index = shots.firstIndex(where: { $0.id == id })
+            else { return }
             shots[index].place = place
         }
     }
@@ -1009,7 +1042,7 @@ final class CameraController {
     // MARK: Video
 
     func toggleRecording() {
-        capture.enqueue { $0.toggleRecording() }   // isRecording follows the .recordingStarted/.recordingFinished events
+        capture.enqueue { $0.toggleRecording() }  // isRecording follows the .recordingStarted/.recordingFinished events
     }
 
     /// Saves the recording if its file is good, and says why it stopped if it wasn't the user who stopped it. The
@@ -1021,10 +1054,11 @@ final class CameraController {
             Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: url) }
             return
         }
-        let report: @Sendable (String) -> Void = outcome.failure.map { failure in
-            post(failure)
-            return { message in post("\(failure). \(message)") }
-        } ?? post
+        let report: @Sendable (String) -> Void =
+            outcome.failure.map { failure in
+                post(failure)
+                return { message in post("\(failure). \(message)") }
+            } ?? post
         Task.detached(priority: .utility) { MediaLibrary.saveVideo(at: url, report: report) }
     }
 
@@ -1045,7 +1079,7 @@ final class CameraController {
     }
 
     /// For work running off the main actor (e.g. `MediaLibrary`) to report back through `post`.
-    private nonisolated var statusReporter: @Sendable (String) -> Void {
+    nonisolated private var statusReporter: @Sendable (String) -> Void {
         { [weak self] message in Task { @MainActor in self?.post(message) } }
     }
 }

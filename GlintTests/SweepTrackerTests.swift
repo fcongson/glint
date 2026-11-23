@@ -1,4 +1,5 @@
 import Testing
+
 @testable import Glint
 
 /// Sweep peaking's per-tile memory, fed sharpness and brightness as if focus were being swept.
@@ -16,8 +17,8 @@ struct SweepTrackerTests {
         var tracker = SweepTracker()
         _ = tracker.update(sharpness: [5, 5], luma: luma, minimumStrength: 4)
         let verdicts = tracker.update(sharpness: [20, 6], luma: luma, minimumStrength: 4)
-        #expect(verdicts[0] == 40)   // twice its own average, low contrast or not
-        #expect(verdicts[1] == 0)    // still no verdict
+        #expect(verdicts[0] == 40)  // twice its own average, low contrast or not
+        #expect(verdicts[1] == 0)  // still no verdict
     }
 
     @Test func pastItsSharpestATileIsNotOutlinedHoweverContrasty() {

@@ -1,5 +1,6 @@
 import Testing
 import UIKit
+
 @testable import Glint
 
 @Suite("Review image")
@@ -17,7 +18,7 @@ struct ReviewImageTests {
         let review = try #require(ReviewImage(image(width: 1400, height: 1050)))
         let decoded = try #require(UIImage(data: review.data))
         #expect(decoded.size == CGSize(width: 1400, height: 1050))
-        #expect(review.data.count < 1400 * 1050 * 4 / 10)   // far smaller than the bitmap
+        #expect(review.data.count < 1400 * 1050 * 4 / 10)  // far smaller than the bitmap
     }
 
     @Test func theThumbnailsShortSideFitsTheButton() throws {

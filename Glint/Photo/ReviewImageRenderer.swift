@@ -35,7 +35,8 @@ struct ReviewImageRenderer: @unchecked Sendable {
     /// would otherwise ignore the ASPECT setting. Nil when it can't be decoded; the caller keeps the original.
     func cropHEIC(_ heic: Data, aspect: AspectRatio) -> Data? {
         guard !aspect.isFullSensor,
-              let image = CIImage(data: heic, options: [.applyOrientationProperty: true]) else { return nil }
+            let image = CIImage(data: heic, options: [.applyOrientationProperty: true])
+        else { return nil }
         return encodeHEIC(image, aspect: aspect, metadataFrom: heic)
     }
 
@@ -54,10 +55,13 @@ struct ReviewImageRenderer: @unchecked Sendable {
         // Written with ImageIO rather than CIContext's HEIF export so the HEIC carries the DNG's metadata (capture
         // time, exposure, lens). Photos needs that to pair the two files in RAW+HEIC, and the HEIC needs it anyway.
         let output = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(output as CFMutableData, "public.heic" as CFString, 1, nil)
+        guard
+            let destination = CGImageDestinationCreateWithData(
+                output as CFMutableData, "public.heic" as CFString, 1, nil)
         else { return nil }
-        CGImageDestinationAddImage(destination, cgImage,
-                                   Self.developedProperties(from: dng, width: cgImage.width, height: cgImage.height) as CFDictionary)
+        CGImageDestinationAddImage(
+            destination, cgImage,
+            Self.developedProperties(from: dng, width: cgImage.width, height: cgImage.height) as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return output as Data
     }
@@ -67,7 +71,8 @@ struct ReviewImageRenderer: @unchecked Sendable {
     static func developedProperties(from dng: Data, width: Int, height: Int) -> [CFString: Any] {
         var properties: [CFString: Any] = [:]
         if let source = CGImageSourceCreateWithData(dng as CFData, nil),
-           let copied = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            let copied = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        {
             properties = copied
         }
         properties[kCGImagePropertyDNGDictionary] = nil
@@ -96,10 +101,11 @@ struct ReviewImageRenderer: @unchecked Sendable {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: Self.maxPixelSize
+            kCGImageSourceThumbnailMaxPixelSize: Self.maxPixelSize,
         ]
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
         return UIImage(cgImage: cg)
     }
 
@@ -108,9 +114,10 @@ struct ReviewImageRenderer: @unchecked Sendable {
         guard let filter = CIRAWFilter(imageData: data, identifierHint: "com.adobe.raw-image") else { return nil }
         let longest = max(filter.nativeSize.width, filter.nativeSize.height)
         if longest > 0 { filter.scaleFactor = Float(min(1, Self.maxPixelSize / longest)) }
-        filter.isDraftModeEnabled = true   // review image only: favour speed over final-quality decode
+        filter.isDraftModeEnabled = true  // review image only: favour speed over final-quality decode
         guard let image = filter.outputImage,
-              let cg = ciContext.createCGImage(image, from: image.extent) else { return nil }
+            let cg = ciContext.createCGImage(image, from: image.extent)
+        else { return nil }
         return UIImage(cgImage: cg)
     }
 }
@@ -123,7 +130,7 @@ struct ReviewImage: Sendable {
     static let thumbnailPixels: CGFloat = 160
 
     let thumbnail: UIImage
-    let data: Data   // JPEG
+    let data: Data  // JPEG
 
     init?(_ image: UIImage) {
         guard let data = image.jpegData(compressionQuality: 0.9) else { return nil }

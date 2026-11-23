@@ -6,18 +6,20 @@ struct RulerPicker: View {
     let count: Int
     @Binding var index: Int
     let isMajor: (Int) -> Bool
-    let label: String        // VoiceOver label, e.g. "ISO"
-    let valueText: String    // VoiceOver value, e.g. "800"
+    let label: String  // VoiceOver label, e.g. "ISO"
+    let valueText: String  // VoiceOver value, e.g. "800"
 
     @State private var position: Int?
     private let tickSpacing: CGFloat = 14
     private let height: CGFloat = 44
 
-    init(count: Int,
-         index: Binding<Int>,
-         isMajor: @escaping (Int) -> Bool = { $0 % 3 == 0 },
-         label: String,
-         valueText: String) {
+    init(
+        count: Int,
+        index: Binding<Int>,
+        isMajor: @escaping (Int) -> Bool = { $0.isMultiple(of: 3) },
+        label: String,
+        valueText: String
+    ) {
         self.count = count
         self._index = index
         self.isMajor = isMajor
@@ -47,12 +49,13 @@ struct RulerPicker: View {
         }
         .frame(height: height)
         .mask(
-            LinearGradient(stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: 0.22),
-                .init(color: .black, location: 0.78),
-                .init(color: .clear, location: 1)
-            ], startPoint: .leading, endPoint: .trailing)
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.22),
+                    .init(color: .black, location: 0.78),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .leading, endPoint: .trailing)
         )
         .overlay {
             Capsule()
@@ -64,13 +67,14 @@ struct RulerPicker: View {
             if let new, new != index { index = new }
         }
         .onChange(of: index) { _, new in
-            if position != new { position = new }   // external change, e.g. clamped by the device
+            if position != new { position = new }  // external change, e.g. clamped by the device
         }
         .sensoryFeedback(trigger: position) { _, new in
             guard let new else { return nil }
             // Firmer click on full stops, softer on the 1/3-stop ticks between them.
-            return isMajor(new) ? .impact(flexibility: .rigid, intensity: 1.0)
-                                : .impact(flexibility: .rigid, intensity: 0.6)
+            return isMajor(new)
+                ? .impact(flexibility: .rigid, intensity: 1.0)
+                : .impact(flexibility: .rigid, intensity: 0.6)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)

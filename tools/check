@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# One entry point for every check. CI and the git hook run this too.
+#   tools/check           format, lint, build, unit tests
+#   tools/check --fast    format and lint only (what the pre-commit hook runs)
+#   tools/check --fix     apply swift-format, then run the rest
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+SOURCES=(Glint Shared GlintTests GlintUITests GlintCapture GlintControl)
+mode=${1:-all}
+
+step() { printf '\n==> %s\n' "$1"; }
+
+if [[ $mode == --fix ]]; then
+  step "Formatting"
+  xcrun swift-format format --in-place --recursive "${SOURCES[@]}"
+fi
+
+step "swift-format"
+xcrun swift-format lint --strict --recursive "${SOURCES[@]}"
+
+step "SwiftLint"
+if ! command -v swiftlint >/dev/null; then
+  echo "SwiftLint is not installed: brew install swiftlint" >&2
+  exit 1
+fi
+swiftlint lint --strict --quiet
+
+[[ $mode == --fast ]] && { echo; echo "Fast checks passed."; exit 0; }
+
+step "Build (warnings are errors)"
+xcodebuild build -project Glint.xcodeproj -scheme Glint \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -quiet
+
+step "Unit tests"
+# Any available iOS simulator will do; GLINT_TEST_DESTINATION overrides.
+destination=${GLINT_TEST_DESTINATION:-}
+if [[ -z $destination ]]; then
+  udid=$(xcrun simctl list devices available | awk '/^-- /{ios=/iOS/} ios && /\(Shutdown\)|\(Booted\)/' | head -1 | grep -oE '[0-9A-F-]{36}' || true)
+  [[ -n $udid ]] || { echo "No iOS simulator found. Create one in Xcode > Window > Devices and Simulators." >&2; exit 1; }
+  destination="id=$udid"
+fi
+xcodebuild test -project Glint.xcodeproj -scheme GlintTests -destination "$destination" \
+  CODE_SIGNING_ALLOWED=NO -quiet
+
+echo; echo "All checks passed."

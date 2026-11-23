@@ -1,5 +1,6 @@
 import CoreMedia
 import Testing
+
 @testable import Glint
 
 @Suite("Exposure queue")
@@ -27,7 +28,7 @@ struct ExposureQueueTests {
         #expect(queue.waiting == request(30))
         #expect(queue.landed() == request(30))
         #expect(queue.waiting == nil)
-        #expect(queue.landed() == nil)   // nothing left
+        #expect(queue.landed() == nil)  // nothing left
     }
 
     @Test func aChangeThatNeverLandsOnlyHoldsThingsUpBriefly() {

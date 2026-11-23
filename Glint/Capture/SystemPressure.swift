@@ -8,11 +8,17 @@ enum SystemPressure: Int, Comparable, Sendable {
     case nominal, fair, serious, critical, shutdown
 
     init(_ level: AVCaptureDevice.SystemPressureState.Level) {
-        if level == .fair { self = .fair }
-        else if level == .serious { self = .serious }
-        else if level == .critical { self = .critical }
-        else if level == .shutdown { self = .shutdown }
-        else { self = .nominal }
+        if level == .fair {
+            self = .fair
+        } else if level == .serious {
+            self = .serious
+        } else if level == .critical {
+            self = .critical
+        } else if level == .shutdown {
+            self = .shutdown
+        } else {
+            self = .nominal
+        }
     }
 
     static func < (a: SystemPressure, b: SystemPressure) -> Bool { a.rawValue < b.rawValue }

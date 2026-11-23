@@ -94,7 +94,7 @@ struct SettingReadout: View {
     let label: String
     let value: String
     var highlighted = false
-    var isAuto = false   // a red A before the value, like the A on a Leica dial: the camera chose it
+    var isAuto = false  // a red A before the value, like the A on a Leica dial: the camera chose it
 
     var body: some View {
         VStack(spacing: 2) {
@@ -144,7 +144,7 @@ struct ExposureMeterView: View {
 
 /// Microphone level beside the recording time: five bars, the last two red near full scale.
 struct AudioLevelMeter: View {
-    let level: Float   // 0 … 1
+    let level: Float  // 0 … 1
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 2) {
@@ -175,13 +175,15 @@ struct SegmentedSwitch<Value: Hashable>: View {
     let options: [SwitchOption<Value>]
     let selection: Value
     let onSelect: (Value) -> Void
-    var height: CGFloat = 44   // 40 when two are stacked beside the shutter
+    var height: CGFloat = 44  // 40 when two are stacked beside the shutter
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(options, id: \.value) { option in
                 let selected = option.value == selection
-                Button { onSelect(option.value) } label: {
+                Button {
+                    onSelect(option.value)
+                } label: {
                     Text(option.title)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(selected ? Color.black : Color.white)
@@ -208,7 +210,7 @@ extension Color {
 extension Angle {
     /// True at ±90° (and 270°…): the content's width now runs along the screen's height.
     /// `rotationEffect` doesn't change layout, so rotated views need their frame swapped by hand.
-    var isQuarterTurn: Bool { Int((degrees / 90).rounded()) % 2 != 0 }
+    var isQuarterTurn: Bool { !Int((degrees / 90).rounded()).isMultiple(of: 2) }
 }
 
 extension View {

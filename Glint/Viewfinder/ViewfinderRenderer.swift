@@ -62,13 +62,13 @@ final class ViewfinderRenderer: @unchecked Sendable {
     private let inFlight = DispatchSemaphore(value: framesInFlight)
 
     private let lock = NSLock()
-    private var target: (layer: CAMetalLayer, size: CGSize)?   // behind `lock`
-    private var threshold = PeakingThreshold()                  // behind `lock`
-    private var thresholdGeneration = 0                         // behind `lock`; bumped when it starts over
-    private var sweep = SweepTracker()                          // behind `lock`
-    private var latestVerdicts: (any MTLBuffer)?                // behind `lock`: the last tile verdicts worked out
-    private var analysisPaused = false                          // behind `lock`
-    private var analysisInterval = 1                            // behind `lock`: analyse every nth frame
+    private var target: (layer: CAMetalLayer, size: CGSize)?  // behind `lock`
+    private var threshold = PeakingThreshold()  // behind `lock`
+    private var thresholdGeneration = 0  // behind `lock`; bumped when it starts over
+    private var sweep = SweepTracker()  // behind `lock`
+    private var latestVerdicts: (any MTLBuffer)?  // behind `lock`: the last tile verdicts worked out
+    private var analysisPaused = false  // behind `lock`
+    private var analysisInterval = 1  // behind `lock`: analyse every nth frame
 
     // Only touched by whoever is rendering (the analysis queue, or a test).
     private var sensitivity = PeakingSensitivity.medium
@@ -83,7 +83,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
     private struct Work {
         let frameWidth: Int, frameHeight: Int
         let factor: Int
-        let width: Int, height: Int   // the analysed size: the frame's, shrunk by `factor`
+        let width: Int, height: Int  // the analysed size: the frame's, shrunk by `factor`
         /// The shrunk frame. Nil at factor 1, where the camera's luma plane is read directly: at 12 MP that's a
         /// 24 MB texture that would never be written.
         let small: (any MTLTexture)?
@@ -91,7 +91,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let mask: any MTLTexture
         let groups: MTLSize
         let partials: [any MTLBuffer]
-        let verdicts: [any MTLBuffer]   // per tile, for sweep peaking; one per frame in flight, like `partials`
+        let verdicts: [any MTLBuffer]  // per tile, for sweep peaking; one per frame in flight, like `partials`
     }
 
     /// Keeps a frame's resources alive until the GPU is done with it, across the completion handler.
@@ -151,7 +151,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         layer.device = device
         layer.pixelFormat = .bgra8Unorm
         layer.framebufferOnly = true
-        layer.isOpaque = false   // see-through until the first frame, so the system preview shows
+        layer.isOpaque = false  // see-through until the first frame, so the system preview shows
     }
 
     @MainActor
@@ -199,34 +199,38 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let outlines = settings.outlines && !lock.withLock({ analysisPaused })
         let interval = lock.withLock { analysisInterval }
         frameIndex &+= 1
-        let analyse = outlines && (interval == 1 || frameIndex % interval == 0)   // otherwise reuse the last outlines
+        // Otherwise reuse the last outlines.
+        let analyse = outlines && (interval == 1 || frameIndex.isMultiple(of: interval))
         let level = outlines ? prepare(sensitivity, mode: mode) : nil
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
-              let chroma = texture(pixelBuffer, plane: 1, format: .rg8Unorm),
-              let lumaTexture = CVMetalTextureGetTexture(luma), let chromaTexture = CVMetalTextureGetTexture(chroma),
-              let work = workspace(width: lumaTexture.width, height: lumaTexture.height)
+            let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
+            let chroma = texture(pixelBuffer, plane: 1, format: .rg8Unorm),
+            let lumaTexture = CVMetalTextureGetTexture(luma), let chromaTexture = CVMetalTextureGetTexture(chroma),
+            let work = workspace(width: lumaTexture.width, height: lumaTexture.height)
         else {
             inFlight.signal()
             return
         }
         let partials = work.partials[slot], ownVerdicts = work.verdicts[slot]
         slot = (slot + 1) % work.partials.count
-        let scale = Self.fitScale(frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
-                                  viewSize: target.size)
+        let scale = Self.fitScale(
+            frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
+            viewSize: target.size)
         var outlineMask = work.mask
         if outlines && !analyse, settings.magnifier == nil, let last = pooled?.texture {
             outlineMask = last
         } else if analyse {
             // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
             let verdicts = mode == .sweep ? lock.withLock({ latestVerdicts }) : nil
-            encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
-                           verdicts: verdicts ?? ownVerdicts, sweep: verdicts != nil)
+            encodeAnalysis(
+                commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
+                verdicts: verdicts ?? ownVerdicts, sweep: verdicts != nil)
             // Magnified, mask texels are already a screen pixel or more across: draw from the full mask.
             if settings.magnifier == nil {
-                outlineMask = encodePool(commandBuffer, work: work,
-                                         pictureWidthOnScreen: Float(target.size.width) * scale.x)
+                outlineMask = encodePool(
+                    commandBuffer, work: work,
+                    pictureWidthOnScreen: Float(target.size.width) * scale.x)
             }
         }
 
@@ -240,8 +244,9 @@ final class ViewfinderRenderer: @unchecked Sendable {
             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
                 var magnify = SIMD4<Float>(0.5, 0.5, 1, 0)
                 if let magnifier = settings.magnifier {
-                    let zoom = Magnifier.zoom(for: magnifier.magnification, uprightFrameWidth: lumaTexture.height,
-                                              pictureWidthOnScreen: Float(target.size.width) * scale.x)
+                    let zoom = Magnifier.zoom(
+                        for: magnifier.magnification, uprightFrameWidth: lumaTexture.height,
+                        pictureWidthOnScreen: Float(target.size.width) * scale.x)
                     let centre = Magnifier.pictureCenter(viewCenter: magnifier.center, scale: scale, zoom: zoom)
                     magnify = SIMD4(centre.x, centre.y, zoom, 0)
                 }
@@ -251,11 +256,14 @@ final class ViewfinderRenderer: @unchecked Sendable {
                     scale: scale,
                     matrix: Self.matrix(for: pixelBuffer),
                     color: SIMD4(appearance.color.rgb, 1),
-                    lines: SIMD4(1 / Float(outlineMask.width), 1 / Float(outlineMask.height), reach,
-                                 outlines ? 1 : 0),
+                    lines: SIMD4(
+                        1 / Float(outlineMask.width), 1 / Float(outlineMask.height), reach,
+                        outlines ? 1 : 0),
                     magnify: magnify,
                     // Stripes about 7 points wide at the screen's scale (drawable pixels per point ≈ 3).
-                    zebra: SIMD4(settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1, 0))
+                    zebra: SIMD4(
+                        settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1,
+                        0))
                 encoder.setRenderPipelineState(drawPipeline)
                 encoder.setFragmentTexture(lumaTexture, index: 0)
                 encoder.setFragmentTexture(chromaTexture, index: 1)
@@ -267,9 +275,10 @@ final class ViewfinderRenderer: @unchecked Sendable {
             commandBuffer.present(drawable)
         }
 
-        let frame = InFlight(textures: [luma, chroma], partials: partials,
-                             groupCount: work.groups.width * work.groups.height,
-                             pixelCount: work.width * work.height)
+        let frame = InFlight(
+            textures: [luma, chroma], partials: partials,
+            groupCount: work.groups.width * work.groups.height,
+            pixelCount: work.width * work.height)
         let generation = lock.withLock { thresholdGeneration }
         let sweeping = mode == .sweep
         let verdictsOut = UncheckedBuffer(ownVerdicts)
@@ -287,8 +296,9 @@ final class ViewfinderRenderer: @unchecked Sendable {
                 if let tiles {
                     // Written to this frame's own buffer, which no frame still in flight reads: they read the
                     // latest verdicts from before this frame finished, and frames finish in order.
-                    let cutoffs = sweep.update(sharpness: tiles.sharpness, luma: tiles.luma,
-                                               minimumStrength: Self.minimumStrength)
+                    let cutoffs = sweep.update(
+                        sharpness: tiles.sharpness, luma: tiles.luma,
+                        minimumStrength: Self.minimumStrength)
                     let out = verdictsOut.buffer.contents().bindMemory(to: Float.self, capacity: cutoffs.count)
                     for (i, cutoff) in cutoffs.enumerated() { out[i] = cutoff }
                     latestVerdicts = verdictsOut.buffer
@@ -317,8 +327,10 @@ final class ViewfinderRenderer: @unchecked Sendable {
 
     /// Steps 1–4: shrink, high-pass, smooth (with statistics into `partials`), and mark against `level`. With no level
     /// yet (the first frame), nothing is marked.
-    private func encodeAnalysis(_ commandBuffer: any MTLCommandBuffer, luma: any MTLTexture, work: Work,
-                                partials: any MTLBuffer, level: Double?, verdicts: any MTLBuffer, sweep: Bool) {
+    private func encodeAnalysis(
+        _ commandBuffer: any MTLCommandBuffer, luma: any MTLTexture, work: Work,
+        partials: any MTLBuffer, level: Double?, verdicts: any MTLBuffer, sweep: Bool
+    ) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         let size = MTLSize(width: work.width, height: work.height, depth: 1)
         let group = MTLSize(width: 16, height: 16, depth: 1)
@@ -357,10 +369,11 @@ final class ViewfinderRenderer: @unchecked Sendable {
         encoder.setTexture(source, index: 2)
         encoder.setBuffer(partials, offset: 0, index: 0)
         encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 1)
-        encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)   // whole groups, for the sums
+        encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)  // whole groups, for the sums
 
-        var params = MaskParams(cutoff: level.map { max(Self.minimumStrength, Float($0)) } ?? .infinity,
-                                tilesAcross: UInt32(work.groups.width), sweep: sweep ? 1 : 0)
+        var params = MaskParams(
+            cutoff: level.map { max(Self.minimumStrength, Float($0)) } ?? .infinity,
+            tilesAcross: UInt32(work.groups.width), sweep: sweep ? 1 : 0)
         encoder.setComputePipelineState(maskPipeline)
         encoder.setTexture(work.edges, index: 0)
         encoder.setTexture(work.mask, index: 1)
@@ -398,22 +411,26 @@ final class ViewfinderRenderer: @unchecked Sendable {
         }
         let verdictsLength = groups.width * groups.height * MemoryLayout<Float>.stride
         let verdicts = (0..<Self.framesInFlight).compactMap { _ -> (any MTLBuffer)? in
-            guard let buffer = device.makeBuffer(length: verdictsLength, options: .storageModeShared) else { return nil }
-            memset(buffer.contents(), 0, verdictsLength)   // no verdicts: standard peaking
+            guard let buffer = device.makeBuffer(length: verdictsLength, options: .storageModeShared) else {
+                return nil
+            }
+            memset(buffer.contents(), 0, verdictsLength)  // no verdicts: standard peaking
             return buffer
         }
         let small = factor > 1 ? make(.r16Float) : nil
         guard factor == 1 || small != nil,
-              let blurred = make(.r16Float), let response = make(.r16Float),
-              let edges = make(.r16Float),
-              let mask = make(.r8Unorm),
-              partials.count == Self.framesInFlight, verdicts.count == Self.framesInFlight else { return nil }
-        let new = Work(frameWidth: width, frameHeight: height, factor: factor, width: w, height: h, small: small, blurred: blurred,
-                       response: response, edges: edges, mask: mask, groups: groups, partials: partials,
-                       verdicts: verdicts)
+            let blurred = make(.r16Float), let response = make(.r16Float),
+            let edges = make(.r16Float),
+            let mask = make(.r8Unorm),
+            partials.count == Self.framesInFlight, verdicts.count == Self.framesInFlight
+        else { return nil }
+        let new = Work(
+            frameWidth: width, frameHeight: height, factor: factor, width: w, height: h, small: small, blurred: blurred,
+            response: response, edges: edges, mask: mask, groups: groups, partials: partials,
+            verdicts: verdicts)
         work = new
         slot = 0
-        lock.withLock {   // new tile grid: start the sweep over
+        lock.withLock {  // new tile grid: start the sweep over
             sweep.reset()
             latestVerdicts = nil
         }
@@ -422,15 +439,18 @@ final class ViewfinderRenderer: @unchecked Sendable {
 
     /// Step 5's shrink: pools the mask by the number of mask texels per screen pixel (rounded up), so outlines keep
     /// their weight on screen. Returns the mask to draw from.
-    private func encodePool(_ commandBuffer: any MTLCommandBuffer, work: Work,
-                            pictureWidthOnScreen: Float) -> any MTLTexture {
-        let perPixel = Float(work.mask.height) / max(1, pictureWidthOnScreen)   // the mask's upright width
+    private func encodePool(
+        _ commandBuffer: any MTLCommandBuffer, work: Work,
+        pictureWidthOnScreen: Float
+    ) -> any MTLTexture {
+        let perPixel = Float(work.mask.height) / max(1, pictureWidthOnScreen)  // the mask's upright width
         let factor = max(1, Int(perPixel.rounded(.up)))
         guard factor > 1 else { return work.mask }
         let w = (work.mask.width + factor - 1) / factor, h = (work.mask.height + factor - 1) / factor
         if pooled == nil || pooled?.factor != factor || pooled?.texture.width != w || pooled?.texture.height != h {
-            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: w, height: h,
-                                                             mipmapped: false)
+            let d = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .r8Unorm, width: w, height: h,
+                mipmapped: false)
             d.usage = [.shaderRead, .shaderWrite]
             d.storageMode = .private
             guard let texture = device.makeTexture(descriptor: d) else { return work.mask }
@@ -444,8 +464,9 @@ final class ViewfinderRenderer: @unchecked Sendable {
         encoder.setTexture(work.mask, index: 0)
         encoder.setTexture(texture, index: 1)
         encoder.setBytes(&poolFactor, length: MemoryLayout<UInt32>.size, index: 0)
-        encoder.dispatchThreads(MTLSize(width: w, height: h, depth: 1),
-                                threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+        encoder.dispatchThreads(
+            MTLSize(width: w, height: h, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
         encoder.endEncoding()
         return texture
     }
@@ -500,7 +521,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
 
     /// The upright picture's size as a fraction of the view when fitted inside it (like `.resizeAspect`).
     static func fitScale(frameWidth: Int, frameHeight: Int, viewSize: CGSize) -> SIMD2<Float> {
-        let picture = Float(frameHeight) / Float(frameWidth)   // upright: the landscape frame turned
+        let picture = Float(frameHeight) / Float(frameWidth)  // upright: the landscape frame turned
         let view = Float(viewSize.width / viewSize.height)
         return picture > view ? SIMD2(1, view / picture) : SIMD2(picture / view, 1)
     }
@@ -516,11 +537,12 @@ final class ViewfinderRenderer: @unchecked Sendable {
     /// Wide-colour frames are Display P3; show them as such, as the system preview does.
     private func updateColorSpace(of layer: CAMetalLayer, for pixelBuffer: CVPixelBuffer) {
         let primaries = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferColorPrimariesKey, nil) as? String
-        let name = primaries == (kCVImageBufferColorPrimaries_P3_D65 as String) ? CGColorSpace.displayP3 : CGColorSpace.sRGB
+        let name =
+            primaries == (kCVImageBufferColorPrimaries_P3_D65 as String) ? CGColorSpace.displayP3 : CGColorSpace.sRGB
         guard name != colorSpaceName else { return }
         colorSpaceName = name
         let space = CGColorSpace(name: name)
-        nonisolated(unsafe) let layer = layer   // only touched on the main queue from here
+        nonisolated(unsafe) let layer = layer  // only touched on the main queue from here
         DispatchQueue.main.async { layer.colorspace = space }
     }
 
@@ -532,34 +554,41 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let height: Int
         let mean: Double
         let deviation: Double
-        let mask: [UInt8]   // 255 where outlined, row by row
+        let mask: [UInt8]  // 255 where outlined, row by row
     }
 
     /// Runs steps 1–4 on a frame and waits for the result: with no `level`, only the statistics are meaningful.
     func analyse(_ pixelBuffer: CVPixelBuffer, level: Double?) -> Analysis? {
         guard let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
-              let lumaTexture = CVMetalTextureGetTexture(luma),
-              let work = workspace(width: lumaTexture.width, height: lumaTexture.height),
-              let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+            let lumaTexture = CVMetalTextureGetTexture(luma),
+            let work = workspace(width: lumaTexture.width, height: lumaTexture.height),
+            let commandBuffer = commandQueue.makeCommandBuffer()
+        else { return nil }
         let partials = work.partials[0]
-        encodeAnalysis(commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
-                       verdicts: work.verdicts[0], sweep: false)
+        encodeAnalysis(
+            commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
+            verdicts: work.verdicts[0], sweep: false)
 
         // Copy the private mask texture somewhere readable.
         let w = work.mask.width, h = work.mask.height
         guard let readback = device.makeBuffer(length: w * h, options: .storageModeShared),
-              let blit = commandBuffer.makeBlitCommandEncoder() else { return nil }
-        blit.copy(from: work.mask, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                  sourceSize: MTLSize(width: w, height: h, depth: 1), to: readback, destinationOffset: 0,
-                  destinationBytesPerRow: w, destinationBytesPerImage: w * h)
+            let blit = commandBuffer.makeBlitCommandEncoder()
+        else { return nil }
+        blit.copy(
+            from: work.mask, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: MTLSize(width: w, height: h, depth: 1), to: readback, destinationOffset: 0,
+            destinationBytesPerRow: w, destinationBytesPerImage: w * h)
         blit.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
 
-        let stats = Self.statistics(InFlight(textures: [luma], partials: partials,
-                                             groupCount: work.groups.width * work.groups.height, pixelCount: w * h))
+        let stats = Self.statistics(
+            InFlight(
+                textures: [luma], partials: partials,
+                groupCount: work.groups.width * work.groups.height, pixelCount: w * h))
         let bytes = readback.contents().bindMemory(to: UInt8.self, capacity: w * h)
-        return Analysis(width: w, height: h, mean: stats.mean, deviation: stats.deviation,
-                        mask: Array(UnsafeBufferPointer(start: bytes, count: w * h)))
+        return Analysis(
+            width: w, height: h, mean: stats.mean, deviation: stats.deviation,
+            mask: Array(UnsafeBufferPointer(start: bytes, count: w * h)))
     }
 }

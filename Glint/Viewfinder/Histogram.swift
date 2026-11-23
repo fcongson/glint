@@ -6,7 +6,7 @@ import Observation
 @Observable
 final class HistogramModel {
     private(set) var bins: [Float] = []
-    private(set) var channels: RGBBins?   // red, green and blue, while HISTOGRAM is RGB in SET
+    private(set) var channels: RGBBins?  // red, green and blue, while HISTOGRAM is RGB in SET
     private(set) var clipsHighlights = false
     private(set) var clipsShadows = false
 
@@ -57,7 +57,9 @@ struct YCbCrMatrix: Sendable, Equatable {
 
     /// The matrix a pixel buffer says it was encoded with; Rec. 709 if it doesn't say.
     static func of(_ pixelBuffer: CVPixelBuffer) -> YCbCrMatrix {
-        guard let name = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil) as? String else { return .rec709 }
+        guard let name = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil) as? String else {
+            return .rec709
+        }
         if name == kCVImageBufferYCbCrMatrix_ITU_R_601_4 as String { return .rec601 }
         if name == kCVImageBufferYCbCrMatrix_ITU_R_2020 as String { return .rec2020 }
         return .rec709
@@ -67,9 +69,11 @@ struct YCbCrMatrix: Sendable, Equatable {
     func rgb(y: UInt8, cb: UInt8, cr: UInt8) -> (red: Int, green: Int, blue: Int) {
         let luma = Float(y), blueDifference = Float(cb) - 128, redDifference = Float(cr) - 128
         func level(_ value: Float) -> Int { Int(min(max(value, 0), 255).rounded()) }
-        return (level(luma + crToRed * redDifference),
-                level(luma + cbToGreen * blueDifference + crToGreen * redDifference),
-                level(luma + cbToBlue * blueDifference))
+        return (
+            level(luma + crToRed * redDifference),
+            level(luma + cbToGreen * blueDifference + crToGreen * redDifference),
+            level(luma + cbToBlue * blueDifference)
+        )
     }
 }
 
@@ -85,19 +89,19 @@ struct YCbCrMatrix: Sendable, Equatable {
 /// white (`whiteLevel`), which zebras use too.
 struct Histogram: Sendable {
     static let binCount = 64
-    static let shadowLuma = 5               // at or below: near black (measured: a covered lens reads 0)
-    static let minimumWhite = 200           // a spike lower than this is a uniform subject, not clipped white
-    static let spikeFraction: Float = 0.002 // at least this share of pixels within a level of the peak…
-    static let spikeSharpness: Float = 4    // …at this many times the density of the five levels below it…
-    static let strayFraction: Float = 0.5   // …with fewer pixels above it than this share of the peak
-    static let highlightClipFraction: Float = 0.01   // warn when more than 1% of pixels are clipped white
-    static let shadowClipFraction: Float = 0.05      // shadows are allowed more, since deep blacks are often intended
+    static let shadowLuma = 5  // at or below: near black (measured: a covered lens reads 0)
+    static let minimumWhite = 200  // a spike lower than this is a uniform subject, not clipped white
+    static let spikeFraction: Float = 0.002  // at least this share of pixels within a level of the peak…
+    static let spikeSharpness: Float = 4  // …at this many times the density of the five levels below it…
+    static let strayFraction: Float = 0.5  // …with fewer pixels above it than this share of the peak
+    static let highlightClipFraction: Float = 0.01  // warn when more than 1% of pixels are clipped white
+    static let shadowClipFraction: Float = 0.05  // shadows are allowed more, since deep blacks are often intended
 
-    let bins: [Float]          // 0...1, sqrt-scaled so small counts stay visible
+    let bins: [Float]  // 0...1, sqrt-scaled so small counts stay visible
     let clipsHighlights: Bool
     let clipsShadows: Bool
-    let whiteLevel: Int?       // where clipped highlights sit in this frame, if any are
-    let channels: RGBBins?     // nil unless asked for, or the buffer has no chroma plane
+    let whiteLevel: Int?  // where clipped highlights sit in this frame, if any are
+    let channels: RGBBins?  // nil unless asked for, or the buffer has no chroma plane
 
     /// Samples every `step`th pixel in each direction. Returns nil if the buffer has no readable luma plane.
     /// `rgb` also reads the chroma plane for `channels`; clipping is judged from luma either way.
@@ -115,7 +119,9 @@ struct Histogram: Sendable {
         // The chroma plane: Cb and Cr interleaved, usually at half the luma's size each way.
         var chroma: UnsafePointer<UInt8>?
         var chromaBytesPerRow = 0, chromaWidth = 0, chromaHeight = 0
-        if rgb, CVPixelBufferGetPlaneCount(pixelBuffer) > 1, let plane = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1) {
+        if rgb, CVPixelBufferGetPlaneCount(pixelBuffer) > 1,
+            let plane = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1)
+        {
             chroma = UnsafePointer(plane.assumingMemoryBound(to: UInt8.self))
             chromaBytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1)
             chromaWidth = CVPixelBufferGetWidthOfPlane(pixelBuffer, 1)
@@ -172,8 +178,9 @@ struct Histogram: Sendable {
         let below = Float(levels[(peak - 7)...(peak - 3)].reduce(0, +))
         let above = peak + 2 <= 255 ? Float(levels[(peak + 2)...].reduce(0, +)) : 0
         guard spike >= Float(total) * spikeFraction,
-              spike / 3 >= spikeSharpness * below / 5,
-              above <= strayFraction * spike else { return nil }
+            spike / 3 >= spikeSharpness * below / 5,
+            above <= strayFraction * spike
+        else { return nil }
         return peak
     }
 }

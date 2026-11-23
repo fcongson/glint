@@ -3,9 +3,9 @@ import ImageIO
 import UIKit
 
 enum PhotoFormat: Sendable {
-    case raw          // Bayer DNG
+    case raw  // Bayer DNG
     case heic
-    case rawAndHEIC   // a DNG with a HEIC developed from it
+    case rawAndHEIC  // a DNG with a HEIC developed from it
 }
 
 enum WhiteBalanceSetting: Equatable, Sendable {
@@ -17,14 +17,14 @@ enum WhiteBalanceSetting: Equatable, Sendable {
 /// Optional fields are ones the photo's metadata may not report.
 struct PhotoInfo: Sendable {
     let format: PhotoFormat
-    let whiteBalance: WhiteBalanceSetting?   // nil for a photo found in the library: the file doesn't record it
+    let whiteBalance: WhiteBalanceSetting?  // nil for a photo found in the library: the file doesn't record it
     let iso: Int?
     let exposureSeconds: Double?
     let fNumber: Double?
-    let focalLength35mm: Int?   // millimetres, 35mm-equivalent
-    let exposureBias: Double?   // EV
+    let focalLength35mm: Int?  // millimetres, 35mm-equivalent
+    let exposureBias: Double?  // EV
     let capturedAt: Date?
-    let cameraModel: String?    // make and model, e.g. "Apple iPhone 15 Pro"
+    let cameraModel: String?  // make and model, e.g. "Apple iPhone 15 Pro"
     let lensModel: String?
     private(set) var pixelWidth: Int?
     private(set) var pixelHeight: Int?
@@ -38,11 +38,15 @@ struct PhotoInfo: Sendable {
         let tiff = metadata[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]
         iso = (exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])?.first?.intValue
         // EXIF uses 0 for "unknown" in these two fields.
-        exposureSeconds = (exif[kCGImagePropertyExifExposureTime as String] as? NSNumber).map(\.doubleValue).flatMap { $0 > 0 ? $0 : nil }
+        exposureSeconds = (exif[kCGImagePropertyExifExposureTime as String] as? NSNumber).map(\.doubleValue).flatMap {
+            $0 > 0 ? $0 : nil
+        }
         fNumber = (exif[kCGImagePropertyExifFNumber as String] as? NSNumber)?.doubleValue
-        focalLength35mm = (exif[kCGImagePropertyExifFocalLenIn35mmFilm as String] as? NSNumber).map(\.intValue).flatMap { $0 > 0 ? $0 : nil }
+        focalLength35mm = (exif[kCGImagePropertyExifFocalLenIn35mmFilm as String] as? NSNumber).map(\.intValue).flatMap
+        { $0 > 0 ? $0 : nil }
         exposureBias = (exif[kCGImagePropertyExifExposureBiasValue as String] as? NSNumber)?.doubleValue
-        capturedAt = (exif[kCGImagePropertyExifDateTimeOriginal as String] as? String).flatMap(Self.exifDateFormatter.date(from:))
+        capturedAt = (exif[kCGImagePropertyExifDateTimeOriginal as String] as? String).flatMap(
+            Self.exifDateFormatter.date(from:))
         let make = tiff[kCGImagePropertyTIFFMake as String] as? String
         let model = tiff[kCGImagePropertyTIFFModel as String] as? String
         // Models sometimes start with the make already ("Canon EOS R5"), so only prepend it when they don't.

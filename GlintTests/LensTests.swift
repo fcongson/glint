@@ -1,4 +1,5 @@
 import Testing
+
 @testable import Glint
 
 struct LensTests {
@@ -6,7 +7,7 @@ struct LensTests {
     private let mainFOV: Float = 69.4
 
     @Test(arguments: [
-        (Float(108.0), 0.5, "0.5×"),   // ultra wide
+        (Float(108.0), 0.5, "0.5×"),  // ultra wide
         (69.4, 1, "1×"),
         (36.6, 2, "2×"),
         (28.4, 2.5, "2.5×"),

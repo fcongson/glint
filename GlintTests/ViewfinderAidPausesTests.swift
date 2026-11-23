@@ -1,4 +1,5 @@
 import Testing
+
 @testable import Glint
 
 @Suite("Viewfinder aid pauses")
@@ -11,7 +12,7 @@ struct ViewfinderAidPausesTests {
         let on = ViewfinderAids(histogram: true, zebras: true)
         #expect(pauses.lowPowerBegan(enabled: on) == on)
         #expect(pauses.lowPowerEnded() == on)
-        #expect(pauses.lowPowerEnded() == none)   // only once
+        #expect(pauses.lowPowerEnded() == none)  // only once
     }
 
     @Test func lowPowerWithNothingOnDoesNothing() {
@@ -23,7 +24,7 @@ struct ViewfinderAidPausesTests {
     @Test func anAidTheUserSwitchedIsLeftAsTheyLeftIt() {
         var pauses = ViewfinderAidPauses()
         _ = pauses.lowPowerBegan(enabled: all)
-        pauses.userChose(.peaking)   // turned back on by hand during Low Power Mode
+        pauses.userChose(.peaking)  // turned back on by hand during Low Power Mode
         #expect(pauses.lowPowerEnded() == ViewfinderAids(histogram: true, zebras: true))
     }
 

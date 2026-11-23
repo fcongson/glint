@@ -2,9 +2,9 @@ import CoreGraphics
 
 /// What SET's FILE row asks for.
 enum PhotoFileType: Sendable, CaseIterable, Codable {
-    case raw          // the Bayer DNG as shot
-    case heic         // the DNG developed into a neutral HEIC
-    case rawAndHEIC   // both, saved to Photos as one asset (HEIC with the DNG as its RAW alternate)
+    case raw  // the Bayer DNG as shot
+    case heic  // the DNG developed into a neutral HEIC
+    case rawAndHEIC  // both, saved to Photos as one asset (HEIC with the DNG as its RAW alternate)
 
     var wantsRAW: Bool { self != .heic }
 }
@@ -43,10 +43,10 @@ enum AspectRatio: Sendable, CaseIterable, Codable {
 /// How a still is captured and what comes out, decided from the FILE setting and what the camera supports.
 /// Pure logic, so it can be tested without a camera.
 enum CapturePlan: Equatable, Sendable {
-    case rawDNG           // RAW: save the Bayer DNG as shot
-    case developedHEIC    // HEIC: shoot Bayer RAW, then develop it into a neutral HEIC
-    case rawDNGAndHEIC    // RAW+HEIC: save the DNG and a HEIC developed from it
-    case processedHEIC    // Bayer RAW unavailable: the camera's own processed HEIC
+    case rawDNG  // RAW: save the Bayer DNG as shot
+    case developedHEIC  // HEIC: shoot Bayer RAW, then develop it into a neutral HEIC
+    case rawDNGAndHEIC  // RAW+HEIC: save the DNG and a HEIC developed from it
+    case processedHEIC  // Bayer RAW unavailable: the camera's own processed HEIC
 
     init(fileType: PhotoFileType, bayerRAWAvailable: Bool) {
         guard bayerRAWAvailable else { self = .processedHEIC; return }

@@ -7,10 +7,10 @@ import SwiftUI
 /// picture jump. It fades back when idle so it doesn't sit on the picture, and stays fully visible while
 /// VoiceOver is running. While autofocus is on, the thumb is grey and follows the lens.
 struct FocusRail: View {
-    let position: Float   // 0 nearest … 1 farthest
+    let position: Float  // 0 nearest … 1 farthest
     let isAutofocus: Bool
     let onChange: (Float) -> Void
-    var onTouch: (Bool) -> Void = { _ in }   // touched (true) and let go (false), for the focus magnifier
+    var onTouch: (Bool) -> Void = { _ in }  // touched (true) and let go (false), for the focus magnifier
 
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var dragStart: Float?
@@ -19,7 +19,7 @@ struct FocusRail: View {
 
     static let trackHeight: CGFloat = 240
     private let width: CGFloat = 44
-    private let inset: CGFloat = 16   // keeps the thumb inside the rounded ends
+    private let inset: CGFloat = 16  // keeps the thumb inside the rounded ends
     private var travel: CGFloat { Self.trackHeight - inset * 2 }
 
     private var isVisible: Bool { awake || voiceOver || dragStart != nil }
@@ -86,12 +86,14 @@ struct FocusRail: View {
         )
         .accessibilityElement()
         .accessibilityLabel("Focus")
-        .accessibilityValue(isAutofocus
-                            ? "Autofocus, \(SettingsText.focusPosition(position))"
-                            : SettingsText.focusPosition(position))
+        .accessibilityValue(
+            isAutofocus
+                ? "Autofocus, \(SettingsText.focusPosition(position))"
+                : SettingsText.focusPosition(position)
+        )
         .accessibilityHint("Swipe up or down to focus by hand. This turns autofocus off.")
         .accessibilityAdjustableAction { direction in
-            onTouch(true)   // a VoiceOver adjustment counts as a touch, so the magnifier comes on for it too
+            onTouch(true)  // a VoiceOver adjustment counts as a touch, so the magnifier comes on for it too
             switch direction {
             case .increment: onChange(FocusScale.stepped(position, by: 1))
             case .decrement: onChange(FocusScale.stepped(position, by: -1))
@@ -144,7 +146,7 @@ struct FocusRail: View {
 enum RailSide: String, CaseIterable {
     case left, right
 
-    static let key = "focusRailSide"   // UserDefaults
+    static let key = "focusRailSide"  // UserDefaults
 
     var title: String {
         switch self {

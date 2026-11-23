@@ -1,12 +1,15 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 struct VideoFormatTests {
     private let pro = VideoCapabilities(
-        modes: [VideoMode(resolution: .uhd4K, frameRate: 24), VideoMode(resolution: .uhd4K, frameRate: 30),
-                VideoMode(resolution: .uhd4K, frameRate: 60), VideoMode(resolution: .hd1080, frameRate: 25),
-                VideoMode(resolution: .hd1080, frameRate: 60)],
+        modes: [
+            VideoMode(resolution: .uhd4K, frameRate: 24), VideoMode(resolution: .uhd4K, frameRate: 30),
+            VideoMode(resolution: .uhd4K, frameRate: 60), VideoMode(resolution: .hd1080, frameRate: 25),
+            VideoMode(resolution: .hd1080, frameRate: 60),
+        ],
         logModes: [VideoMode(resolution: .uhd4K, frameRate: 24), VideoMode(resolution: .uhd4K, frameRate: 30)],
         proRes: true,
         proResRAWFrameRates: [24, 30])
@@ -26,14 +29,14 @@ struct VideoFormatTests {
     }
 
     @Test func autoShutterInVideoFollowsTheFrameRate() {
-        let f = VideoFormat()   // 24 fps
+        let f = VideoFormat()  // 24 fps
         let result = f.exposure(auto: AutoSettings(iso: true, shutter: true), shutterDenominator: 250)
         #expect(result.shutterDenominator == 48)
-        #expect(result.auto.iso && !result.auto.shutter)   // ISO still floats: shutter priority at 180°
+        #expect(result.auto.iso && !result.auto.shutter)  // ISO still floats: shutter priority at 180°
     }
 
     @Test func manualShutterStaysWithinAFrame() {
-        let f = VideoFormat()   // 24 fps
+        let f = VideoFormat()  // 24 fps
         #expect(f.exposure(auto: AutoSettings(), shutterDenominator: 8).shutterDenominator == 24)
         #expect(f.exposure(auto: AutoSettings(), shutterDenominator: 500).shutterDenominator == 500)
     }
@@ -54,10 +57,10 @@ struct VideoFormatTests {
 
     @Test func logNeedsProResAndALogMode() {
         var f = VideoFormat()
-        f.encoding = .log          // HEVC
+        f.encoding = .log  // HEVC
         #expect(f.normalized(for: pro).encoding == .standard)
         f.codec = .proRes
-        f.frameRate = 60           // no Log at 4K 60 here
+        f.frameRate = 60  // no Log at 4K 60 here
         #expect(f.normalized(for: pro).encoding == .standard)
     }
 
@@ -92,23 +95,23 @@ struct VideoFormatTests {
         #expect(f.recordedResolution == .hd1080)
         f.codec = .proResRAW
         #expect(f.recordedResolution == .uhd4K)
-        #expect(f.resolution == .hd1080)   // kept for when the codec changes back
+        #expect(f.resolution == .hd1080)  // kept for when the codec changes back
     }
 
     @Test func setGreysOutWhatTheLensCantRecord() {
-        var f = VideoFormat()   // 4K 24 HEVC
+        var f = VideoFormat()  // 4K 24 HEVC
         #expect(pro.allows(.hd1080, for: f))
         #expect(pro.allows(frameRate: 60, for: f))
-        #expect(!pro.allows(frameRate: 25, for: f))            // 25 only at 1080p here
+        #expect(!pro.allows(frameRate: 25, for: f))  // 25 only at 1080p here
         #expect(pro.allows(.proResRAW))
         #expect(!VideoCapabilities().allows(.proRes))
-        #expect(!pro.allows(.log, for: f))                     // Log needs ProRes
+        #expect(!pro.allows(.log, for: f))  // Log needs ProRes
         f.codec = .proRes
         #expect(pro.allows(.log, for: f))
         f.frameRate = 60
-        #expect(!pro.allows(.log, for: f))                     // no Log format at 4K 60
+        #expect(!pro.allows(.log, for: f))  // no Log format at 4K 60
         f.codec = .proResRAW
-        #expect(!pro.allows(.hd1080, for: f))                  // ProRes RAW is 4K only
+        #expect(!pro.allows(.hd1080, for: f))  // ProRes RAW is 4K only
         #expect(pro.allows(frameRate: 30, for: f))
         #expect(!pro.allows(frameRate: 60, for: f))
     }

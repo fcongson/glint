@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 @Suite("Saved photo log")
@@ -69,7 +70,7 @@ struct SavedPhotoLogTests {
             try Data("x".utf8).write(to: folder.appendingPathComponent(name))
         }
         let removed = SavedPhotoLog.removeFiles(["IMG-1.heic", "IMG-1.dng", "IMG-gone.heic"], in: folder)
-        #expect(removed == 2)   // the one that was already gone isn't counted, and isn't a problem
+        #expect(removed == 2)  // the one that was already gone isn't counted, and isn't a problem
         #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("IMG-1.heic").path))
         #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("IMG-1.dng").path))
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("IMG-2.heic").path))

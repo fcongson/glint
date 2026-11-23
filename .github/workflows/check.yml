@@ -1,0 +1,25 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      # The project needs Xcode 27 to open, which GitHub's runners don't have yet.
+      # Until they do, CI covers format and lint; run `tools/check` locally for build and tests.
+      - name: Format and lint
+        run: tools/check --fast

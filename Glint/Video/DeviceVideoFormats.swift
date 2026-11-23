@@ -10,7 +10,8 @@ enum DeviceVideoFormats {
             guard Self.supports(format, frameRate: f.frameRate) else { return false }
             if f.codec == .proResRAW { return Self.isBayerVideo(format) }
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            guard !Self.isBayerVideo(format), VideoResolution(width: dims.width, height: dims.height) == f.resolution else { return false }
+            guard !Self.isBayerVideo(format), VideoResolution(width: dims.width, height: dims.height) == f.resolution
+            else { return false }
             return f.encoding == .log ? format.supportedColorSpaces.contains(.appleLog) : true
         }
         if f.codec == .proResRAW {
@@ -45,12 +46,15 @@ enum DeviceVideoFormats {
     }
 
     private static func supports(_ format: AVCaptureDevice.Format, frameRate: Int) -> Bool {
-        format.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= Double(frameRate) && Double(frameRate) <= $0.maxFrameRate }
+        format.videoSupportedFrameRateRanges.contains {
+            $0.minFrameRate <= Double(frameRate) && Double(frameRate) <= $0.maxFrameRate
+        }
     }
 
     /// Bayer RAW video formats exist from iOS 26 (iPhone 17 Pro); they're what ProRes RAW records from.
     private static func isBayerVideo(_ format: AVCaptureDevice.Format) -> Bool {
         guard #available(iOS 26.0, *) else { return false }
-        return CMFormatDescriptionGetMediaSubType(format.formatDescription) == kCVPixelFormatType_96VersatileBayerPacked12
+        return CMFormatDescriptionGetMediaSubType(format.formatDescription)
+            == kCVPixelFormatType_96VersatileBayerPacked12
     }
 }

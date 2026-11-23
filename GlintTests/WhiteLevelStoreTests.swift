@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 @Suite("White level store")
@@ -19,7 +20,7 @@ struct WhiteLevelStoreTests {
         let store = WhiteLevelStore(defaults: try emptyDefaults())
         store.save(235, for: "wide 4032x3024 photo")
         store.save(243, for: "tele 3840x2160 video")
-        store.save(238, for: "wide 4032x3024 photo")   // learned again
+        store.save(238, for: "wide 4032x3024 photo")  // learned again
         #expect(store.level(for: "wide 4032x3024 photo") == 238)
         #expect(store.level(for: "tele 3840x2160 video") == 243)
         #expect(store.level(for: "ultrawide 4032x3024 photo") == nil)

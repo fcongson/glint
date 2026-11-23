@@ -15,7 +15,7 @@ struct GridOverlay: View {
                 }
             }
             .stroke(Color.white.opacity(0.55), lineWidth: 0.75)
-            .shadow(color: .black.opacity(0.5), radius: 1)   // so the lines read over a bright scene too
+            .shadow(color: .black.opacity(0.5), radius: 1)  // so the lines read over a bright scene too
             .animation(.easeOut(duration: 0.25), value: frame)
         }
         .allowsHitTesting(false)

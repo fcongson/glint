@@ -13,14 +13,18 @@ struct TopBar: View {
             if cam.isRecording {
                 RecordingTimer(cam: cam)
             } else {
-                Button { toggleSet() } label: { ChipLabel("SET") }
-                    .buttonStyle(ChipStyle(isOn: showingSet, outlined: true))
-                    .accessibilityLabel("Settings")
-                    .accessibilityValue(showingSet ? "Open" : "Closed")
-                    .accessibilityHint("The photo or video format, peaking and the zebra level")
+                Button {
+                    toggleSet()
+                } label: {
+                    ChipLabel("SET")
+                }
+                .buttonStyle(ChipStyle(isOn: showingSet, outlined: true))
+                .accessibilityLabel("Settings")
+                .accessibilityValue(showingSet ? "Open" : "Closed")
+                .accessibilityHint("The photo or video format, peaking and the zebra level")
                 formatReadout
             }
-            Spacer(minLength: 100)   // the Dynamic Island
+            Spacer(minLength: 100)  // the Dynamic Island
             LiveExposureMeter(cam: cam)
         }
         .shownWhenReady(cam.isCameraReady)
@@ -33,12 +37,15 @@ struct TopBar: View {
     private var formatReadout: some View {
         let photo = cam.captureMode == .photo
         let file = SettingsText.fileType(cam.fileType)
-        let format = photo
-            ? "\(file) \(SettingsText.aspect(cam.appliedAspect))"   // always both, so the readout doesn't change shape
+        let format =
+            photo
+            ? "\(file) \(SettingsText.aspect(cam.appliedAspect))"  // always both, so the readout doesn't change shape
             : SettingsText.videoFormat(cam.videoFormat)
         // A flash mark after it while the flash will fire or the light is on, since SET is usually closed.
-        let flash = photo ? cam.flash.available(hasFlash: cam.hasFlash)
-                          : (cam.isVideoLightOn && cam.hasVideoLight ? FlashSetting.on : .off)
+        let flash =
+            photo
+            ? cam.flash.available(hasFlash: cam.hasFlash)
+            : (cam.isVideoLightOn && cam.hasVideoLight ? FlashSetting.on : .off)
         let title = format + flash.mark
         return Button {
             toggleSet()
@@ -52,10 +59,14 @@ struct TopBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(photo ? "Photo format" : "Video format")
-        .accessibilityValue((photo ? "\(file), \(SettingsText.aspectSpoken(cam.appliedAspect))" : format)
-                            + SettingsText.flashSpoken(flash, isVideo: !photo))
-        .accessibilityHint(photo ? "Opens Settings, where file type, aspect ratio and flash are"
-                                 : "Opens Settings, where resolution, frame rate, codec, exposure lock and the light are")
+        .accessibilityValue(
+            (photo ? "\(file), \(SettingsText.aspectSpoken(cam.appliedAspect))" : format)
+                + SettingsText.flashSpoken(flash, isVideo: !photo)
+        )
+        .accessibilityHint(
+            photo
+                ? "Opens Settings, where file type, aspect ratio and flash are"
+                : "Opens Settings, where resolution, frame rate, codec, exposure lock and the light are")
     }
 
     private func toggleSet() {
