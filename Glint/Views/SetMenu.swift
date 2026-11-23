@@ -9,8 +9,8 @@ import SwiftUI
 struct SetMenu: View {
     let cam: CameraController
     let onDone: () -> Void
-    @AppStorage(RailSide.key) private var railSide: RailSide = .right
-    @AppStorage(DebugInfo.key) private var debugInfo = false
+    @AppStorage(RailSide.key, store: SharedDefaults.store) private var railSide: RailSide = .right
+    @AppStorage(DebugInfo.key, store: SharedDefaults.store) private var debugInfo = false
 
     enum Tile: CaseIterable {
         case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
@@ -309,5 +309,5 @@ enum DebugInfo {
     }
 
     /// Off until switched on.
-    static var isOn: Bool { isAvailable && UserDefaults.standard.bool(forKey: key) }
+    static var isOn: Bool { isAvailable && SharedDefaults.store.bool(forKey: key) }
 }

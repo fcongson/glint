@@ -32,7 +32,7 @@ struct ContentView: View {
         .onAppear { cam.start() }
         .onChange(of: scenePhase) { _, phase in
             // Remembered between launches, like a camera's settings. Leaving the screen comes before any quit.
-            if phase != .active { cam.saveSettings() }
+            if phase != .active { cam.flushSettings() } else { cam.reloadSavedSettings() }
             #if LOCKED_CAPTURE   // the app's camera is stopped by the system in the background; the extension's isn't
             cam.setInForeground(phase == .active)
             #endif

@@ -34,12 +34,12 @@ struct SavedSettings: Codable, Equatable {
 
     static let key = "settings"
 
-    static func load(from defaults: UserDefaults = .standard) -> SavedSettings? {
+    static func load(from defaults: UserDefaults = SharedDefaults.store) -> SavedSettings? {
         guard let data = defaults.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(SavedSettings.self, from: data)
     }
 
-    func save(to defaults: UserDefaults = .standard) {
+    func save(to defaults: UserDefaults = SharedDefaults.store) {
         guard let data = try? JSONEncoder().encode(self) else { return }
         defaults.set(data, forKey: Self.key)
     }

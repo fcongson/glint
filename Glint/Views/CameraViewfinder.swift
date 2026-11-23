@@ -8,8 +8,8 @@ struct CameraViewfinder: View {
     let deviceAngle: Angle
     let flash: Bool
     @Binding var showingSet: Bool
-    @AppStorage(RailSide.key) private var railSide: RailSide = .right
-    @AppStorage(DebugInfo.key) private var debugInfoSetting = false   // see `DebugInfo`
+    @AppStorage(RailSide.key, store: SharedDefaults.store) private var railSide: RailSide = .right
+    @AppStorage(DebugInfo.key, store: SharedDefaults.store) private var debugInfoSetting = false   // see `DebugInfo`
     @State private var focusPoint: CGPoint?
     @State private var focusTapCount = 0
     @State private var lockPoint: CGPoint?   // where the long press that set the AE/AF lock was

@@ -7,7 +7,7 @@ struct WhiteLevelStore: Sendable {
 
     nonisolated(unsafe) private let defaults: UserDefaults   // UserDefaults is thread-safe, though not marked Sendable
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = SharedDefaults.store) {
         self.defaults = defaults
     }
 

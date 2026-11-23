@@ -103,6 +103,7 @@
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "NO",
+        "CODE_SIGN_ENTITLEMENTS": "Config/Glint.entitlements",
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "ENABLE_APP_SANDBOX": "YES",
@@ -186,6 +187,7 @@
         "resources",
       ],
       "build-settings": {
+        "CODE_SIGN_ENTITLEMENTS": "Config/GlintCapture.entitlements",
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "GENERATE_INFOPLIST_FILE": "YES",
