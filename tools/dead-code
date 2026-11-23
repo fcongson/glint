@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Finds unused code with Periphery. Needs `brew install periphery` and a full build, so it runs locally, not in CI.
+# Periphery can't read this project's Xcode 27 file format, so it scans the compiler's index instead.
+#   tools/dead-code                  report unused code (non-zero exit if any is new)
+#   tools/dead-code --write-baseline accept the current findings
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+command -v periphery >/dev/null || { echo "Periphery is not installed: brew install periphery" >&2; exit 1; }
+
+derived=.build/periphery
+config=$derived/generic.json
+
+xcodebuild build-for-testing -project Glint.xcodeproj -scheme GlintTests \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
+  CODE_SIGNING_ALLOWED=NO -quiet
+
+cat > "$config" <<JSON
+{
+  "indexstores": ["$PWD/$derived/Index.noindex/DataStore"],
+  "plists": [], "xibs": [], "xcdatamodels": [], "xcmappingmodels": [],
+  "test_targets": ["GlintTests", "GlintUITests"]
+}
+JSON
+
+args=(--generic-project-config "$config" --format xcode --quiet)
+if [[ ${1:-} == --write-baseline ]]; then
+  periphery scan "${args[@]}" --write-baseline .periphery-baseline.json
+elif [[ -f .periphery-baseline.json ]]; then
+  periphery scan "${args[@]}" --baseline .periphery-baseline.json --strict
+else
+  periphery scan "${args[@]}" --strict
+fi
