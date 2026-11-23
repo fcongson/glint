@@ -117,6 +117,7 @@
         "INFOPLIST_KEY_NSLocationWhenInUseUsageDescription": "Glint tags your photos with where they were taken.",
         "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Glint records audio with video.",
         "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": "Glint saves your captures to Photos.",
+        "INFOPLIST_KEY_NSPhotoLibraryUsageDescription": "Glint shows the photos it has saved, and deletes the ones you choose.",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]": "YES",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]": "YES",
         "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]": "YES",

@@ -1,29 +1,39 @@
 import SwiftUI
 
-/// Full-screen photo review; tap anywhere to close.
+/// Full-screen photo review; tap anywhere to close. In the app it pages through every photo Glint has saved; in the
+/// Lock Screen camera, only the ones taken in that session.
 struct ReviewView: View {
-    let shots: [Shot]
     let angle: Angle   // device rotation; the screen stays portrait, so the image turns instead
-    @State private var selection: UUID?
+    /// Deletes a photo and says whether it's gone. Nil where photos can't be deleted (the Lock Screen camera).
+    let onDelete: ((ReviewEntry) async -> Bool)?
+    @State private var entries: [ReviewEntry]
+    @State private var selection: String?
+    /// The photos on pages that are on or near the screen, for the details card (see `ReviewPage`).
+    @State private var loaded: [String: Shot] = [:]
+    @State private var isDeleting = false
     @Environment(\.dismiss) private var dismiss
 
-    init(shots: [Shot], angle: Angle) {
-        self.shots = shots
+    init(entries: [ReviewEntry], angle: Angle, onDelete: ((ReviewEntry) async -> Bool)? = nil) {
         self.angle = angle
-        _selection = State(initialValue: shots.last?.id)   // open on the newest photo
+        self.onDelete = onDelete
+        _entries = State(initialValue: entries)
+        _selection = State(initialValue: entries.last?.id)   // open on the newest photo
     }
 
-    private var current: Shot? { shots.first { $0.id == selection } }
+    private var current: Shot? { selection.flatMap { loaded[$0] } }
+    private var currentEntry: ReviewEntry? { entries.first { $0.id == selection } }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
                 .onTapGesture { dismiss() }
                 .accessibilityHidden(true)   // the "Back to camera" button is the accessible way out
-            // Swipe sideways to move between photos taken this session.
+            // Swipe sideways to move between photos.
             TabView(selection: $selection) {
-                ForEach(shots) { shot in
-                    ReviewPage(shot: shot, angle: angle, onTap: { dismiss() }).tag(Optional(shot.id))
+                ForEach(entries) { entry in
+                    ReviewPage(entry: entry, angle: angle, onTap: { dismiss() },
+                               onLoaded: { loaded[entry.id] = $0 }, onUnloaded: { loaded[entry.id] = nil })
+                        .tag(Optional(entry.id))
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -40,20 +50,16 @@ struct ReviewView: View {
                 .animation(.easeInOut(duration: 0.3), value: angle)
                 .allowsHitTesting(false)
             }
-            // Explicit way back to the camera; the icon turns with the device like the other controls.
+            // Explicit way back to the camera, and the way to delete; the icons turn with the device like the other
+            // controls.
             VStack {
                 HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.15), in: Circle())
-                            .rotationEffect(angle)
-                            .animation(.easeInOut(duration: 0.3), value: angle)
-                    }
-                    .accessibilityLabel("Back to camera")
+                    roundButton("xmark", label: "Back to camera") { dismiss() }
                     Spacer()
+                    if onDelete != nil, currentEntry?.canDelete == true {
+                        roundButton("trash", label: "Delete photo") { Task { await deleteCurrent() } }
+                            .disabled(isDeleting)
+                    }
                 }
                 Spacer()
             }
@@ -61,6 +67,33 @@ struct ReviewView: View {
             .padding(.top, 8)
         }
         .accessibilityAction(.escape) { dismiss() }   // two-finger scrub closes the review
+    }
+
+    private func roundButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(width: 44, height: 44)
+                .background(Color.white.opacity(0.15), in: Circle())
+                .rotationEffect(angle)
+                .animation(.easeInOut(duration: 0.3), value: angle)
+        }
+        .accessibilityLabel(label)
+    }
+
+    /// iOS asks to confirm the deletion itself; if that's declined, nothing changes here. Afterwards review moves to
+    /// the next photo, or the one before if that was the last, and closes when none are left.
+    private func deleteCurrent() async {
+        guard let onDelete, !isDeleting, let entry = currentEntry,
+              let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        isDeleting = true
+        defer { isDeleting = false }
+        guard await onDelete(entry) else { return }
+        let next = ReviewPlan.selection(afterDeletingAt: index, of: entries.count)
+        entries.remove(at: index)
+        loaded[entry.id] = nil
+        if let next { selection = entries[next].id } else { dismiss() }
     }
 
     /// Capture details above, the settings the photo was taken with below; each part is skipped when the metadata lacks it.
@@ -140,38 +173,60 @@ struct ReviewView: View {
         if let f = info.fNumber { rows.append(("APERTURE", SettingsText.aperture(f))) }
         if let mm = info.focalLength35mm { rows.append(("FOCAL", "\(mm)mm")) }
         if let ev = info.exposureBias { rows.append(("EV", SettingsText.exposureBias(ev))) }
-        rows.append(("WB", SettingsText.whiteBalance(info.whiteBalance)))
+        if let whiteBalance = info.whiteBalance { rows.append(("WB", SettingsText.whiteBalance(whiteBalance))) }
         return rows
     }
 }
 
 /// One photo in review. Shots keep their review image compressed, so the page decodes it when it comes on screen
 /// (showing the thumbnail for the moment that takes) and lets it go when it leaves: only the pages near the one
-/// you're looking at hold a full bitmap.
+/// you're looking at hold a full bitmap. A photo from the library is fetched when its page comes on screen too.
 private struct ReviewPage: View {
-    let shot: Shot
+    let entry: ReviewEntry
     let angle: Angle
     let onTap: () -> Void
+    let onLoaded: (Shot) -> Void
+    let onUnloaded: () -> Void
+    @State private var shot: Shot?
     @State private var image: UIImage?
 
     var body: some View {
         GeometryReader { geo in
             // At a quarter turn the image's width runs along the screen's height, so swap the box before rotating.
             let box = angle.isQuarterTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
-            Image(uiImage: image ?? shot.thumbnail)
-                .resizable()
-                .scaledToFit()
-                .frame(width: box.width, height: box.height)
-                .rotationEffect(angle)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                .accessibilityLabel("Photo")
+            Group {
+                if let shown = image ?? shot?.thumbnail {
+                    Image(uiImage: shown).resizable().scaledToFit()
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .frame(width: box.width, height: box.height)
+            .rotationEffect(angle)
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            .accessibilityLabel("Photo")
         }
         .animation(.easeInOut(duration: 0.3), value: angle)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
-        .task {
-            if image == nil { image = await UIImage(data: shot.imageData)?.byPreparingForDisplay() }
+        .task { await load() }
+        .onDisappear {
+            image = nil
+            shot = nil
+            onUnloaded()
         }
-        .onDisappear { image = nil }
+    }
+
+    private func load() async {
+        guard shot == nil, var loaded = await entry.load() else { return }
+        shot = loaded
+        onLoaded(loaded)
+        image = if let prepared = loaded.preparedImage { prepared }
+                else { await UIImage(data: loaded.imageData)?.byPreparingForDisplay() }
+        if entry.needsPlace, loaded.place == nil, let location = loaded.location,
+           let place = await LocationProvider.placeName(for: location) {
+            loaded.place = place
+            onLoaded(loaded)
+        }
     }
 }

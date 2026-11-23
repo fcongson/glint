@@ -18,14 +18,33 @@ enum MediaLibrary {
         LockScreenCaptures.sessionDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
     }
 
+    /// The Photos assets a save creates, filled in by the change block (which runs on Photos' own queue) and read
+    /// once the save has finished.
+    private final class CreatedAssets: @unchecked Sendable {
+        private let lock = NSLock()
+        private var ids: [String] = []
+        func add(_ id: String?) { if let id { lock.withLock { ids.append(id) } } }
+        var all: [String] { lock.withLock { ids } }
+    }
+
+    /// Notes the saved photos in the log review reads from: each created asset with the Documents copies of it.
+    /// `files` lines up with `assets`.
+    private static func record(_ assets: CreatedAssets, files: [[String]]) {
+        let ids = assets.all
+        guard ids.count == files.count else { return }
+        let now = Date()
+        SavedPhotoLog.shared?.append(zip(ids, files).map { SavedPhoto(assetID: $0, files: $1, savedAt: now) })
+    }
+
     /// The capture ID keeps file names unique when several shots land in the same second.
     /// `location` tags the Photos copy only; the Documents copy is saved as captured.
     static func savePhoto(_ data: Data, isRAW: Bool, captureID: Int64, location: CLLocation?, report: @escaping @Sendable (String) -> Void) {
+        let name = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID).\(isRAW ? "dng" : "heic")"
         if let dir = documentsDirectory {
-            let name = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID).\(isRAW ? "dng" : "heic")"
             do { try writeToDocuments(data, at: dir.appendingPathComponent(name)) }
             catch { report("Save failed: \(error.localizedDescription)") }
         }
+        let created = CreatedAssets()
         requestAddAccess { granted in
             guard granted else { report("Photos access denied"); return }
             PHPhotoLibrary.shared().performChanges({
@@ -34,7 +53,9 @@ enum MediaLibrary {
                 let request = PHAssetCreationRequest.forAsset()
                 request.location = location
                 request.addResource(with: .photo, data: data, options: options)
+                created.add(request.placeholderForCreatedAsset?.localIdentifier)
             }) { ok, error in
+                if ok { record(created, files: [[name]]) }
                 report(ok ? "Saved" : "Save failed: \(error?.localizedDescription ?? "?")")
             }
         }
@@ -57,12 +78,13 @@ enum MediaLibrary {
         // through a temporary file, which Photos moves into the library.
         let tempDNG = FileManager.default.temporaryDirectory.appendingPathComponent(base + ".dng")
         let removeTemp: @Sendable () -> Void = { try? FileManager.default.removeItem(at: tempDNG) }
+        let created = CreatedAssets()
         requestAddAccess { granted in
             guard granted else { report("Photos access denied"); return }
             do {
                 try dng.write(to: tempDNG)
             } catch {
-                saveSeparately(heic: heic, dng: dng, location: location, report: report)
+                saveSeparately(heic: heic, dng: dng, base: base, location: location, report: report)
                 return
             }
             PHPhotoLibrary.shared().performChanges({
@@ -72,24 +94,28 @@ enum MediaLibrary {
                 let options = rawOptions
                 options.shouldMoveFile = true
                 request.addResource(with: .alternatePhoto, fileURL: tempDNG, options: options)
+                created.add(request.placeholderForCreatedAsset?.localIdentifier)
             }) { ok, _ in
                 removeTemp()   // already gone if Photos moved it
-                if ok { report("Saved"); return }
-                saveSeparately(heic: heic, dng: dng, location: location, report: report)
+                if ok { record(created, files: [[base + ".heic", base + ".dng"]]); report("Saved"); return }
+                saveSeparately(heic: heic, dng: dng, base: base, location: location, report: report)
             }
         }
     }
 
     /// If Photos still won't take the pair, keep both as separate photos rather than lose either.
-    private static func saveSeparately(heic: Data, dng: Data, location: CLLocation?,
+    private static func saveSeparately(heic: Data, dng: Data, base: String, location: CLLocation?,
                                        report: @escaping @Sendable (String) -> Void) {
+        let created = CreatedAssets()
         PHPhotoLibrary.shared().performChanges({
             for (data, options) in [(heic, nil), (dng, rawOptions)] as [(Data, PHAssetResourceCreationOptions?)] {
                 let request = PHAssetCreationRequest.forAsset()
                 request.location = location
                 request.addResource(with: .photo, data: data, options: options)
+                created.add(request.placeholderForCreatedAsset?.localIdentifier)
             }
         }) { ok, error in
+            if ok { record(created, files: [[base + ".heic"], [base + ".dng"]]) }
             report(ok ? "Saved RAW and HEIC as separate photos"
                       : "Save failed: \(error?.localizedDescription ?? "?")")
         }

@@ -9,6 +9,7 @@ struct CaptureControls: View {
     @Binding var flash: Bool
     @State private var selected: ManualParam = .shutter   // kept here so MANUAL comes back to the same ruler
     @State private var showReview = false
+    @State private var reviewEntries: [ReviewEntry] = []
 
     var body: some View {
         VStack(spacing: 8) {
@@ -98,7 +99,7 @@ struct CaptureControls: View {
     }
 
     private var thumbnailButton: some View {
-        Button { showReview = true } label: {
+        Button { Task { await openReview() } } label: {
             Group {
                 if let img = cam.lastThumbnail {
                     Image(uiImage: img).resizable().scaledToFill()
@@ -114,8 +115,47 @@ struct CaptureControls: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }
         .accessibilityLabel("Review photos")
-        .disabled(cam.lastThumbnail == nil)
-        .fullScreenCover(isPresented: $showReview) { ReviewView(shots: cam.shots, angle: deviceAngle) }
+        .disabled(!cam.canOpenReview)
+        .fullScreenCover(isPresented: $showReview) {
+            ReviewView(entries: reviewEntries, angle: deviceAngle, onDelete: deleteFromReview)
+        }
         .onChange(of: showReview) { _, isReviewing in cam.setReviewing(isReviewing) }   // saves battery
+    }
+
+    /// In the app, review pages through every photo Glint has saved, once Photos can be read (the first time asks).
+    /// Where it can't, and in the Lock Screen camera whatever it's allowed, it's only this session's photos.
+    private func openReview() async {
+        #if LOCKED_CAPTURE
+        let isLockScreen = true, canRead = false
+        #else
+        let isLockScreen = false
+        let canRead = await PhotoHistory.requestReadAccess()
+        #endif
+        switch ReviewPlan.source(isLockScreen: isLockScreen, canReadLibrary: canRead) {
+        case .thisSession: reviewEntries = cam.sessionReviewEntries()
+        case .library:
+            #if !LOCKED_CAPTURE
+            reviewEntries = PhotoHistory.entries()
+            await cam.showLatestSavedPhoto(onlyIfNone: true)   // access may have just been given
+            #endif
+        }
+        showReview = !reviewEntries.isEmpty
+        if reviewEntries.isEmpty {
+            cam.notify(canRead || isLockScreen ? "No photos to review yet"
+                                               : "Photos access is off. Allow it in Settings to review your photos")
+        }
+    }
+
+    /// Nil in the Lock Screen camera: someone holding a locked phone can't delete photos from it.
+    private var deleteFromReview: ((ReviewEntry) async -> Bool)? {
+        #if LOCKED_CAPTURE
+        nil
+        #else
+        { entry in
+            let deleted = await PhotoHistory.delete(assetID: entry.id)
+            if deleted { await cam.showLatestSavedPhoto() }
+            return deleted
+        }
+        #endif
     }
 }

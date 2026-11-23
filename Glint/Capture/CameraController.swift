@@ -286,6 +286,7 @@ final class CameraController {
         if #available(iOS 18.0, *) {
             Task.detached(priority: .utility) { await LockScreenCaptures.collect() }
         }
+        Task { await showLatestSavedPhoto(onlyIfNone: true) }   // the thumbnail isn't empty on opening
         #endif
         Task {
             for await event in capture.events { handle(event) }
@@ -912,6 +913,31 @@ final class CameraController {
         }
     }
 
+    /// Whether the thumbnail button can open review: there's a photo to show, or (in the app) Photos hasn't been
+    /// asked for read access yet, which opening review does.
+    var canOpenReview: Bool {
+        #if LOCKED_CAPTURE
+        lastThumbnail != nil
+        #else
+        lastThumbnail != nil || PhotoHistory.canAskForReadAccess
+        #endif
+    }
+
+    /// This session's photos as pages for review, oldest first. They can't be deleted from there.
+    func sessionReviewEntries() -> [ReviewEntry] {
+        shots.map { shot in ReviewEntry(id: shot.id.uuidString, canDelete: false, needsPlace: false) { shot } }
+    }
+
+    #if !LOCKED_CAPTURE
+    /// Shows the newest photo Glint has saved on the thumbnail button, from the library, when it can be read without
+    /// asking. After one is deleted this brings the one before it forward (or empties the button).
+    func showLatestSavedPhoto(onlyIfNone: Bool = false) async {
+        guard !onlyIfNone || lastThumbnail == nil, PhotoHistory.canRead else { return }
+        let latest = await PhotoHistory.latestThumbnail()
+        if !onlyIfNone || lastThumbnail == nil { lastThumbnail = latest }
+    }
+    #endif
+
     /// Developing, saving and drawing the review image run off the main actor (`PhotoProcessor`); the result is
     /// added to `shots` here.
     private func photoCaptured(_ photo: CapturedPhoto) {
@@ -1003,6 +1029,9 @@ final class CameraController {
     }
 
     // MARK: Status
+
+    /// For the views: says something in the status line, e.g. why the review didn't open.
+    func notify(_ message: String) { post(message) }
 
     /// Shows a transient status message, cleared after a moment unless a newer one has replaced it.
     private func post(_ message: String) {
