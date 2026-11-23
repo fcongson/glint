@@ -4,7 +4,7 @@ A raw-first iPhone camera app (Swift 6, SwiftUI, AVFoundation). The README descr
 
 ## Checks
 
-Run `tools/check` before pushing. CI runs the same script.
+Run `tools/check` before pushing. CI runs `tools/check --fast` only, because GitHub's runners lack the Xcode this project needs; build and tests run locally.
 
 - `tools/check --fast`: swift-format and SwiftLint only (the pre-commit hook).
 - `tools/check --fix`: apply swift-format first.
