@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import os
 
 /// The camera screen: top bar, viewfinder, tool row and capture controls, top to bottom. Each is its own view and
 /// reads only what it shows from the controller, so a change redraws the part it belongs to.
@@ -30,10 +31,34 @@ struct ContentView: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear { cam.start() }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { old, phase in
+            Log.lifecycle.notice("[\(Log.copy, privacy: .public)] scene phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public)")
             // Remembered between launches, like a camera's settings. Leaving the screen comes before any quit.
-            if phase != .active { cam.saveSettings() }
+            if phase != .active { cam.flushSettings() } else { cam.reloadSavedSettings() }
+            #if LOCKED_CAPTURE   // the app's camera is stopped by the system in the background; the extension's isn't
+            cam.setInForeground(phase == .active)
+            #endif
         }
+        #if LOCKED_CAPTURE
+        // The Lock Screen scene can end by unlocking, without the scene phase ever saying so: let go of the camera
+        // on any of these, so the app isn't told "Camera in use by another app".
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.willDeactivateNotification)) { _ in
+            Log.lifecycle.notice("[\(Log.copy, privacy: .public)] scene willDeactivate")
+            cam.setInForeground(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
+            Log.lifecycle.notice("[\(Log.copy, privacy: .public)] scene didEnterBackground")
+            cam.setInForeground(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)) { _ in
+            Log.lifecycle.notice("[\(Log.copy, privacy: .public)] scene didDisconnect")
+            cam.setInForeground(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didActivateNotification)) { _ in
+            Log.lifecycle.notice("[\(Log.copy, privacy: .public)] scene didActivate")
+            cam.setInForeground(true)
+        }
+        #endif
         // A long take, or one on a tripod, mustn't end because the phone locked itself. Only while recording:
         // the rest of the time the screen sleeps as usual, which is what saves the battery.
         .onChange(of: cam.isRecording) { _, isRecording in

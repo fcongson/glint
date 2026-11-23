@@ -41,6 +41,15 @@ struct PhotoProcessor: Sendable {
                 report(photo.keepsDNG ? "Develop failed, saving DNG only" : "Develop failed, saving DNG")
             }
             developTime = CFAbsoluteTimeGetCurrent() - t0
+        } else if !photo.keepsDNG, !photo.aspect.isFullSensor {
+            // The camera's own HEIC, from a lens that offers no Bayer RAW: cropped the same way a developed one is.
+            if let cropped = await developer.crop(photo.data, aspect: photo.aspect) {
+                heic = cropped
+                let size = Self.savedSize(width: info.pixelWidth, height: info.pixelHeight, aspect: photo.aspect)
+                info = info.saved(pixelWidth: size?.width, pixelHeight: size?.height, fileBytes: cropped.count)
+            } else {
+                report("Couldn't crop to the chosen aspect, saving the full frame")
+            }
         }
         // Saving doesn't hold up the review image.
         let dng = photo.data, developed = heic

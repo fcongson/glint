@@ -8,8 +8,8 @@ struct CameraViewfinder: View {
     let deviceAngle: Angle
     let flash: Bool
     @Binding var showingSet: Bool
-    @AppStorage(RailSide.key) private var railSide: RailSide = .right
-    @AppStorage(DebugInfo.key) private var debugInfoSetting = false   // see `DebugInfo`
+    @AppStorage(RailSide.key, store: SharedDefaults.store) private var railSide: RailSide = .right
+    @AppStorage(DebugInfo.key, store: SharedDefaults.store) private var debugInfoSetting = false   // see `DebugInfo`
     @State private var focusPoint: CGPoint?
     @State private var focusTapCount = 0
     @State private var lockPoint: CGPoint?   // where the long press that set the AE/AF lock was
@@ -73,8 +73,8 @@ struct CameraViewfinder: View {
                 EmptyView()
             } else if cam.captureMode == .video {
                 CropMask(aspect: .sixteenNine)   // video is 16:9 from the 4:3 sensor
-            } else if !cam.aspect.isFullSensor {
-                CropMask(aspect: cam.aspect)
+            } else if !cam.appliedAspect.isFullSensor {
+                CropMask(aspect: cam.appliedAspect)
             }
         }
         .overlay {
@@ -168,7 +168,7 @@ struct CameraViewfinder: View {
 
     /// The frame that's kept: video's 16:9, or the photo aspect.
     private var frameAspect: AspectRatio {
-        cam.captureMode == .video ? .sixteenNine : cam.aspect
+        cam.captureMode == .video ? .sixteenNine : cam.appliedAspect
     }
 
     private var viewfinderHint: String {

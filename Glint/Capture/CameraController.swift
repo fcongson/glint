@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreLocation
 import SwiftUI
+import os
 
 /// Whether the big capture button takes a photo or records video.
 enum CaptureMode: Sendable, Codable { case photo, video }
@@ -106,16 +107,29 @@ final class CameraController {
     private let locationProvider = LocationProvider()
     private let photoProcessor = PhotoProcessor()
     @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// How long after a change its save waits, so a slider drag is one save. Short in tests.
+    @ObservationIgnored var saveDelay = Duration.milliseconds(400)
+    @ObservationIgnored private var hasUnsavedSettings = false
     @ObservationIgnored private var modeGeneration = 0   // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
     @ObservationIgnored private var statusGeneration = 0
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
 
-    init() {
+    /// Where settings are saved and loaded: the group's defaults, shared with the other copy of Glint.
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = SharedDefaults.store) {
+        self.defaults = defaults
         let renderer = ViewfinderRenderer.make()
         viewfinderRenderer = renderer
         capture = CaptureSession(viewfinder: renderer)
         isPeakingEnabled = renderer != nil
-        if let saved = SavedSettings.load() { restore(saved) }
+        if let saved = SavedSettings.load(from: defaults) {
+            restore(saved)
+            Log.settings.notice("[\(Log.copy, privacy: .public)] loaded at start: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)")
+        } else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] nothing saved yet, starting from the defaults")
+        }
     }
 
     // MARK: Saved settings
@@ -132,9 +146,84 @@ final class CameraController {
                       histogramStyle: histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
     }
 
-    /// Called when the app leaves the screen, which is also the last chance before it's quit from the app switcher.
-    func saveSettings() {
-        savedSettings.save()
+    /// Writes any change that hasn't been saved yet, when the screen is left: the last chance before the app is
+    /// quit from the app switcher. Only a change made here is written. Saving every time the screen is left would
+    /// let a copy that's been waiting in memory overwrite what the other copy saved in the meantime.
+    func flushSettings() {
+        guard hasUnsavedSettings else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] leaving the screen: nothing changed here, nothing written")
+            return
+        }
+        Log.settings.notice("[\(Log.copy, privacy: .public)] leaving the screen with a change not yet saved")
+        saveSettings()
+    }
+
+    private func saveSettings() {
+        saveTask?.cancel()
+        hasUnsavedSettings = false
+        let current = savedSettings
+        if current != SavedSettings.load(from: defaults) {
+            current.save(to: defaults)
+            Log.settings.notice("[\(Log.copy, privacy: .public)] saved: file \(String(describing: current.fileType), privacy: .public), aspect \(String(describing: current.aspect), privacy: .public)")
+        } else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] save skipped: what's saved is already this")   // taking up the other copy's save isn't a change to write back
+        }
+    }
+
+    /// Saves shortly after each change, not only on leaving the screen: the Lock Screen camera can be closed by
+    /// unlocking without ever reporting that it left, which lost its changes before the app could see them.
+    func saveSettingsAsTheyChange() {
+        withObservationTracking {
+            _ = savedSettings
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.settingsChanged() }
+        }
+    }
+
+    private func settingsChanged() {
+        hasUnsavedSettings = true
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: saveDelay)
+            guard !Task.isCancelled else { return }
+            saveSettings()
+        }
+        saveSettingsAsTheyChange()
+    }
+
+    /// The other copy of Glint (the app, or the Lock Screen camera) may have changed settings while this one was
+    /// waiting in memory. Called when the screen becomes active: takes up what was saved since, and does nothing
+    /// when nothing differs, which includes this copy's own save. Left alone mid-recording and in review.
+    func reloadSavedSettings() {
+        guard isCameraReady, !isRecording, !isReviewing else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] active: no reload (camera ready \(self.isCameraReady), recording \(self.isRecording), review \(self.isReviewing))")
+            return
+        }
+        guard let saved = SavedSettings.load(from: defaults), saved != savedSettings else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] active: saved settings match, nothing to take up")
+            return
+        }
+        Log.settings.notice("[\(Log.copy, privacy: .public)] active: taking up the other copy's settings: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)")
+        let before = savedSettings
+        let exposureChanged = saved.manual != before.manual || saved.iso != before.iso
+            || saved.shutterDenominator != before.shutterDenominator || saved.whiteBalanceKelvin != before.whiteBalanceKelvin
+            || saved.hasManualWhiteBalance != before.hasManualWhiteBalance || saved.auto != before.auto
+            || saved.exposureBias != before.exposureBias
+
+        // The capture mode and video format go through their setters, which tell the camera; the rest is values
+        // the camera is sent below, as at launch (`applySavedSettingsToCamera`).
+        var values = saved
+        values.captureMode = nil
+        values.videoFormat = nil
+        restore(values)
+        if exposureChanged { sendExposureMode(keepWhiteBalance: hasManualWhiteBalance) }
+        sendAnalysis()
+        updateLevelSensor()
+
+        if let format = saved.videoFormat {
+            if captureMode == .video, (saved.captureMode ?? .video) == .video { setVideoFormat(format) } else { videoFormat = format }
+        }
+        if let mode = saved.captureMode { setCaptureMode(mode) }
     }
 
     /// Puts saved values in place before the camera starts. The camera picks them up once it's running
@@ -189,6 +278,7 @@ final class CameraController {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        saveSettingsAsTheyChange()
         startTimer("launch")
         startTimer("outputs")
         #if !LOCKED_CAPTURE   // location permission belongs to the app; Lock Screen shots are saved untagged
@@ -313,9 +403,11 @@ final class CameraController {
             sendExposureMode(keepWhiteBalance: true)
             recordingFinished(url, outcome)
         case .interrupted(let reason):
+            Log.camera.notice("[\(Log.copy, privacy: .public)] interrupted: \(String(describing: reason), privacy: .public)")
             interruption = reason
             if let message = reason.message { AccessibilityNotification.Announcement(message).post() }
         case .interruptionEnded:
+            Log.camera.notice("[\(Log.copy, privacy: .public)] interruption ended")
             interruption = nil
         case .status(let message):
             post(message)
@@ -388,6 +480,13 @@ final class CameraController {
     func setFileType(_ type: PhotoFileType) { fileType = type }
 
     func setAspect(_ aspect: AspectRatio) { self.aspect = aspect }
+
+    /// The crop that will really be applied. A RAW photo is a DNG, which always keeps the full sensor, so while FILE
+    /// is RAW the chosen aspect is kept for later but does nothing (HEIC and RAW+HEIC crop the HEIC).
+    var appliedAspect: AspectRatio { fileType == .raw ? .fourThree : aspect }
+
+    /// Whether ASPECT can be changed, for SET to grey it out otherwise.
+    var canChooseAspect: Bool { fileType != .raw }
 
     /// Switch between manual exposure + locked white balance, and continuous auto.
     /// The first time into manual, white balance starts from whatever auto has chosen; after that, returning to
@@ -705,9 +804,22 @@ final class CameraController {
     func setReviewing(_ isReviewing: Bool) {
         self.isReviewing = isReviewing
         updateLevelSensor()
-        let running = !isReviewing
+        let running = !isReviewing && isInForeground
         if running { startTimer("resume") }
         locationProvider.setPaused(isReviewing)   // no photo can be taken from review
+        capture.enqueue { $0.setRunning(running) }
+    }
+
+    /// Whether the screen is in the foreground. The system stops the camera of a backgrounded app by itself, but a
+    /// Lock Screen extension isn't "backgrounded" that way and would keep the camera, so opening Glint afterwards
+    /// said "Camera in use by another app". Leaving the screen lets go of the camera; coming back takes it again.
+    private var isInForeground = true
+
+    func setInForeground(_ inForeground: Bool) {
+        Log.lifecycle.notice("[\(Log.copy, privacy: .public)] foreground \(inForeground) (was \(self.isInForeground))")
+        guard inForeground != isInForeground else { return }
+        isInForeground = inForeground
+        let running = inForeground && !isReviewing
         capture.enqueue { $0.setRunning(running) }
     }
 
@@ -791,7 +903,7 @@ final class CameraController {
     func capturePhoto() {
         shutterPresses += 1
         photoProcessing(started: true)
-        let fileType = fileType, aspect = aspect, flash = flash.available(hasFlash: hasFlash)
+        let fileType = fileType, aspect = appliedAspect, flash = flash.available(hasFlash: hasFlash)
         let whiteBalance: WhiteBalanceSetting = manual && !auto.whiteBalance ? .kelvin(Int(whiteBalanceKelvin)) : .auto
         let requestedAt = CFAbsoluteTimeGetCurrent()
         capture.enqueue {

@@ -27,10 +27,24 @@ struct ReviewImageRenderer: @unchecked Sendable {
         filter.moireReductionAmount = 0
         filter.boostAmount = 0
         filter.boostShadowAmount = 0
-        guard var image = filter.outputImage,
-              let colorSpace = CGColorSpace(name: CGColorSpace.displayP3) else { return nil }
+        guard let image = filter.outputImage else { return nil }
+        return encodeHEIC(image, aspect: aspect, metadataFrom: dng)
+    }
+
+    /// The camera's own HEIC (what's saved when Bayer RAW isn't offered, on some lenses) cropped to `aspect`, which
+    /// would otherwise ignore the ASPECT setting. Nil when it can't be decoded; the caller keeps the original.
+    func cropHEIC(_ heic: Data, aspect: AspectRatio) -> Data? {
+        guard !aspect.isFullSensor,
+              let image = CIImage(data: heic, options: [.applyOrientationProperty: true]) else { return nil }
+        return encodeHEIC(image, aspect: aspect, metadataFrom: heic)
+    }
+
+    /// Crops an upright image to `aspect` and writes it as HEIC carrying `metadataFrom`'s metadata.
+    private func encodeHEIC(_ developed: CIImage, aspect: AspectRatio, metadataFrom dng: Data) -> Data? {
+        var image = developed
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.displayP3) else { return nil }
         if !aspect.isFullSensor {
-            // The developed image is already upright, so the crop's long side is the image's long side.
+            // The image is already upright, so the crop's long side is the image's long side.
             let extent = image.extent
             let crop = aspect.cropRect(in: extent.size).offsetBy(dx: extent.minX, dy: extent.minY).integral
             image = image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))

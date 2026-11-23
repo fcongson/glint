@@ -29,6 +29,7 @@
     },
     { "kind": "folder", "path": "Shared", "target-membership": [ "Glint", "GlintCapture", "GlintControlExtension" ] },
     { "kind": "folder", "path": "GlintTests", "target-membership": [ "GlintTests" ] },
+    { "kind": "folder", "path": "GlintUITests", "target-membership": [ "GlintUITests" ] },
     {
       "kind": "folder",
       "path": "GlintCapture",
@@ -70,6 +71,7 @@
       "children": [
         { "path": "<PRODUCTS>/Glint.app", "id": "000000000000000000000120", "type": "wrapper.application", "index": false },
         { "path": "<PRODUCTS>/GlintTests.xctest", "id": "010133F7309AF1B100063F52", "type": "wrapper.cfbundle", "index": false },
+        { "path": "<PRODUCTS>/GlintUITests.xctest", "id": "01AA00000000000000000002", "type": "wrapper.cfbundle", "index": false },
         { "path": "<PRODUCTS>/GlintCapture.appex", "id": "01CD901B30A7E1870017CF97", "type": "wrapper.extensionkit-extension", "index": false, "target-membership": [ { "build-phase": "Glint/copy/Embed ExtensionKit Extensions", "header-preservation": "remove-on-copy" } ] },
         { "path": "<PRODUCTS>/GlintControlExtension.appex", "id": "01CD902C30A7E1C10017CF97", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "Glint/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
       ],
@@ -103,6 +105,7 @@
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "NO",
+        "CODE_SIGN_ENTITLEMENTS": "Config/Glint.entitlements",
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "ENABLE_APP_SANDBOX": "YES",
@@ -176,6 +179,39 @@
         "TEST_HOST": "$(BUILT_PRODUCTS_DIR)/Glint.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Glint",
       },
     }, {
+      "name": "GlintUITests",
+      "id": "01AA00000000000000000001",
+      "product": "Products/GlintUITests.xctest",
+      "product-type": "bundle.ui-testing",
+      "dependencies": [
+        "Glint",
+      ],
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+        "resources",
+      ],
+      "build-settings": {
+        "CODE_SIGN_STYLE": "Automatic",
+        "CURRENT_PROJECT_VERSION": "1",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_KEY_NSPhotoLibraryUsageDescription": "The UI tests read the size of the photo they take, then delete it.",
+        "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+        "MARKETING_VERSION": "1.0",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.frankcongson.glint.uitests",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SDKROOT": "iphoneos",
+        "STRING_CATALOG_GENERATE_SYMBOLS": "NO",
+        "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
+        "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
+        "SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated",
+        "SWIFT_EMIT_LOC_STRINGS": "NO",
+        "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
+        "SWIFT_VERSION": "6.0",
+        "TARGETED_DEVICE_FAMILY": "1",
+        "TEST_TARGET_NAME": "Glint",
+      },
+    }, {
       "name": "GlintCapture",
       "id": "01CD901A30A7E1870017CF97",
       "product": "Products/GlintCapture.appex",
@@ -186,6 +222,7 @@
         "resources",
       ],
       "build-settings": {
+        "CODE_SIGN_ENTITLEMENTS": "Config/GlintCapture.entitlements",
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "GENERATE_INFOPLIST_FILE": "YES",
@@ -195,6 +232,7 @@
         "INFOPLIST_KEY_NSHumanReadableCopyright": "",
         "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Glint records audio with video.",
         "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": "Glint saves your captures to Photos.",
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone": "UIInterfaceOrientationPortrait",
         "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
         "LD_RUNPATH_SEARCH_PATHS": [
           "$(inherited)",

@@ -9,8 +9,8 @@ import SwiftUI
 struct SetMenu: View {
     let cam: CameraController
     let onDone: () -> Void
-    @AppStorage(RailSide.key) private var railSide: RailSide = .right
-    @AppStorage(DebugInfo.key) private var debugInfo = false
+    @AppStorage(RailSide.key, store: SharedDefaults.store) private var railSide: RailSide = .right
+    @AppStorage(DebugInfo.key, store: SharedDefaults.store) private var debugInfo = false
 
     enum Tile: CaseIterable {
         case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
@@ -194,8 +194,9 @@ struct SetMenu: View {
                        selection: cam.fileType, onSelect: { cam.setFileType($0) })
         case .aspect:
             SettingRow(tile: tile, options: AspectRatio.allCases.map { (title: SettingsText.aspect($0), value: $0) },
-                       selection: cam.aspect, onSelect: { cam.setAspect($0) },
-                       spoken: { SettingsText.aspectSpoken($0) })
+                       selection: cam.appliedAspect, onSelect: { cam.setAspect($0) },
+                       spoken: { SettingsText.aspectSpoken($0) },
+                       isAvailable: { _ in cam.canChooseAspect })   // RAW keeps the full sensor, so there's no crop to choose
         case .resolution:
             SettingRow(tile: tile, options: VideoResolution.allCases.map { (title: SettingsText.resolution($0), value: $0) },
                        selection: format.recordedResolution, onSelect: { r in updateVideo { $0.resolution = r } },
@@ -308,5 +309,5 @@ enum DebugInfo {
     }
 
     /// Off until switched on.
-    static var isOn: Bool { isAvailable && UserDefaults.standard.bool(forKey: key) }
+    static var isOn: Bool { isAvailable && SharedDefaults.store.bool(forKey: key) }
 }
