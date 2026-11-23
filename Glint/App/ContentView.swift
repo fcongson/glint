@@ -33,7 +33,26 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             // Remembered between launches, like a camera's settings. Leaving the screen comes before any quit.
             if phase != .active { cam.saveSettings() }
+            #if LOCKED_CAPTURE   // the app's camera is stopped by the system in the background; the extension's isn't
+            cam.setInForeground(phase == .active)
+            #endif
         }
+        #if LOCKED_CAPTURE
+        // The Lock Screen scene can end by unlocking, without the scene phase ever saying so: let go of the camera
+        // on any of these, so the app isn't told "Camera in use by another app".
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.willDeactivateNotification)) { _ in
+            cam.setInForeground(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
+            cam.setInForeground(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)) { _ in
+            cam.setInForeground(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didActivateNotification)) { _ in
+            cam.setInForeground(true)
+        }
+        #endif
         // A long take, or one on a tripod, mustn't end because the phone locked itself. Only while recording:
         // the rest of the time the screen sleeps as usual, which is what saves the battery.
         .onChange(of: cam.isRecording) { _, isRecording in

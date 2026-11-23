@@ -712,9 +712,21 @@ final class CameraController {
     func setReviewing(_ isReviewing: Bool) {
         self.isReviewing = isReviewing
         updateLevelSensor()
-        let running = !isReviewing
+        let running = !isReviewing && isInForeground
         if running { startTimer("resume") }
         locationProvider.setPaused(isReviewing)   // no photo can be taken from review
+        capture.enqueue { $0.setRunning(running) }
+    }
+
+    /// Whether the screen is in the foreground. The system stops the camera of a backgrounded app by itself, but a
+    /// Lock Screen extension isn't "backgrounded" that way and would keep the camera, so opening Glint afterwards
+    /// said "Camera in use by another app". Leaving the screen lets go of the camera; coming back takes it again.
+    private var isInForeground = true
+
+    func setInForeground(_ inForeground: Bool) {
+        guard inForeground != isInForeground else { return }
+        isInForeground = inForeground
+        let running = inForeground && !isReviewing
         capture.enqueue { $0.setRunning(running) }
     }
 

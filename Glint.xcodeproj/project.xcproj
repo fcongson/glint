@@ -195,6 +195,7 @@
         "INFOPLIST_KEY_NSHumanReadableCopyright": "",
         "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Glint records audio with video.",
         "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription": "Glint saves your captures to Photos.",
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone": "UIInterfaceOrientationPortrait",
         "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
         "LD_RUNPATH_SEARCH_PATHS": [
           "$(inherited)",
