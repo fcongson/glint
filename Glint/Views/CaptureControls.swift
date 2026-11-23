@@ -115,7 +115,7 @@ struct CaptureControls: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }
         .accessibilityLabel("Review photos")
-        .disabled(cam.lastThumbnail == nil)
+        .disabled(!cam.canOpenReview)
         .fullScreenCover(isPresented: $showReview) {
             ReviewView(entries: reviewEntries, angle: deviceAngle, onDelete: deleteFromReview)
         }
@@ -136,9 +136,14 @@ struct CaptureControls: View {
         case .library:
             #if !LOCKED_CAPTURE
             reviewEntries = PhotoHistory.entries()
+            await cam.showLatestSavedPhoto(onlyIfNone: true)   // access may have just been given
             #endif
         }
         showReview = !reviewEntries.isEmpty
+        if reviewEntries.isEmpty {
+            cam.notify(canRead || isLockScreen ? "No photos to review yet"
+                                               : "Photos access is off. Allow it in Settings to review your photos")
+        }
     }
 
     /// Nil in the Lock Screen camera: someone holding a locked phone can't delete photos from it.

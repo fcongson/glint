@@ -913,6 +913,16 @@ final class CameraController {
         }
     }
 
+    /// Whether the thumbnail button can open review: there's a photo to show, or (in the app) Photos hasn't been
+    /// asked for read access yet, which opening review does.
+    var canOpenReview: Bool {
+        #if LOCKED_CAPTURE
+        lastThumbnail != nil
+        #else
+        lastThumbnail != nil || PhotoHistory.canAskForReadAccess
+        #endif
+    }
+
     /// This session's photos as pages for review, oldest first. They can't be deleted from there.
     func sessionReviewEntries() -> [ReviewEntry] {
         shots.map { shot in ReviewEntry(id: shot.id.uuidString, canDelete: false, needsPlace: false) { shot } }
@@ -1019,6 +1029,9 @@ final class CameraController {
     }
 
     // MARK: Status
+
+    /// For the views: says something in the status line, e.g. why the review didn't open.
+    func notify(_ message: String) { post(message) }
 
     /// Shows a transient status message, cleared after a moment unless a newer one has replaced it.
     private func post(_ message: String) {

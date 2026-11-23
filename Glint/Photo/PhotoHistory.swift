@@ -14,6 +14,12 @@ enum PhotoHistory {
         return status == .authorized || status == .limited
     }
 
+    /// Whether asking would show the prompt, which is when the thumbnail button has to stay usable even with no
+    /// photo to show yet: opening review is how access gets asked for.
+    static var canAskForReadAccess: Bool {
+        PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined
+    }
+
     /// Asks for read access the first time (and when only adding was allowed before); afterwards just answers.
     static func requestReadAccess() async -> Bool {
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)

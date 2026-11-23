@@ -23,7 +23,7 @@ struct SavedPhotoLog: Sendable {
     /// The log in the app group's folder; nil if the group isn't available (it then isn't kept).
     static var shared: SavedPhotoLog? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedDefaults.groupID)
-            .map { SavedPhotoLog(url: $0.appendingPathComponent("saved-photos.json")) }
+            .map { SavedPhotoLog(url: $0.appendingPathComponent("Library/saved-photos.json")) }
     }
 
     /// Every recorded photo, oldest first.
@@ -56,6 +56,7 @@ struct SavedPhotoLog: Sendable {
 
     private func write(_ photos: [SavedPhoto]) {
         guard let data = try? JSONEncoder().encode(photos) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
     }
 
