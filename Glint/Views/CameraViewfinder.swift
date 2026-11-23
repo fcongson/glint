@@ -9,19 +9,20 @@ struct CameraViewfinder: View {
     let flash: Bool
     @Binding var showingSet: Bool
     @AppStorage(RailSide.key, store: SharedDefaults.store) private var railSide: RailSide = .right
-    @AppStorage(DebugInfo.key, store: SharedDefaults.store) private var debugInfoSetting = false   // see `DebugInfo`
+    @AppStorage(DebugInfo.key, store: SharedDefaults.store) private var debugInfoSetting = false  // see `DebugInfo`
     @State private var focusPoint: CGPoint?
     @State private var focusTapCount = 0
-    @State private var lockPoint: CGPoint?   // where the long press that set the AE/AF lock was
+    @State private var lockPoint: CGPoint?  // where the long press that set the AE/AF lock was
     @State private var lockCount = 0
 
     var body: some View {
         ZStack {
-            CameraPreview(session: cam.session, hint: viewfinderHint,
-                          onTap: { devicePoint, layerPoint, size in tapped(devicePoint, layerPoint, size) },
-                          onLongPress: { devicePoint, layerPoint, _ in longPressed(devicePoint, layerPoint) },
-                          onCaptureButton: { cam.pressCaptureButton() },
-                          onLayerReady: { cam.attachPreviewLayer($0) })
+            CameraPreview(
+                session: cam.session, hint: viewfinderHint,
+                onTap: { devicePoint, layerPoint, size in tapped(devicePoint, layerPoint, size) },
+                onLongPress: { devicePoint, layerPoint, _ in longPressed(devicePoint, layerPoint) },
+                onCaptureButton: { cam.pressCaptureButton() },
+                onLayerReady: { cam.attachPreviewLayer($0) })
             // While peaking, magnifying or zebras are on, the viewfinder is drawn on the GPU over the system
             // preview, so outlines can't lag the picture and magnifying uses the full-resolution frame.
             // Touches go through to the preview.
@@ -72,7 +73,7 @@ struct CameraViewfinder: View {
             if cam.isMagnifying {
                 EmptyView()
             } else if cam.captureMode == .video {
-                CropMask(aspect: .sixteenNine)   // video is 16:9 from the 4:3 sensor
+                CropMask(aspect: .sixteenNine)  // video is 16:9 from the 4:3 sensor
             } else if !cam.appliedAspect.isFullSensor {
                 CropMask(aspect: cam.appliedAspect)
             }
@@ -103,9 +104,11 @@ struct CameraViewfinder: View {
             let sideways = deviceAngle.isQuarterTurn
             focusControls
                 .frame(width: Self.railColumn.width, height: Self.railColumn.height)
-                .rotationEffect(deviceAngle)   // the running angle, so it turns the short way round
-                .frame(width: sideways ? Self.railColumn.height : Self.railColumn.width,
-                       height: sideways ? Self.railColumn.width : Self.railColumn.height)
+                .rotationEffect(deviceAngle)  // the running angle, so it turns the short way round
+                .frame(
+                    width: sideways ? Self.railColumn.height : Self.railColumn.width,
+                    height: sideways ? Self.railColumn.width : Self.railColumn.height
+                )
                 .animation(.easeInOut(duration: 0.3), value: railAlignment)
                 .shownWhenReady(cam.isCameraReady)
         }
@@ -113,7 +116,7 @@ struct CameraViewfinder: View {
             // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
             // there's room to read them; the top bar has no space to spare beside the Dynamic Island.
             VStack(alignment: .leading, spacing: 6) {
-                if let paused = cam.interruption?.message { OverlayLabel(paused) }   // stays until the camera is back
+                if let paused = cam.interruption?.message { OverlayLabel(paused) }  // stays until the camera is back
                 if !cam.status.isEmpty { OverlayLabel(cam.status) }
                 if DebugInfo.isAvailable, debugInfoSetting, !cam.timing.isEmpty { OverlayLabel(cam.timing) }
             }
@@ -192,8 +195,10 @@ struct CameraViewfinder: View {
     /// AF on top of the focus rail. Turning AF off, or touching the rail, locks the lens where autofocus left it.
     private var focusControls: some View {
         VStack(spacing: 10) {
-            Chip("AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
-                 isOn: cam.isAutofocus) { cam.setAutofocus(!cam.isAutofocus) }
+            Chip(
+                "AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
+                isOn: cam.isAutofocus
+            ) { cam.setAutofocus(!cam.isAutofocus) }
             LiveFocusRail(cam: cam)
         }
         .padding(.trailing, 8)

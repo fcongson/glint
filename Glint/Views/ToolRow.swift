@@ -8,8 +8,10 @@ struct ToolRow: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
-                Chip("HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
-                     isOn: cam.isHistogramEnabled) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+                Chip(
+                    "HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
+                    isOn: cam.isHistogramEnabled
+                ) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
                 if cam.viewfinderRenderer != nil { zebraChip }
             }
             Spacer(minLength: 6)
@@ -18,9 +20,12 @@ struct ToolRow: View {
             HStack(spacing: 6) {
                 if cam.viewfinderRenderer != nil { peakingChip }
                 if cam.isMagnifierAvailable {
-                    Chip("MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
-                         isOn: cam.isMagnifierEnabled) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
-                        .accessibilityHint("When on, focusing with the focus rail magnifies the focus point so you can check focus.")
+                    Chip(
+                        "MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
+                        isOn: cam.isMagnifierEnabled
+                    ) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
+                    .accessibilityHint(
+                        "When on, focusing with the focus rail magnifies the focus point so you can check focus.")
                 }
             }
         }
@@ -31,24 +36,30 @@ struct ToolRow: View {
 
     /// ZEB: zebras on and off. The level they start at is in SET.
     private var zebraChip: some View {
-        Chip("ZEB", label: "Zebras",
-             value: cam.isZebraEnabled ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent" : SettingsText.onOff(false),
-             isOn: cam.isZebraEnabled) { cam.setZebraEnabled(!cam.isZebraEnabled) }
-            .accessibilityHint("Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level.")
-            .accessibilityAdjustableAction { direction in
-                let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
-                switch direction {
-                case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
-                case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
-                @unknown default: break
-                }
+        Chip(
+            "ZEB", label: "Zebras",
+            value: cam.isZebraEnabled
+                ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent" : SettingsText.onOff(false),
+            isOn: cam.isZebraEnabled
+        ) { cam.setZebraEnabled(!cam.isZebraEnabled) }
+        .accessibilityHint(
+            "Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level."
+        )
+        .accessibilityAdjustableAction { direction in
+            let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
+            switch direction {
+            case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
+            case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
+            @unknown default: break
             }
+        }
     }
 
     /// PK: peaking on and off. Mode, sensitivity, colour and lines are in SET.
     private var peakingChip: some View {
         let look = cam.peakingAppearance
-        let value = cam.isPeakingEnabled
+        let value =
+            cam.isPeakingEnabled
             ? "\(SettingsText.onOff(true)), \(cam.peakingMode.title), \(cam.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
             : SettingsText.onOff(false)
         return Chip("PK", label: "Focus peaking", value: value, isOn: cam.isPeakingEnabled) {
@@ -69,7 +80,9 @@ struct ToolRow: View {
     private var lensPicker: some View {
         HStack(spacing: 2) {
             ForEach(cam.lenses) { lens in
-                Button { cam.switchLens(to: lens) } label: {
+                Button {
+                    cam.switchLens(to: lens)
+                } label: {
                     Text(lens.label)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .lineLimit(1)

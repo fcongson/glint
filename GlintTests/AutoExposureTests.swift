@@ -1,13 +1,14 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 struct AutoExposureTests {
     @Test func modes() {
         #expect(AutoSettings(iso: true, shutter: true).isProgram)
-        #expect(AutoSettings(iso: true).isPriority)          // shutter priority
-        #expect(AutoSettings(shutter: true).isPriority)      // ISO priority
-        #expect(!AutoSettings().usesCompensation)            // fully manual: the meter is just a guide
+        #expect(AutoSettings(iso: true).isPriority)  // shutter priority
+        #expect(AutoSettings(shutter: true).isPriority)  // ISO priority
+        #expect(!AutoSettings().usesCompensation)  // fully manual: the meter is just a guide
         #expect(!AutoSettings(whiteBalance: true).usesCompensation)
     }
 
@@ -36,12 +37,13 @@ struct AutoExposureTests {
     @Test func nextISOStaysInRange() throws {
         let raised = try #require(PriorityExposure.nextISO(current: 100, offset: -2, min: 32, max: 3200))
         #expect(raised > 100)
-        #expect(PriorityExposure.nextISO(current: 3200, offset: -2, min: 32, max: 3200) == nil)   // already at the top
+        #expect(PriorityExposure.nextISO(current: 3200, offset: -2, min: 32, max: 3200) == nil)  // already at the top
         #expect(PriorityExposure.nextISO(current: 400, offset: 0.05, min: 32, max: 3200) == nil)  // on target
     }
 
     @Test func nextDurationStaysInRange() throws {
-        let shorter = try #require(PriorityExposure.nextDuration(current: 1.0 / 60, offset: 1.5, min: 1.0 / 8000, max: 1))
+        let shorter = try #require(
+            PriorityExposure.nextDuration(current: 1.0 / 60, offset: 1.5, min: 1.0 / 8000, max: 1))
         #expect(shorter < 1.0 / 60)
         #expect(PriorityExposure.nextDuration(current: 1.0 / 8000, offset: 2, min: 1.0 / 8000, max: 1) == nil)
     }

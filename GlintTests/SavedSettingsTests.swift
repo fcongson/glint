@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 @Suite("Saved settings")
@@ -10,14 +11,15 @@ struct SavedSettingsTests {
         var format = VideoFormat()
         format.codec = .proRes
         format.frameRate = 30
-        let settings = SavedSettings(captureMode: .video, fileType: .rawAndHEIC, aspect: .threeTwo, manual: true,
-                                     iso: 400, shutterDenominator: 60, whiteBalanceKelvin: 3200,
-                                     hasManualWhiteBalance: true, auto: AutoSettings(iso: true), exposureBias: -0.7,
-                                     videoFormat: format, isHistogramEnabled: true, isPeakingEnabled: false,
-                                     peakingSensitivity: .high, peakingAppearance: PeakingAppearance(color: .blue, lines: .fine),
-                                     peakingMode: .sweep, isZebraEnabled: true, zebraLevel: .ninety,
-                                     isMagnifierEnabled: false, flash: .auto, histogramStyle: .rgb,
-                                     isGridEnabled: true, isLevelEnabled: true)
+        let settings = SavedSettings(
+            captureMode: .video, fileType: .rawAndHEIC, aspect: .threeTwo, manual: true,
+            iso: 400, shutterDenominator: 60, whiteBalanceKelvin: 3200,
+            hasManualWhiteBalance: true, auto: AutoSettings(iso: true), exposureBias: -0.7,
+            videoFormat: format, isHistogramEnabled: true, isPeakingEnabled: false,
+            peakingSensitivity: .high, peakingAppearance: PeakingAppearance(color: .blue, lines: .fine),
+            peakingMode: .sweep, isZebraEnabled: true, zebraLevel: .ninety,
+            isMagnifierEnabled: false, flash: .auto, histogramStyle: .rgb,
+            isGridEnabled: true, isLevelEnabled: true)
         settings.save(to: defaults)
         #expect(SavedSettings.load(from: defaults) == settings)
     }
@@ -29,6 +31,8 @@ struct SavedSettingsTests {
         let loaded = try #require(SavedSettings.load(from: defaults))
         #expect(loaded.isHistogramEnabled == true)
         #expect(loaded.manual == nil)
-        #expect(loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil && loaded.isLevelEnabled == nil)
+        #expect(
+            loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil
+                && loaded.isLevelEnabled == nil)
     }
 }

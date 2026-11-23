@@ -14,8 +14,8 @@ struct ReviewEntry: Identifiable {
 /// The decisions behind review that don't depend on the Photos library, so they can be tested without one.
 enum ReviewPlan {
     enum Source: Equatable {
-        case thisSession   // only the photos taken since Glint opened, kept in memory
-        case library       // every photo Glint has saved that Photos still has
+        case thisSession  // only the photos taken since Glint opened, kept in memory
+        case library  // every photo Glint has saved that Photos still has
     }
 
     /// The Lock Screen camera never shows more than its own session's photos, whatever it's been allowed: someone

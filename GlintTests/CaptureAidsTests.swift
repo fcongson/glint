@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreGraphics
 import Testing
+
 @testable import Glint
 
 @Suite("Flash")
@@ -51,7 +52,8 @@ struct ViewfinderLockTests {
         let priority = try #require(ViewfinderLock(isAutofocus: true, manual: true, auto: AutoSettings(iso: true)))
         #expect(priority.exposure)
         // White balance on A isn't exposure.
-        let whiteBalanceOnly = try #require(ViewfinderLock(isAutofocus: true, manual: true, auto: AutoSettings(whiteBalance: true)))
+        let whiteBalanceOnly = try #require(
+            ViewfinderLock(isAutofocus: true, manual: true, auto: AutoSettings(whiteBalance: true)))
         #expect(!whiteBalanceOnly.exposure)
     }
 

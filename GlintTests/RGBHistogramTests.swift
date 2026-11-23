@@ -1,14 +1,17 @@
 import CoreVideo
 import Foundation
 import Testing
+
 @testable import Glint
 
 @Suite("RGB histogram")
 struct RGBHistogramTests {
     /// A 420f buffer of one colour.
-    private func pixelBuffer(y: UInt8, cb: UInt8, cr: UInt8, width: Int = 64, height: Int = 64) throws -> CVPixelBuffer {
+    private func pixelBuffer(y: UInt8, cb: UInt8, cr: UInt8, width: Int = 64, height: Int = 64) throws -> CVPixelBuffer
+    {
         var buffer: CVPixelBuffer?
-        let status = CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, nil, &buffer)
+        let status = CVPixelBufferCreate(
+            nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, nil, &buffer)
         let pb = try #require(buffer, "CVPixelBufferCreate failed: \(status)")
         CVBufferSetAttachment(pb, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
         CVPixelBufferLockBaseAddress(pb, [])
@@ -43,7 +46,7 @@ struct RGBHistogramTests {
         let bin = 128 * Histogram.binCount / 256
         #expect(channels.red[bin] == 1 && channels.green[bin] == 1 && channels.blue[bin] == 1)
         #expect(channels.red == channels.green && channels.green == channels.blue)
-        #expect(histogram.bins[bin] == 1)   // luma is unchanged by asking for colour
+        #expect(histogram.bins[bin] == 1)  // luma is unchanged by asking for colour
     }
 
     /// The point of RGB: one colour can be clipping while brightness looks safe.
@@ -65,9 +68,11 @@ struct RGBHistogramTests {
     @Test func readsTheMatrixFromTheBuffer() throws {
         let buffer = try pixelBuffer(y: 128, cb: 128, cr: 128)
         #expect(YCbCrMatrix.of(buffer) == .rec709)
-        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4, .shouldPropagate)
+        CVBufferSetAttachment(
+            buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4, .shouldPropagate)
         #expect(YCbCrMatrix.of(buffer) == .rec601)
-        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020, .shouldPropagate)
+        CVBufferSetAttachment(
+            buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020, .shouldPropagate)
         #expect(YCbCrMatrix.of(buffer) == .rec2020)
     }
 
@@ -103,7 +108,7 @@ struct RGBHistogramTests {
         model.show(try #require(Histogram(lumaOf: pixelBuffer(y: 128, cb: 128, cr: 128), rgb: true)))
         #expect(model.channels != nil && !model.bins.isEmpty)
         model.show(try #require(Histogram(lumaOf: pixelBuffer(y: 128, cb: 128, cr: 128))))
-        #expect(model.channels == nil)   // back to Luma in SET
+        #expect(model.channels == nil)  // back to Luma in SET
         model.clear()
         #expect(model.bins.isEmpty && model.channels == nil)
     }

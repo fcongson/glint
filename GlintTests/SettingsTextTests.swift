@@ -1,5 +1,6 @@
 import CoreLocation
 import Testing
+
 @testable import Glint
 
 struct SettingsTextTests {
@@ -23,7 +24,7 @@ struct SettingsTextTests {
 
     @Test(arguments: [
         (0.0, "0 ev"),
-        (0.04, "0 ev"),     // rounds to zero, so no stray "+0.0"
+        (0.04, "0 ev"),  // rounds to zero, so no stray "+0.0"
         (0.7, "+0.7 ev"),
         (-1.33, "-1.3 ev"),
     ])
@@ -56,7 +57,7 @@ struct SettingsTextTests {
 
     @Test(arguments: [
         (Float(0), "±0"),
-        (0.04, "±0"),       // rounds to zero, so no stray "+0.0"
+        (0.04, "±0"),  // rounds to zero, so no stray "+0.0"
         (-0.04, "±0"),
         (1.26, "+1.3"),
         (-0.7, "-0.7"),
@@ -128,7 +129,7 @@ struct SettingsTextTests {
 
     @Test func theVideoNoteExplainsTheChosenCodec() {
         let pro = VideoCapabilities(proRes: true)
-        var format = VideoFormat()   // 4K 24 HEVC
+        var format = VideoFormat()  // 4K 24 HEVC
         let hevc = SettingsText.videoNote(format, capabilities: pro)
         #expect(hevc.contains("1/48 at 24 fps"))
         #expect(!hevc.contains("ProRes"))

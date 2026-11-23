@@ -1,4 +1,5 @@
 import Testing
+
 @testable import Glint
 
 struct ExposureScaleTests {
@@ -28,14 +29,16 @@ struct ExposureScaleTests {
         #expect(kelvins.count == 81)
         #expect(kelvins.first == 2000)
         #expect(kelvins.last == 10000)
-        #expect(kelvins.filter(ExposureScale.isMajorWhiteBalance) == stride(from: 2000, through: 10000, by: 1000).map { Float($0) })
+        #expect(
+            kelvins.filter(ExposureScale.isMajorWhiteBalance)
+                == stride(from: 2000, through: 10000, by: 1000).map { Float($0) })
     }
 
     @Test(arguments: [
         (Float(5520), Float(5500)),
         (5560, 5600),
-        (5550, 5600),    // exactly half-way rounds up
-        (1500, 2000),    // clamps below the range
+        (5550, 5600),  // exactly half-way rounds up
+        (1500, 2000),  // clamps below the range
         (12000, 10000),  // and above it
     ])
     func nearestWhiteBalanceStop(temperature: Float, expected: Float) {

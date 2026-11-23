@@ -1,4 +1,5 @@
 import Testing
+
 @testable import Glint
 
 @Suite("Debug timings")
@@ -28,7 +29,7 @@ struct DebugTimingsTests {
         #expect(timings.readout.isEmpty)
         timings.start("lens", now: 1)
         timings.stop("lens", now: 2)
-        timings.stop("lens", now: 3)   // already stopped
+        timings.stop("lens", now: 3)  // already stopped
         #expect(timings.readout == "lens    1.00s")
     }
 
@@ -37,7 +38,7 @@ struct DebugTimingsTests {
         timings.thumbnailShown(after: 0.12)
         timings.shotFinished(shotTime: 0.4, developTime: 1.2, renderTime: 0.3)
         #expect(timings.readout == "shot    0.4s\nthumb   0.12s\ndevelop 1.2s\nrender  0.3s")
-        timings.shotFinished(shotTime: 0.5, developTime: 0, renderTime: 0.2)   // RAW only, no new thumbnail time
+        timings.shotFinished(shotTime: 0.5, developTime: 0, renderTime: 0.2)  // RAW only, no new thumbnail time
         #expect(timings.readout == "shot    0.5s\nrender  0.2s")
     }
 }

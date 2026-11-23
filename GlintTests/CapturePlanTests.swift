@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import Testing
+
 @testable import Glint
 
 struct CapturePlanTests {
@@ -29,7 +30,7 @@ struct CapturePlanTests {
         // The developed HEIC replaces the DNG, so it's reported as HEIC even though the capture was RAW.
         #expect(CapturePlan.developedHEIC.savedFormat(isRawPhoto: true) == .heic)
         #expect(CapturePlan.processedHEIC.savedFormat(isRawPhoto: false) == .heic)
-        #expect(CapturePlan.rawDNGAndHEIC.savedFormat(isRawPhoto: false) == .heic)   // the camera returned a HEIC anyway
+        #expect(CapturePlan.rawDNGAndHEIC.savedFormat(isRawPhoto: false) == .heic)  // the camera returned a HEIC anyway
     }
 
     @Test func developmentAndKeepingTheDNG() {

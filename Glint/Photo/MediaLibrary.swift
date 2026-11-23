@@ -15,7 +15,8 @@ enum MediaLibrary {
     /// Where the app's own copies go: Documents, or on the Lock Screen the capture session's folder, which Glint
     /// moves into Documents the next time it's opened (see `LockScreenCaptures`).
     private static var documentsDirectory: URL? {
-        LockScreenCaptures.sessionDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        LockScreenCaptures.sessionDirectory
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
     }
 
     /// The Photos assets a save creates, filled in by the change block (which runs on Photos' own queue) and read
@@ -38,11 +39,14 @@ enum MediaLibrary {
 
     /// The capture ID keeps file names unique when several shots land in the same second.
     /// `location` tags the Photos copy only; the Documents copy is saved as captured.
-    static func savePhoto(_ data: Data, isRAW: Bool, captureID: Int64, location: CLLocation?, report: @escaping @Sendable (String) -> Void) {
+    static func savePhoto(
+        _ data: Data, isRAW: Bool, captureID: Int64, location: CLLocation?, report: @escaping @Sendable (String) -> Void
+    ) {
         let name = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID).\(isRAW ? "dng" : "heic")"
         if let dir = documentsDirectory {
-            do { try writeToDocuments(data, at: dir.appendingPathComponent(name)) }
-            catch { report("Save failed: \(error.localizedDescription)") }
+            do { try writeToDocuments(data, at: dir.appendingPathComponent(name)) } catch {
+                report("Save failed: \(error.localizedDescription)")
+            }
         }
         let created = CreatedAssets()
         requestAddAccess { granted in
@@ -63,8 +67,10 @@ enum MediaLibrary {
 
     /// RAW+HEIC: both files in Documents under one name, and one Photos asset, the HEIC with the DNG as its
     /// RAW alternate (as a camera's RAW+JPEG pair imports).
-    static func savePhotoPair(heic: Data, dng: Data, captureID: Int64, location: CLLocation?,
-                              report: @escaping @Sendable (String) -> Void) {
+    static func savePhotoPair(
+        heic: Data, dng: Data, captureID: Int64, location: CLLocation?,
+        report: @escaping @Sendable (String) -> Void
+    ) {
         let base = "IMG-\(timestampFormatter.string(from: Date()))-\(captureID)"
         if let dir = documentsDirectory {
             do {
@@ -96,7 +102,7 @@ enum MediaLibrary {
                 request.addResource(with: .alternatePhoto, fileURL: tempDNG, options: options)
                 created.add(request.placeholderForCreatedAsset?.localIdentifier)
             }) { ok, _ in
-                removeTemp()   // already gone if Photos moved it
+                removeTemp()  // already gone if Photos moved it
                 if ok { record(created, files: [[base + ".heic", base + ".dng"]]); report("Saved"); return }
                 saveSeparately(heic: heic, dng: dng, base: base, location: location, report: report)
             }
@@ -104,8 +110,10 @@ enum MediaLibrary {
     }
 
     /// If Photos still won't take the pair, keep both as separate photos rather than lose either.
-    private static func saveSeparately(heic: Data, dng: Data, base: String, location: CLLocation?,
-                                       report: @escaping @Sendable (String) -> Void) {
+    private static func saveSeparately(
+        heic: Data, dng: Data, base: String, location: CLLocation?,
+        report: @escaping @Sendable (String) -> Void
+    ) {
         let created = CreatedAssets()
         PHPhotoLibrary.shared().performChanges({
             for (data, options) in [(heic, nil), (dng, rawOptions)] as [(Data, PHAssetResourceCreationOptions?)] {
@@ -116,8 +124,10 @@ enum MediaLibrary {
             }
         }) { ok, error in
             if ok { record(created, files: [[base + ".heic"], [base + ".dng"]]) }
-            report(ok ? "Saved RAW and HEIC as separate photos"
-                      : "Save failed: \(error?.localizedDescription ?? "?")")
+            report(
+                ok
+                    ? "Saved RAW and HEIC as separate photos"
+                    : "Save failed: \(error?.localizedDescription ?? "?")")
         }
     }
 
@@ -134,8 +144,7 @@ enum MediaLibrary {
                 let copy = dir.appendingPathComponent(tempURL.lastPathComponent)
                 try FileManager.default.copyItem(at: tempURL, to: copy)
                 excludeFromBackup(copy)
-            }
-            catch { report("Save failed: \(error.localizedDescription)") }
+            } catch { report("Save failed: \(error.localizedDescription)") }
         }
         let removeTemp: @Sendable () -> Void = { try? FileManager.default.removeItem(at: tempURL) }
         requestAddAccess { granted in

@@ -7,9 +7,9 @@ import UIKit
 struct CameraAccessPrompt: View {
     private static var message: String {
         #if LOCKED_CAPTURE
-        "Glint doesn't have camera access yet. Unlock your iPhone and open Glint to allow it."
+            "Glint doesn't have camera access yet. Unlock your iPhone and open Glint to allow it."
         #else
-        "Camera access is off for Glint. Turn it on in Settings to take photos and video."
+            "Camera access is off for Glint. Turn it on in Settings to take photos and video."
         #endif
     }
 
@@ -24,17 +24,17 @@ struct CameraAccessPrompt: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             #if !LOCKED_CAPTURE
-            Button {
-                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-            } label: {
-                Text("Open Settings")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Color.black)
-                    .padding(.horizontal, 20)
-                    .frame(minHeight: 44)
-                    .background(Color.amber, in: Capsule())
-            }
-            .buttonStyle(.plain)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                } label: {
+                    Text("Open Settings")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 20)
+                        .frame(minHeight: 44)
+                        .background(Color.amber, in: Capsule())
+                }
+                .buttonStyle(.plain)
             #endif
         }
         .foregroundStyle(Color.white)

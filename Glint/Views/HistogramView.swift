@@ -7,16 +7,17 @@ struct HistogramContainer: View {
 
     var body: some View {
         if !model.bins.isEmpty {
-            HistogramView(bins: model.bins, channels: model.channels,
-                          clipsHighlights: model.clipsHighlights, clipsShadows: model.clipsShadows)
+            HistogramView(
+                bins: model.bins, channels: model.channels,
+                clipsHighlights: model.clipsHighlights, clipsShadows: model.clipsShadows)
         }
     }
 }
 
 struct HistogramView: View {
     let bins: [Float]
-    var channels: RGBBins? = nil   // red, green and blue instead of brightness
-    let clipsHighlights: Bool   // decided by Histogram; the view only picks colours
+    var channels: RGBBins? = nil  // red, green and blue instead of brightness
+    let clipsHighlights: Bool  // decided by Histogram; the view only picks colours
     let clipsShadows: Bool
 
     /// Total footprint including padding.
@@ -41,9 +42,11 @@ struct HistogramView: View {
             }
             // The three colours add where they overlap, so where all three are present it reads white.
             ctx.blendMode = .plusLighter
-            for (values, color) in [(channels.red, Color(red: 1, green: 0.2, blue: 0.2)),
-                                    (channels.green, Color(red: 0.15, green: 0.9, blue: 0.2)),
-                                    (channels.blue, Color(red: 0.25, green: 0.4, blue: 1))] {
+            for (values, color) in [
+                (channels.red, Color(red: 1, green: 0.2, blue: 0.2)),
+                (channels.green, Color(red: 0.15, green: 0.9, blue: 0.2)),
+                (channels.blue, Color(red: 0.25, green: 0.4, blue: 1)),
+            ] {
                 for (i, v) in values.enumerated() { ctx.fill(bar(i, v), with: .color(color)) }
             }
             // The bars are taken up by colour here, so clipping is a line down the edge it happens at.

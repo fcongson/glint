@@ -33,7 +33,8 @@ actor PhotoDeveloper {
     func warmUp() {
         let log = Logger(subsystem: "Glint", category: "warm-up")
         guard let url = Bundle.main.url(forResource: "WarmUp", withExtension: "dng"),
-              let dng = try? Data(contentsOf: url) else {
+            let dng = try? Data(contentsOf: url)
+        else {
             log.error("WarmUp.dng is missing from the app bundle")
             return
         }

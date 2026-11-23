@@ -2,11 +2,12 @@ import CoreGraphics
 import CoreVideo
 import Foundation
 import Testing
+
 @testable import Glint
 
 /// Runs the GPU peaking pipeline (Viewfinder.metal) on synthetic frames. Needs Metal, which the simulator has.
 struct FocusPeakingTests {
-    private static let width = 64, height = 48   // small enough that frames aren't shrunk
+    private static let width = 64, height = 48  // small enough that frames aren't shrunk
 
     /// A 420YpCbCr8 full-range frame whose luma is `value(x, y)` (clamped) and chroma neutral.
     private func frame(width: Int = width, height: Int = height, _ value: (Int, Int) -> Int) throws -> CVPixelBuffer {
@@ -15,8 +16,9 @@ struct FocusPeakingTests {
             kCVPixelBufferMetalCompatibilityKey as String: true,
         ]
         var created: CVPixelBuffer?
-        CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-                            attributes as CFDictionary, &created)
+        CVPixelBufferCreate(
+            nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+            attributes as CFDictionary, &created)
         let buffer = try #require(created)
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
@@ -32,8 +34,10 @@ struct FocusPeakingTests {
     }
 
     /// The outline mask for a frame at a sensitivity, with the threshold taken from the frame's own statistics.
-    private func mask(_ sensitivity: PeakingSensitivity = .medium,
-                      _ value: (Int, Int) -> Int) throws -> ViewfinderRenderer.Analysis {
+    private func mask(
+        _ sensitivity: PeakingSensitivity = .medium,
+        _ value: (Int, Int) -> Int
+    ) throws -> ViewfinderRenderer.Analysis {
         let renderer = try #require(ViewfinderRenderer.make())
         let buffer = try frame(value)
         let stats = try #require(renderer.analyse(buffer, level: nil))
@@ -150,7 +154,7 @@ struct FocusPeakingTests {
     }
 
     @Test func framesAreFittedUprightLikeThePreview() {
-        let box = CGSize(width: 300, height: 400)   // the 3:4 viewfinder
+        let box = CGSize(width: 300, height: 400)  // the 3:4 viewfinder
         #expect(ViewfinderRenderer.fitScale(frameWidth: 4032, frameHeight: 3024, viewSize: box) == SIMD2(1, 1))
         // 16:9 video stands 9:16 upright: full height, three quarters of the width.
         #expect(ViewfinderRenderer.fitScale(frameWidth: 3840, frameHeight: 2160, viewSize: box) == SIMD2(0.75, 1))
@@ -158,7 +162,7 @@ struct FocusPeakingTests {
 
     @Test func theThresholdEasesTowardEachFrame() {
         var threshold = PeakingThreshold()
-        #expect(threshold.update(100) == 100)   // the first frame sets it outright
+        #expect(threshold.update(100) == 100)  // the first frame sets it outright
         #expect(abs(threshold.update(200) - 130) < 0.001)
         threshold.reset()
         #expect(threshold.update(50) == 50)

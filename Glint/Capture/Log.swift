@@ -7,9 +7,9 @@ enum Log {
     static let subsystem = "com.frankcongson.glint"
 
     #if LOCKED_CAPTURE
-    static let copy = "extension"
+        static let copy = "extension"
     #else
-    static let copy = "app"
+        static let copy = "app"
     #endif
 
     /// The camera session starting, stopping and being interrupted.

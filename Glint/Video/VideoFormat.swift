@@ -15,13 +15,13 @@ enum VideoResolution: Sendable, CaseIterable, Codable {
 
 enum VideoCodec: Sendable, CaseIterable, Codable {
     case hevc
-    case proRes      // ProRes 422 HQ where available (Pro iPhones)
-    case proResRAW   // sensor data before Apple's processing (iPhone 17 Pro and later, iOS 26)
+    case proRes  // ProRes 422 HQ where available (Pro iPhones)
+    case proResRAW  // sensor data before Apple's processing (iPhone 17 Pro and later, iOS 26)
 }
 
 enum VideoEncoding: Sendable, CaseIterable, Codable {
     case standard
-    case log   // Apple Log, with ProRes
+    case log  // Apple Log, with ProRes
 }
 
 /// One resolution at one frame rate.
@@ -33,9 +33,9 @@ struct VideoMode: Hashable, Sendable {
 /// What the current lens can record, read from its device formats and the movie output.
 struct VideoCapabilities: Equatable, Sendable {
     var modes: Set<VideoMode> = []
-    var logModes: Set<VideoMode> = []          // modes with an Apple Log format
-    var proRes = false                         // the movie output offers ProRes
-    var proResRAWFrameRates: Set<Int> = []     // frame rates of the Bayer RAW video formats
+    var logModes: Set<VideoMode> = []  // modes with an Apple Log format
+    var proRes = false  // the movie output offers ProRes
+    var proResRAWFrameRates: Set<Int> = []  // frame rates of the Bayer RAW video formats
 
     var proResRAW: Bool { !proResRAWFrameRates.isEmpty }
 }
@@ -95,8 +95,10 @@ struct VideoFormat: Equatable, Sendable, Codable {
             let sameResolution = caps.modes.filter { $0.resolution == f.resolution }.map(\.frameRate)
             if let fps = Self.nearest(f.frameRate, in: sameResolution) {
                 f.frameRate = fps
-            } else if let any = caps.modes.min(by: { ($0.resolution == .uhd4K ? 0 : 1, $0.frameRate)
-                                                     < ($1.resolution == .uhd4K ? 0 : 1, $1.frameRate) }) {
+            } else if let any = caps.modes.min(by: {
+                ($0.resolution == .uhd4K ? 0 : 1, $0.frameRate)
+                    < ($1.resolution == .uhd4K ? 0 : 1, $1.frameRate)
+            }) {
                 f.resolution = any.resolution
                 f.frameRate = any.frameRate
             }
@@ -117,7 +119,8 @@ struct VideoFormat: Equatable, Sendable, Codable {
 /// to the nearest thing it can (`VideoFormat.normalized(for:)`).
 extension VideoCapabilities {
     func allows(_ resolution: VideoResolution, for format: VideoFormat) -> Bool {
-        format.codec == .proResRAW ? resolution == format.recordedResolution : modes.contains { $0.resolution == resolution }
+        format.codec == .proResRAW
+            ? resolution == format.recordedResolution : modes.contains { $0.resolution == resolution }
     }
 
     func allows(frameRate: Int, for format: VideoFormat) -> Bool {

@@ -29,11 +29,15 @@ enum SettingsText {
         return rounded == 0 ? "0 ev" : String(format: "%+.1f ev", rounded)
     }
 
-    static func megapixels(width: Int, height: Int) -> String { "\(Int((Double(width * height) / 1_000_000).rounded())) MP" }
+    static func megapixels(width: Int, height: Int) -> String {
+        "\(Int((Double(width * height) / 1_000_000).rounded())) MP"
+    }
 
     static func dimensions(width: Int, height: Int) -> String { "\(width) \u{00D7} \(height)" }
 
-    static func fileSize(bytes: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
+    static func fileSize(bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
 
     /// Fallback when no place name is available: "-41.3311, 174.7946".
     static func coordinates(_ coordinate: CLLocationCoordinate2D) -> String {
@@ -130,10 +134,14 @@ enum SettingsText {
     /// What the video settings mean, under SET's VIDEO rows. While recording it starts by saying why they're greyed out.
     static func videoNote(_ format: VideoFormat, capabilities: VideoCapabilities, isRecording: Bool = false) -> String {
         var lines = isRecording ? ["The video format can't change while recording."] : []
-        lines += ["Shutter on A follows the 180° rule (1/\(Int(format.autoShutterDenominator)) at \(format.frameRate) fps), and no shutter is slower than a frame. White balance holds still while recording."]
+        lines += [
+            "Shutter on A follows the 180° rule (1/\(Int(format.autoShutterDenominator)) at \(format.frameRate) fps), and no shutter is slower than a frame. White balance holds still while recording."
+        ]
         switch format.codec {
         case .proResRAW:
-            lines.append("ProRes RAW records the sensor data, so Log and white balance are set when editing. It needs a lot of storage; Apple recommends an external drive.")
+            lines.append(
+                "ProRes RAW records the sensor data, so Log and white balance are set when editing. It needs a lot of storage; Apple recommends an external drive."
+            )
         case .proRes:
             lines.append("ProRes files are large. Log records Apple Log for grading.")
         case .hevc:

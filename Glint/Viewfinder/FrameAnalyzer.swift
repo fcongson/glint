@@ -12,8 +12,8 @@ import os
 final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     struct Wants: Sendable, Equatable {
         var histogram = false
-        var histogramRGB = false              // the histogram also wants red, green and blue (HISTOGRAM in SET)
-        var viewfinder: ViewfinderSettings?   // non-nil while the GPU viewfinder draws (peaking or magnifier)
+        var histogramRGB = false  // the histogram also wants red, green and blue (HISTOGRAM in SET)
+        var viewfinder: ViewfinderSettings?  // non-nil while the GPU viewfinder draws (peaking or magnifier)
         var any: Bool { histogram || viewfinder != nil }
     }
 
@@ -28,7 +28,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// (`setWhiteKey`) so zebras are right from the first frame. With nothing remembered yet, full scale, so zebras
     /// at 100% don't mark bright areas that aren't clipped. Only touched on `queue`.
     private var whiteLevel = 255
-    private var whiteKey: String?                       // only touched on `queue`
+    private var whiteKey: String?  // only touched on `queue`
     private let nextWhiteKey = OSAllocatedUnfairLock<String?>(initialState: nil)
     private let whiteLevels = WhiteLevelStore()
 
@@ -58,7 +58,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         // Frame size is chosen in `set(_:)`: small for the histogram alone, full size for the GPU viewfinder.
         output.automaticallyConfiguresOutputBufferDimensions = false
         output.deliversPreviewSizedOutputBuffers = true
-        output.videoSettings = [   // luma for everything; the chroma plane only for the RGB histogram
+        output.videoSettings = [  // luma for everything; the chroma plane only for the RGB histogram
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
         output.setSampleBufferDelegate(self, queue: queue)
@@ -100,7 +100,9 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         queue.async { renderer.releaseWorkspace() }
     }
 
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    func captureOutput(
+        _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection
+    ) {
         let current = wants.withLock { $0 }
         let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
         // The histogram also finds the frame's white level, which zebras need even with HIST off.

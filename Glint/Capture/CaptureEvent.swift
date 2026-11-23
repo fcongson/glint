@@ -7,8 +7,8 @@ struct DeviceInfo: Sendable {
     let minISO: Float
     let maxISO: Float
     let aperture: Float
-    let hasFlash: Bool   // for stills
-    let hasTorch: Bool   // the same LED as a steady light, for video
+    let hasFlash: Bool  // for stills
+    let hasTorch: Bool  // the same LED as a steady light, for video
 }
 
 /// A finished photo, copied out of `AVCapturePhoto` so it can leave the capture callback.
@@ -16,7 +16,7 @@ struct CapturedPhoto: Sendable {
     let data: Data
     let captureID: Int64
     let info: PhotoInfo
-    let requestedAt: CFAbsoluteTime   // when the shutter was pressed, for the debug timing readout
+    let requestedAt: CFAbsoluteTime  // when the shutter was pressed, for the debug timing readout
     /// `data` is a Bayer DNG that a HEIC has to be developed from (HEIC and RAW+HEIC).
     let needsDevelopment: Bool
     /// The DNG itself is saved too (RAW and RAW+HEIC).

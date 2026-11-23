@@ -1,6 +1,7 @@
 import ImageIO
-import UIKit
 import Testing
+import UIKit
+
 @testable import Glint
 
 @Suite("Photo processor")
@@ -25,7 +26,8 @@ struct CameraHEICCropTests {
     private func heic(width: CGFloat, height: CGFloat) throws -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image {
+            context in
             UIColor.orange.setFill()
             context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         }
@@ -35,8 +37,10 @@ struct CameraHEICCropTests {
     private func size(of data: Data) throws -> (width: Int, height: Int) {
         let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
         let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
-        return (try #require(properties[kCGImagePropertyPixelWidth] as? Int),
-                try #require(properties[kCGImagePropertyPixelHeight] as? Int))
+        return (
+            try #require(properties[kCGImagePropertyPixelWidth] as? Int),
+            try #require(properties[kCGImagePropertyPixelHeight] as? Int)
+        )
     }
 
     @Test func aLandscapePhotoIsCroppedToTheChosenAspect() throws {

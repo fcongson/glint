@@ -12,8 +12,8 @@ enum SharedDefaults {
 
     nonisolated(unsafe) static let store: UserDefaults = {
         guard let shared = UserDefaults(suiteName: groupID) else { return .standard }
-        #if !LOCKED_CAPTURE   // only the app has older settings to bring across
-        migrate(from: .standard, to: shared)
+        #if !LOCKED_CAPTURE  // only the app has older settings to bring across
+            migrate(from: .standard, to: shared)
         #endif
         return shared
     }()
@@ -24,7 +24,8 @@ enum SharedDefaults {
         for key in migratedKeys where shared.object(forKey: key) == nil {
             if let value = old.object(forKey: key) {
                 shared.set(value, forKey: key)
-                Log.settings.notice("[\(Log.copy, privacy: .public)] moved \(key, privacy: .public) into the shared settings")
+                Log.settings.notice(
+                    "[\(Log.copy, privacy: .public)] moved \(key, privacy: .public) into the shared settings")
             }
         }
     }

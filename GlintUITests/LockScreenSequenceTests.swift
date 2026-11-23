@@ -54,11 +54,12 @@ final class LockScreenSequenceTests: XCTestCase {
         app.terminate()
         try lock()
         sleep(1)
-        try lock()   // wakes it again
+        try lock()  // wakes it again
         XCTAssertTrue(springboard.wait(for: .runningForeground, timeout: 5), "round \(n): Lock Screen")
         let control = springboard.buttons["Glint"]
         if !control.waitForExistence(timeout: 5) {
-            XCTFail("round \(n): Glint's control on the Lock Screen. Springboard shows:\n\(springboard.debugDescription)")
+            XCTFail(
+                "round \(n): Glint's control on the Lock Screen. Springboard shows:\n\(springboard.debugDescription)")
         }
         control.tap()
         sleep(6)
@@ -68,8 +69,9 @@ final class LockScreenSequenceTests: XCTestCase {
         add(shot)
 
         launchApp()
-        XCTAssertFalse(app.staticTexts["Camera in use by another app"].waitForExistence(timeout: 3),
-                       "round \(n): the app was told the camera was in use")
+        XCTAssertFalse(
+            app.staticTexts["Camera in use by another app"].waitForExistence(timeout: 3),
+            "round \(n): the app was told the camera was in use")
     }
 
     func testAppOpensAfterTheLockScreenCameraWithoutAnErrorAndWithItsSettings() throws {
@@ -78,10 +80,11 @@ final class LockScreenSequenceTests: XCTestCase {
         choose("HEIC")
         choose("Square")
         XCTAssertEqual(readout, "HEIC, Square", "the settings applied in the app")
-        sleep(1)   // they're saved a moment after they change
+        sleep(1)  // they're saved a moment after they change
 
         try lockScreenRound(1)
-        XCTAssertEqual(readout, "HEIC, Square", "the app's settings survived the Lock Screen camera (readout: \(readout))")
+        XCTAssertEqual(
+            readout, "HEIC, Square", "the app's settings survived the Lock Screen camera (readout: \(readout))")
     }
 
     /// A single pass can't show a release that only sometimes happens, so go round a few times.
@@ -98,7 +101,7 @@ final class LockScreenSequenceTests: XCTestCase {
         choose("HEIC")
         choose("16 by 9")
         XCTAssertEqual(readout, "HEIC, 16 by 9")
-        sleep(1)   // they're saved a moment after they change
+        sleep(1)  // they're saved a moment after they change
         app.terminate()
 
         launchApp()
@@ -138,7 +141,8 @@ final class LockScreenSequenceTests: XCTestCase {
     /// leave test photos behind.
     private func capture(file: String, aspect: String) async throws -> (width: Int, height: Int) {
         let allow = addUIInterruptionMonitor(withDescription: "Photos access") { alert in
-            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] where alert.buttons[label].firstMatch.exists {
+            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"]
+            where alert.buttons[label].firstMatch.exists {
                 alert.buttons[label].firstMatch.tap()
                 return true
             }
@@ -147,11 +151,11 @@ final class LockScreenSequenceTests: XCTestCase {
         defer { removeUIInterruptionMonitor(allow) }
 
         launchApp()
-        app.tap()   // lets the interruption monitor see any permission prompt that's up
+        app.tap()  // lets the interruption monitor see any permission prompt that's up
         openSettings()
         choose(file)
         if app.buttons[aspect].firstMatch.isEnabled { choose(aspect) }
-        app.buttons["Done"].tap()   // close SET
+        app.buttons["Done"].tap()  // close SET
 
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         try XCTSkipUnless(status == .authorized, "The tests need access to Photos to read the new photo's size")
@@ -190,7 +194,9 @@ final class LockScreenSequenceTests: XCTestCase {
     }
 
     func testEveryAspectComesOutAsChosen() async throws {
-        for (aspect, expected) in [("4 by 3, full sensor", 4.0 / 3), ("3 by 2", 3.0 / 2), ("Square", 1.0), ("16 by 9", 16.0 / 9)] {
+        for (aspect, expected) in [
+            ("4 by 3, full sensor", 4.0 / 3), ("3 by 2", 3.0 / 2), ("Square", 1.0), ("16 by 9", 16.0 / 9),
+        ] {
             let size = try await capture(file: "HEIC", aspect: aspect)
             XCTAssertEqual(ratio(size), expected, accuracy: 0.01, "\(aspect) came out \(size.width) x \(size.height)")
         }
@@ -202,7 +208,8 @@ final class LockScreenSequenceTests: XCTestCase {
         XCTAssertEqual(ratio(both), 1.0, accuracy: 0.01, "RAW+HEIC came out \(both.width) x \(both.height)")
 
         let raw = try await capture(file: "RAW", aspect: "Square")
-        XCTAssertEqual(ratio(raw), 4.0 / 3, accuracy: 0.01, "RAW came out \(raw.width) x \(raw.height), not full sensor")
+        XCTAssertEqual(
+            ratio(raw), 4.0 / 3, accuracy: 0.01, "RAW came out \(raw.width) x \(raw.height), not full sensor")
     }
 
     /// Review shows photos from before this launch, and deleting one there deletes it from Photos. The photo is taken,
@@ -210,7 +217,8 @@ final class LockScreenSequenceTests: XCTestCase {
     /// list of what Glint saved. Whatever happens it's deleted at the end.
     func testReviewShowsEarlierPhotosAndDeletingThereDeletesFromPhotos() async throws {
         let allow = addUIInterruptionMonitor(withDescription: "Photos access") { alert in
-            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] where alert.buttons[label].firstMatch.exists {
+            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"]
+            where alert.buttons[label].firstMatch.exists {
                 alert.buttons[label].firstMatch.tap()
                 return true
             }
@@ -234,7 +242,7 @@ final class LockScreenSequenceTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(500))
         }
         let id = try XCTUnwrap(taken, "no new photo reached Photos within 20 seconds")
-        sleep(1)   // the log is written once the save has finished
+        sleep(1)  // the log is written once the save has finished
         defer { if photoIDs().contains(id) { Task.detached { try? await Self.deletePhoto(id: id) } } }
 
         app.terminate()
@@ -243,14 +251,17 @@ final class LockScreenSequenceTests: XCTestCase {
         // The first time, Photos asks to let Glint read it; tapping the screen would close review, so answer it directly.
         let prompt = springboard.alerts.firstMatch
         if prompt.waitForExistence(timeout: 3) {
-            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] where prompt.buttons[label].firstMatch.exists {
+            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"]
+            where prompt.buttons[label].firstMatch.exists {
                 prompt.buttons[label].firstMatch.tap()
                 break
             }
         }
         let trash = app.buttons["Delete photo"]
         if !trash.waitForExistence(timeout: 15) {
-            XCTFail("review didn't open with a photo from before this launch. The app shows:\n\(app.debugDescription)\nSpringboard alerts:\n\(springboard.alerts.debugDescription)")
+            XCTFail(
+                "review didn't open with a photo from before this launch. The app shows:\n\(app.debugDescription)\nSpringboard alerts:\n\(springboard.alerts.debugDescription)"
+            )
         }
         trash.tap()
         let confirm = springboard.alerts.firstMatch

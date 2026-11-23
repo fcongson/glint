@@ -60,7 +60,7 @@ enum PeakingColor: Int, CaseIterable, Sendable, Codable {
     /// sRGB, 0…1.
     var rgb: SIMD3<Float> {
         switch self {
-        case .amber: SIMD3(245, 165, 36) / 255   // Color.amber, the app's accent
+        case .amber: SIMD3(245, 165, 36) / 255  // Color.amber, the app's accent
         case .red: SIMD3(255, 59, 48) / 255
         case .white: SIMD3(1, 1, 1)
         case .blue: SIMD3(64, 156, 255) / 255
@@ -146,7 +146,8 @@ struct SweepTracker {
         let pattern = luma.map { $0 / meanLuma * 128 }
         let relative = zip(sharpness, luma).map { $0 / ($1 + 8) }
 
-        let moved = reference.count == count
+        let moved =
+            reference.count == count
             && zip(pattern, reference).reduce(0) { $0 + abs($1.0 - $1.1) } / Float(count) > Self.motionLimit
         if reference.count != count || moved {
             peak = relative
@@ -162,7 +163,8 @@ struct SweepTracker {
             low[i] = min(low[i], relative[i])
             strongest[i] = max(strongest[i], sharpness[i])
             guard strongest[i] >= minimumStrength, peak[i] >= Self.informative * low[i] else { continue }
-            cutoffs[i] = relative[i] >= Self.nearPeak * peak[i]
+            cutoffs[i] =
+                relative[i] >= Self.nearPeak * peak[i]
                 ? max(minimumStrength, Self.detailFactor * sharpness[i])
                 : -1
         }

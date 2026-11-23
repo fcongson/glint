@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import Glint
 
 @Suite("Level")
@@ -33,7 +34,7 @@ struct LevelTests {
     @Test func tiltIsMeasuredFromTheNearestWayACameraIsHeld() throws {
         #expect(abs(try #require(level(turned: 4)).tilt - 4) < 0.001)
         #expect(abs(try #require(level(turned: -3)).tilt + 3) < 0.001)
-        #expect(abs(try #require(level(turned: 92)).tilt - 2) < 0.001)     // landscape, right side a little low
+        #expect(abs(try #require(level(turned: 92)).tilt - 2) < 0.001)  // landscape, right side a little low
         #expect(abs(try #require(level(turned: -95)).tilt + 5) < 0.001)
         #expect(abs(try #require(level(turned: 178)).tilt + 2) < 0.001)
     }
@@ -45,8 +46,8 @@ struct LevelTests {
     }
 
     @Test func noHorizonWhenThePhoneLiesFlat() {
-        #expect(Level(gravityX: 0.05, gravityY: -0.1) == nil)   // nearly all of gravity is through the screen
-        #expect(Level(gravityX: 0, gravityY: -0.7) != nil)      // pointing 45° down still has one
+        #expect(Level(gravityX: 0.05, gravityY: -0.1) == nil)  // nearly all of gravity is through the screen
+        #expect(Level(gravityX: 0, gravityY: -0.7) != nil)  // pointing 45° down still has one
     }
 
     @MainActor

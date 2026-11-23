@@ -4,12 +4,16 @@ import Foundation
 /// Pure values with no device or UI state; the device clamps anything its active format can't reach.
 enum ExposureScale {
     /// Shutter speeds as 1/x seconds, in conventional 1/3-stop steps.
-    static let shutterDenominators: [Double] = [8, 10, 13, 15, 20, 25, 30, 40, 50, 60, 80, 100, 125, 160, 200, 250, 320,
-                                                400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000]
+    static let shutterDenominators: [Double] = [
+        8, 10, 13, 15, 20, 25, 30, 40, 50, 60, 80, 100, 125, 160, 200, 250, 320,
+        400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000,
+    ]
 
     /// ISO in conventional 1/3-stop steps. Use `isoStops(min:max:)` for the range a lens can actually reach.
-    static let allISOStops: [Float] = [50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600,
-                                       2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25000, 32000, 40000, 50000]
+    static let allISOStops: [Float] = [
+        50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600,
+        2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25000, 32000, 40000, 50000,
+    ]
 
     /// White balance runs 2000–10000K in 100K steps.
     static let whiteBalanceKelvins: [Float] = stride(from: 2000, through: 10000, by: 100).map { Float($0) }

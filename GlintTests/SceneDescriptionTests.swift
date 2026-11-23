@@ -1,5 +1,6 @@
 import CoreGraphics
 import Testing
+
 @testable import Glint
 
 @Suite("Spoken scene descriptions")
@@ -59,7 +60,7 @@ struct SceneDescriptionTests {
         #expect(SceneDescription.Tilt(Level(rotation: 5), previous: nil) == .right)
         #expect(SceneDescription.Tilt(Level(rotation: -5), previous: nil) == .left)
         #expect(SceneDescription.Tilt(Level(rotation: 0.5), previous: .left) == .level)
-        #expect(SceneDescription.Tilt(Level(rotation: 95), previous: nil) == .right)   // held sideways
+        #expect(SceneDescription.Tilt(Level(rotation: 95), previous: nil) == .right)  // held sideways
     }
 
     /// Between level and clearly tilted it keeps saying level, so a hand at the edge doesn't chatter.
@@ -88,7 +89,7 @@ struct SceneDescriptionTests {
         #expect(speech.offer(key: "left", text: "Tilted left, 4 degrees", now: 100) != nil)
         #expect(speech.offer(key: "level", text: "Level", now: 101) == nil)
         #expect(abs(speech.retryAfter(now: 101) - (SceneAnnouncer.minimumGap - 1)) < 0.0001)
-        #expect(speech.lastKey == "left")   // not said, so not counted as said
+        #expect(speech.lastKey == "left")  // not said, so not counted as said
         #expect(speech.offer(key: "level", text: "Level", now: 100 + SceneAnnouncer.minimumGap) == "Level")
         #expect(speech.retryAfter(now: 200) == 0)
     }
@@ -103,10 +104,10 @@ struct SceneDescriptionTests {
     @Test func faceReportsArePacedButACountChangeIsImmediate() {
         var pacer = FaceReportPacer()
         let reports: [(count: Int, at: Double)] = [
-            (1, 10),      // a face
-            (1, 10.2),    // the same face, too soon
-            (2, 10.3),    // someone joined
-            (0, 10.35),   // everyone left: the camera only says so once
+            (1, 10),  // a face
+            (1, 10.2),  // the same face, too soon
+            (2, 10.3),  // someone joined
+            (0, 10.35),  // everyone left: the camera only says so once
             (0, 10.4),
             (0, 10.35 + FaceReportPacer.interval),
         ]

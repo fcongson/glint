@@ -1,6 +1,6 @@
-import SwiftUI
 import AVFoundation
 import AVKit
+import SwiftUI
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
@@ -52,18 +52,23 @@ struct CameraPreview: UIViewRepresentable {
         v.accessibilityHint = hint
         v.accessibilityTraits = .allowsDirectInteraction
         v.previewLayer.session = session
-        v.previewLayer.videoGravity = .resizeAspect   // show the whole frame when the sensor image is landscape in the portrait box
+        // show the whole frame when the sensor image is landscape in the portrait box
+        v.previewLayer.videoGravity = .resizeAspect
         let coordinator = context.coordinator
         update(coordinator)
-        v.addGestureRecognizer(UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleTap(_:))))
-        v.addGestureRecognizer(UILongPressGestureRecognizer(target: coordinator,
-                                                            action: #selector(Coordinator.handleLongPress(_:))))
+        v.addGestureRecognizer(
+            UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleTap(_:))))
+        v.addGestureRecognizer(
+            UILongPressGestureRecognizer(
+                target: coordinator,
+                action: #selector(Coordinator.handleLongPress(_:))))
         // The volume buttons and Camera Control work the capture button, as in the system Camera. The system
         // only sends these while the camera is running, and gives the buttons back their usual job otherwise.
         if #available(iOS 17.2, *) {
-            v.addInteraction(AVCaptureEventInteraction { [weak coordinator] event in
-                if event.phase == .ended { coordinator?.onCaptureButton?() }
-            })
+            v.addInteraction(
+                AVCaptureEventInteraction { [weak coordinator] event in
+                    if event.phase == .ended { coordinator?.onCaptureButton?() }
+                })
         }
         onLayerReady?(v.previewLayer)
         return v

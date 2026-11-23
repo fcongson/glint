@@ -31,7 +31,7 @@ struct SetMenu: View {
             case .frameRate: "FRAME RATE"
             case .codec: "FORMAT"
             case .encoding: "ENCODING"
-            case .recordingExposure: "REC EXPOSURE"   // exposure while recording; the full name doesn't fit the column
+            case .recordingExposure: "REC EXPOSURE"  // exposure while recording; the full name doesn't fit the column
             case .debugInfo: "DEBUG INFO"
             case .flash: "FLASH"
             case .light: "LIGHT"
@@ -88,7 +88,7 @@ struct SetMenu: View {
 
     /// Settings grouped under a heading, so it's clear which feature each belongs to.
     enum Section: CaseIterable {
-        case photo, video, peaking, viewfinder, developer   // the format first: the top bar's readout opens SET
+        case photo, video, peaking, viewfinder, developer  // the format first: the top bar's readout opens SET
 
         var title: String {
             switch self {
@@ -132,11 +132,14 @@ struct SetMenu: View {
                                     .accessibilityAddTraits(.isHeader)
                                 ForEach(sectionRows, id: \.self) { row($0) }
                                 if section == .video {
-                                    Text(SettingsText.videoNote(cam.videoFormat, capabilities: cam.videoCapabilities,
-                                                                isRecording: cam.isRecording))
-                                        .font(.system(.caption2, design: .monospaced))   // grows with the system text size
-                                        .foregroundStyle(Color.white.opacity(0.7))
-                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text(
+                                        SettingsText.videoNote(
+                                            cam.videoFormat, capabilities: cam.videoCapabilities,
+                                            isRecording: cam.isRecording)
+                                    )
+                                    .font(.system(.caption2, design: .monospaced))  // grows with the system text size
+                                    .foregroundStyle(Color.white.opacity(0.7))
+                                    .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                         }
@@ -172,77 +175,96 @@ struct SetMenu: View {
     private func row(_ tile: Tile) -> some View {
         switch tile {
         case .peakingMode:
-            SettingRow(tile: tile, options: PeakingMode.allCases.map { (title: $0.title, value: $0) },
-                       selection: cam.peakingMode, onSelect: { cam.setPeakingMode($0) })
+            SettingRow(
+                tile: tile, options: PeakingMode.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.peakingMode, onSelect: { cam.setPeakingMode($0) })
         case .sensitivity:
-            SettingRow(tile: tile, options: PeakingSensitivity.allCases.map { (title: $0.title, value: $0) },
-                       selection: cam.peakingSensitivity, onSelect: { cam.setPeakingSensitivity($0) })
+            SettingRow(
+                tile: tile, options: PeakingSensitivity.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.peakingSensitivity, onSelect: { cam.setPeakingSensitivity($0) })
         case .colour:
-            SettingRow(tile: tile, options: PeakingColor.allCases.map { (title: $0.title, value: $0) },
-                       selection: cam.peakingAppearance.color, onSelect: { cam.setPeakingColor($0) })
+            SettingRow(
+                tile: tile, options: PeakingColor.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.peakingAppearance.color, onSelect: { cam.setPeakingColor($0) })
         case .lines:
-            SettingRow(tile: tile, options: PeakingLines.allCases.map { (title: $0.title, value: $0) },
-                       selection: cam.peakingAppearance.lines, onSelect: { cam.setPeakingLines($0) })
+            SettingRow(
+                tile: tile, options: PeakingLines.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.peakingAppearance.lines, onSelect: { cam.setPeakingLines($0) })
         case .zebras:
-            SettingRow(tile: tile, options: ZebraLevel.allCases.map { (title: $0.title, value: $0) },
-                       selection: cam.zebraLevel, onSelect: { cam.setZebraLevel($0) })
+            SettingRow(
+                tile: tile, options: ZebraLevel.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.zebraLevel, onSelect: { cam.setZebraLevel($0) })
         case .railSide:
-            SettingRow(tile: tile, options: RailSide.allCases.map { (title: $0.title, value: $0) },
-                       selection: railSide, onSelect: { railSide = $0 })
+            SettingRow(
+                tile: tile, options: RailSide.allCases.map { (title: $0.title, value: $0) },
+                selection: railSide, onSelect: { railSide = $0 })
         case .fileType:
-            SettingRow(tile: tile, options: PhotoFileType.allCases.map { (title: SettingsText.fileType($0), value: $0) },
-                       selection: cam.fileType, onSelect: { cam.setFileType($0) })
+            SettingRow(
+                tile: tile, options: PhotoFileType.allCases.map { (title: SettingsText.fileType($0), value: $0) },
+                selection: cam.fileType, onSelect: { cam.setFileType($0) })
         case .aspect:
-            SettingRow(tile: tile, options: AspectRatio.allCases.map { (title: SettingsText.aspect($0), value: $0) },
-                       selection: cam.appliedAspect, onSelect: { cam.setAspect($0) },
-                       spoken: { SettingsText.aspectSpoken($0) },
-                       isAvailable: { _ in cam.canChooseAspect })   // RAW keeps the full sensor, so there's no crop to choose
+            SettingRow(
+                tile: tile, options: AspectRatio.allCases.map { (title: SettingsText.aspect($0), value: $0) },
+                selection: cam.appliedAspect, onSelect: { cam.setAspect($0) },
+                spoken: { SettingsText.aspectSpoken($0) },
+                isAvailable: { _ in cam.canChooseAspect })  // RAW keeps the full sensor, so there's no crop to choose
         case .resolution:
-            SettingRow(tile: tile, options: VideoResolution.allCases.map { (title: SettingsText.resolution($0), value: $0) },
-                       selection: format.recordedResolution, onSelect: { r in updateVideo { $0.resolution = r } },
-                       isAvailable: { canChangeVideo && caps.allows($0, for: format) })
+            SettingRow(
+                tile: tile, options: VideoResolution.allCases.map { (title: SettingsText.resolution($0), value: $0) },
+                selection: format.recordedResolution, onSelect: { r in updateVideo { $0.resolution = r } },
+                isAvailable: { canChangeVideo && caps.allows($0, for: format) })
         case .frameRate:
-            SettingRow(tile: tile, options: VideoFormat.frameRates.map { (title: "\($0)", value: $0) },
-                       selection: format.frameRate, onSelect: { fps in updateVideo { $0.frameRate = fps } },
-                       spoken: { "\($0) frames per second" },
-                       isAvailable: { canChangeVideo && caps.allows(frameRate: $0, for: format) })
+            SettingRow(
+                tile: tile, options: VideoFormat.frameRates.map { (title: "\($0)", value: $0) },
+                selection: format.frameRate, onSelect: { fps in updateVideo { $0.frameRate = fps } },
+                spoken: { "\($0) frames per second" },
+                isAvailable: { canChangeVideo && caps.allows(frameRate: $0, for: format) })
         case .codec:
-            SettingRow(tile: tile, options: VideoCodec.allCases.map { (title: SettingsText.codec($0), value: $0) },
-                       selection: format.codec, onSelect: { c in updateVideo { $0.codec = c } },
-                       isAvailable: { canChangeVideo && caps.allows($0) })
+            SettingRow(
+                tile: tile, options: VideoCodec.allCases.map { (title: SettingsText.codec($0), value: $0) },
+                selection: format.codec, onSelect: { c in updateVideo { $0.codec = c } },
+                isAvailable: { canChangeVideo && caps.allows($0) })
         case .encoding:
-            SettingRow(tile: tile, options: VideoEncoding.allCases.map { (title: SettingsText.encoding($0), value: $0) },
-                       selection: format.encoding, onSelect: { e in updateVideo { $0.encoding = e } },
-                       isAvailable: { canChangeVideo && caps.allows($0, for: format) })
+            SettingRow(
+                tile: tile, options: VideoEncoding.allCases.map { (title: SettingsText.encoding($0), value: $0) },
+                selection: format.encoding, onSelect: { e in updateVideo { $0.encoding = e } },
+                isAvailable: { canChangeVideo && caps.allows($0, for: format) })
         case .recordingExposure:
-            SettingRow(tile: tile, options: [(title: "Adjustable", value: false), (title: "Locked", value: true)],
-                       selection: format.locksExposureWhileRecording,
-                       onSelect: { locked in updateVideo { $0.locksExposureWhileRecording = locked } },
-                       isAvailable: { _ in canChangeVideo })
+            SettingRow(
+                tile: tile, options: [(title: "Adjustable", value: false), (title: "Locked", value: true)],
+                selection: format.locksExposureWhileRecording,
+                onSelect: { locked in updateVideo { $0.locksExposureWhileRecording = locked } },
+                isAvailable: { _ in canChangeVideo })
         case .debugInfo:
-            SettingRow(tile: tile, options: [(title: "On", value: true), (title: "Off", value: false)],
-                       selection: debugInfo, onSelect: { debugInfo = $0 })
+            SettingRow(
+                tile: tile, options: [(title: "On", value: true), (title: "Off", value: false)],
+                selection: debugInfo, onSelect: { debugInfo = $0 })
         case .flash:
             // Greyed out on a lens with no flash, where Off is all there is.
-            SettingRow(tile: tile, options: FlashSetting.allCases.map { (title: $0.title, value: $0) },
-                       selection: cam.flash.available(hasFlash: cam.hasFlash), onSelect: { cam.setFlash($0) },
-                       spoken: { "Flash \($0.title.lowercased())" },
-                       isAvailable: { $0 == .off || cam.hasFlash })
+            SettingRow(
+                tile: tile, options: FlashSetting.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.flash.available(hasFlash: cam.hasFlash), onSelect: { cam.setFlash($0) },
+                spoken: { "Flash \($0.title.lowercased())" },
+                isAvailable: { $0 == .off || cam.hasFlash })
         case .light:
             // Not part of the format, so it stays live while recording.
-            SettingRow(tile: tile, options: Self.offOn, selection: cam.isVideoLightOn && cam.hasVideoLight,
-                       onSelect: { cam.setVideoLight($0) },
-                       isAvailable: { !$0 || cam.hasVideoLight })
+            SettingRow(
+                tile: tile, options: Self.offOn, selection: cam.isVideoLightOn && cam.hasVideoLight,
+                onSelect: { cam.setVideoLight($0) },
+                isAvailable: { !$0 || cam.hasVideoLight })
         case .histogram:
-            SettingRow(tile: tile, options: HistogramStyle.allCases.map { (title: $0.title, value: $0) },
-                       selection: cam.histogramStyle, onSelect: { cam.setHistogramStyle($0) },
-                       spoken: { $0 == .rgb ? "Red, green and blue" : "Brightness" })
+            SettingRow(
+                tile: tile, options: HistogramStyle.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.histogramStyle, onSelect: { cam.setHistogramStyle($0) },
+                spoken: { $0 == .rgb ? "Red, green and blue" : "Brightness" })
         case .grid:
-            SettingRow(tile: tile, options: [(title: "Off", value: false), (title: "Thirds", value: true)],
-                       selection: cam.isGridEnabled, onSelect: { cam.setGridEnabled($0) })
+            SettingRow(
+                tile: tile, options: [(title: "Off", value: false), (title: "Thirds", value: true)],
+                selection: cam.isGridEnabled, onSelect: { cam.setGridEnabled($0) })
         case .level:
-            SettingRow(tile: tile, options: Self.offOn, selection: cam.isLevelEnabled,
-                       onSelect: { cam.setLevelEnabled($0) })
+            SettingRow(
+                tile: tile, options: Self.offOn, selection: cam.isLevelEnabled,
+                onSelect: { cam.setLevelEnabled($0) })
         }
     }
 }
@@ -270,7 +292,9 @@ private struct SettingRow<Value: Hashable>: View {
                 ForEach(options, id: \.value) { option in
                     let isSelected = option.value == selection
                     let available = isAvailable(option.value)
-                    Button { onSelect(option.value) } label: {
+                    Button {
+                        onSelect(option.value)
+                    } label: {
                         Text(option.title)
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .lineLimit(1)
@@ -302,9 +326,9 @@ enum DebugInfo {
 
     static var isAvailable: Bool {
         #if DEBUG
-        return true
+            return true
         #else
-        return false
+            return false
         #endif
     }
 

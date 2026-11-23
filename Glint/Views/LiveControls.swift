@@ -19,8 +19,9 @@ struct LiveFocusRail: View {
     let cam: CameraController
 
     var body: some View {
-        FocusRail(position: cam.lensPosition, isAutofocus: cam.isAutofocus,
-                  onChange: { cam.setLensPosition($0) }, onTouch: { cam.focusRailTouched($0) })
+        FocusRail(
+            position: cam.lensPosition, isAutofocus: cam.isAutofocus,
+            onChange: { cam.setLensPosition($0) }, onTouch: { cam.focusRailTouched($0) })
     }
 }
 
@@ -76,8 +77,10 @@ struct ManualControls: View {
     private var availableISOStops: [Float] { ExposureScale.isoStops(min: cam.minISO, max: cam.maxISO) }
 
     /// Binds a ruler's index to a camera value: reads the nearest stop, writes the stop at the new index.
-    private func stopIndex<T: BinaryFloatingPoint>(_ stops: [T], value: @escaping () -> T,
-                                                   set: @escaping (T) -> Void) -> Binding<Int> {
+    private func stopIndex<T: BinaryFloatingPoint>(
+        _ stops: [T], value: @escaping () -> T,
+        set: @escaping (T) -> Void
+    ) -> Binding<Int> {
         Binding(
             get: { ExposureScale.nearestIndex(of: value(), in: stops) },
             set: { set(stops[min(max($0, 0), stops.count - 1)]) })
@@ -89,7 +92,8 @@ struct ManualControls: View {
                 readout("ISO", SettingsText.iso(cam.iso), .iso)
                 readout("SHUTTER", SettingsText.shutter(denominator: cam.effectiveShutterDenominator), .shutter)
                 readout("WB", SettingsText.kelvin(cam.whiteBalanceKelvin), .wb)
-                SettingReadout(label: "APERTURE", value: SettingsText.aperture(Double(cam.aperture)))   // fixed lens: display only
+                // fixed lens: display only
+                SettingReadout(label: "APERTURE", value: SettingsText.aperture(Double(cam.aperture)))
             }
             HStack(spacing: 10) {
                 let isAuto = cam.auto[selected.setting]
@@ -97,29 +101,35 @@ struct ManualControls: View {
                     compensationRuler
                 } else if selected == .iso {
                     let stops = availableISOStops
-                    RulerPicker(count: stops.count,
-                                index: stopIndex(stops, value: { cam.iso }, set: cam.setISO),
-                                isMajor: { stops.indices.contains($0) && ExposureScale.isFullStopISO(stops[$0]) },
-                                label: "ISO", valueText: SettingsText.iso(cam.iso))
-                        .id("iso-\(stops.count)")
+                    RulerPicker(
+                        count: stops.count,
+                        index: stopIndex(stops, value: { cam.iso }, set: cam.setISO),
+                        isMajor: { stops.indices.contains($0) && ExposureScale.isFullStopISO(stops[$0]) },
+                        label: "ISO", valueText: SettingsText.iso(cam.iso)
+                    )
+                    .id("iso-\(stops.count)")
                 } else if selected == .wb {
                     // On auto the ruler follows the camera's choice and can't be moved until A is turned off.
                     let stops = ExposureScale.whiteBalanceKelvins
                     let kelvin = "\(Int(cam.whiteBalanceKelvin)) kelvin"
-                    RulerPicker(count: stops.count,
-                                index: stopIndex(stops, value: { cam.whiteBalanceKelvin }, set: cam.setWhiteBalanceKelvin),
-                                isMajor: { ExposureScale.isMajorWhiteBalance(stops[$0]) },
-                                label: "White balance", valueText: isAuto ? "Auto, \(kelvin)" : kelvin)
-                        .id("wb")
-                        .disabled(isAuto)
-                        .opacity(isAuto ? 0.4 : 1)
+                    RulerPicker(
+                        count: stops.count,
+                        index: stopIndex(stops, value: { cam.whiteBalanceKelvin }, set: cam.setWhiteBalanceKelvin),
+                        isMajor: { ExposureScale.isMajorWhiteBalance(stops[$0]) },
+                        label: "White balance", valueText: isAuto ? "Auto, \(kelvin)" : kelvin
+                    )
+                    .id("wb")
+                    .disabled(isAuto)
+                    .opacity(isAuto ? 0.4 : 1)
                 } else {
                     let stops = ExposureScale.shutterDenominators
-                    RulerPicker(count: stops.count,
-                                index: stopIndex(stops, value: { cam.shutterDenominator }, set: cam.setShutterDenominator),
-                                isMajor: ExposureScale.isFullStopShutter(index:),
-                                label: "Shutter speed", valueText: SettingsText.shutter(denominator: cam.shutterDenominator))
-                        .id("shutter")
+                    RulerPicker(
+                        count: stops.count,
+                        index: stopIndex(stops, value: { cam.shutterDenominator }, set: cam.setShutterDenominator),
+                        isMajor: ExposureScale.isFullStopShutter(index:),
+                        label: "Shutter speed", valueText: SettingsText.shutter(denominator: cam.shutterDenominator)
+                    )
+                    .id("shutter")
                 }
                 autoButton(for: selected.setting)
             }
@@ -133,7 +143,9 @@ struct ManualControls: View {
     /// Tapping a readout chooses which setting the ruler below adjusts.
     private func readout(_ label: String, _ value: String, _ p: ManualParam) -> some View {
         let isAuto = cam.auto[p.setting]
-        return Button { selected = p } label: {
+        return Button {
+            selected = p
+        } label: {
             SettingReadout(label: label, value: value, highlighted: selected == p, isAuto: isAuto)
         }
         .accessibilityLabel(SettingsText.name(p.setting))
@@ -156,18 +168,22 @@ struct ManualControls: View {
             }
             .frame(width: 40)
             .accessibilityHidden(true)
-            RulerPicker(count: stops.count,
-                        index: stopIndex(stops, value: { cam.exposureBias }, set: cam.setExposureBias),
-                        isMajor: ExposureScale.isFullStopBias(index:),
-                        label: "Exposure compensation", valueText: SettingsText.exposureBias(Double(cam.exposureBias)))
-                .id("ev")
+            RulerPicker(
+                count: stops.count,
+                index: stopIndex(stops, value: { cam.exposureBias }, set: cam.setExposureBias),
+                isMajor: ExposureScale.isFullStopBias(index:),
+                label: "Exposure compensation", valueText: SettingsText.exposureBias(Double(cam.exposureBias))
+            )
+            .id("ev")
         }
     }
 
     /// A, like the A position on a Leica dial: hands this setting to the camera. Red when on.
     private func autoButton(for setting: ManualSetting) -> some View {
         let on = cam.auto[setting]
-        return Button { cam.setAuto(setting, !on) } label: {
+        return Button {
+            cam.setAuto(setting, !on)
+        } label: {
             Text("A")
                 .font(.system(size: 15, weight: .bold, design: .monospaced))
                 .foregroundStyle(on ? Color.black : Color.autoRed)
@@ -178,8 +194,9 @@ struct ManualControls: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(SettingsText.name(setting)) auto")
         .accessibilityValue(SettingsText.onOff(on))
-        .accessibilityHint(setting == .whiteBalance
-                           ? "Lets the camera choose white balance"
-                           : "Lets the camera choose this. The ruler then sets exposure compensation.")
+        .accessibilityHint(
+            setting == .whiteBalance
+                ? "Lets the camera choose white balance"
+                : "Lets the camera choose this. The ruler then sets exposure compensation.")
     }
 }

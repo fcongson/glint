@@ -1,4 +1,5 @@
 import Testing
+
 @testable import Glint
 
 @Suite("SET menu")
@@ -15,7 +16,8 @@ struct SetMenuTests {
 
     @Test func videoShowsTheVideoFormatAndNotThePhotoFormat() {
         let shown = rows(in: .video)
-        #expect(shown.filter { $0.section == .video }
+        #expect(
+            shown.filter { $0.section == .video }
                 == [.resolution, .frameRate, .codec, .encoding, .recordingExposure, .light])
         #expect(!shown.contains { $0.section == .photo })
     }

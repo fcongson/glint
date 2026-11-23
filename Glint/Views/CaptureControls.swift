@@ -7,7 +7,7 @@ struct CaptureControls: View {
     let deviceAngle: Angle
     /// The shutter's blink, shown over the viewfinder.
     @Binding var flash: Bool
-    @State private var selected: ManualParam = .shutter   // kept here so MANUAL comes back to the same ruler
+    @State private var selected: ManualParam = .shutter  // kept here so MANUAL comes back to the same ruler
     @State private var showReview = false
     @State private var reviewEntries: [ReviewEntry] = []
 
@@ -23,18 +23,24 @@ struct CaptureControls: View {
             ZStack {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
-                        SegmentedSwitch(label: "Exposure mode",
-                                        options: [SwitchOption(title: "AUTO", value: false),
-                                                  SwitchOption(title: "MANUAL", value: true)],
-                                        selection: cam.manual,
-                                        onSelect: { cam.setManual($0) },
-                                        height: 40)
-                        SegmentedSwitch(label: "Capture mode",
-                                        options: [SwitchOption(title: "PHOTO", value: CaptureMode.photo),
-                                                  SwitchOption(title: "VIDEO", value: CaptureMode.video)],
-                                        selection: cam.captureMode,
-                                        onSelect: { cam.setCaptureMode($0) },
-                                        height: 40)
+                        SegmentedSwitch(
+                            label: "Exposure mode",
+                            options: [
+                                SwitchOption(title: "AUTO", value: false),
+                                SwitchOption(title: "MANUAL", value: true),
+                            ],
+                            selection: cam.manual,
+                            onSelect: { cam.setManual($0) },
+                            height: 40)
+                        SegmentedSwitch(
+                            label: "Capture mode",
+                            options: [
+                                SwitchOption(title: "PHOTO", value: CaptureMode.photo),
+                                SwitchOption(title: "VIDEO", value: CaptureMode.video),
+                            ],
+                            selection: cam.captureMode,
+                            onSelect: { cam.setCaptureMode($0) },
+                            height: 40)
                     }
                     .disabled(cam.isRecording)
                     .opacity(cam.isRecording ? 0.4 : 1)
@@ -42,7 +48,7 @@ struct CaptureControls: View {
                     thumbnailButton
                 }
                 .shownWhenReady(cam.isCameraReady)
-                captureButton   // there from the start: a shot taken early is buffered by responsive capture
+                captureButton  // there from the start: a shot taken early is buffered by responsive capture
             }
             .padding(.horizontal, 16)
         }
@@ -72,7 +78,9 @@ struct CaptureControls: View {
     }
 
     private var shutterButton: some View {
-        Button { cam.pressCaptureButton() } label: {
+        Button {
+            cam.pressCaptureButton()
+        } label: {
             ZStack {
                 Circle().strokeBorder(Color.white, lineWidth: 4).frame(width: 78, height: 78)
                 Circle().fill(Color.white).frame(width: 64, height: 64)
@@ -85,7 +93,9 @@ struct CaptureControls: View {
 
     /// Takes the shutter's place in video mode, at the same size: a red dot that becomes a stop square.
     private var recordButton: some View {
-        Button { cam.pressCaptureButton() } label: {
+        Button {
+            cam.pressCaptureButton()
+        } label: {
             ZStack {
                 Circle().strokeBorder(Color.white, lineWidth: 4).frame(width: 78, height: 78)
                 RoundedRectangle(cornerRadius: cam.isRecording ? 6 : 32)
@@ -99,7 +109,9 @@ struct CaptureControls: View {
     }
 
     private var thumbnailButton: some View {
-        Button { Task { await openReview() } } label: {
+        Button {
+            Task { await openReview() }
+        } label: {
             Group {
                 if let img = cam.lastThumbnail {
                     Image(uiImage: img).resizable().scaledToFill()
@@ -119,43 +131,45 @@ struct CaptureControls: View {
         .fullScreenCover(isPresented: $showReview) {
             ReviewView(entries: reviewEntries, angle: deviceAngle, onDelete: deleteFromReview)
         }
-        .onChange(of: showReview) { _, isReviewing in cam.setReviewing(isReviewing) }   // saves battery
+        .onChange(of: showReview) { _, isReviewing in cam.setReviewing(isReviewing) }  // saves battery
     }
 
     /// In the app, review pages through every photo Glint has saved, once Photos can be read (the first time asks).
     /// Where it can't, and in the Lock Screen camera whatever it's allowed, it's only this session's photos.
     private func openReview() async {
         #if LOCKED_CAPTURE
-        let isLockScreen = true, canRead = false
+            let isLockScreen = true, canRead = false
         #else
-        let isLockScreen = false
-        let canRead = await PhotoHistory.requestReadAccess()
+            let isLockScreen = false
+            let canRead = await PhotoHistory.requestReadAccess()
         #endif
         switch ReviewPlan.source(isLockScreen: isLockScreen, canReadLibrary: canRead) {
         case .thisSession: reviewEntries = cam.sessionReviewEntries()
         case .library:
             #if !LOCKED_CAPTURE
-            reviewEntries = PhotoHistory.entries()
-            await cam.showLatestSavedPhoto(onlyIfNone: true)   // access may have just been given
+                reviewEntries = PhotoHistory.entries()
+                await cam.showLatestSavedPhoto(onlyIfNone: true)  // access may have just been given
             #endif
         }
         showReview = !reviewEntries.isEmpty
         if reviewEntries.isEmpty {
-            cam.notify(canRead || isLockScreen ? "No photos to review yet"
-                                               : "Photos access is off. Allow it in Settings to review your photos")
+            cam.notify(
+                canRead || isLockScreen
+                    ? "No photos to review yet"
+                    : "Photos access is off. Allow it in Settings to review your photos")
         }
     }
 
     /// Nil in the Lock Screen camera: someone holding a locked phone can't delete photos from it.
     private var deleteFromReview: ((ReviewEntry) async -> Bool)? {
         #if LOCKED_CAPTURE
-        nil
+            nil
         #else
-        { entry in
-            let deleted = await PhotoHistory.delete(assetID: entry.id)
-            if deleted { await cam.showLatestSavedPhoto() }
-            return deleted
-        }
+            { entry in
+                let deleted = await PhotoHistory.delete(assetID: entry.id)
+                if deleted { await cam.showLatestSavedPhoto() }
+                return deleted
+            }
         #endif
     }
 }

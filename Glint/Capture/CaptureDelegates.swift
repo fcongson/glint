@@ -14,8 +14,10 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     private let emit: AsyncStream<CaptureEvent>.Continuation
     private let finished: @Sendable () -> Void
 
-    init(whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime, plan: CapturePlan, aspect: AspectRatio,
-         emit: AsyncStream<CaptureEvent>.Continuation, finished: @escaping @Sendable () -> Void) {
+    init(
+        whiteBalance: WhiteBalanceSetting, requestedAt: CFAbsoluteTime, plan: CapturePlan, aspect: AspectRatio,
+        emit: AsyncStream<CaptureEvent>.Continuation, finished: @escaping @Sendable () -> Void
+    ) {
         self.whiteBalance = whiteBalance
         self.requestedAt = requestedAt
         self.plan = plan
@@ -28,10 +30,15 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         if let error { emit.yield(.status("Capture error: \(error.localizedDescription)")); return }
         if let preview = Self.previewImage(of: photo) { emit.yield(.photoPreview(preview, requestedAt: requestedAt)) }
         guard let data = photo.fileDataRepresentation() else { return }
-        let info = PhotoInfo(metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto), whiteBalance: whiteBalance, fileBytes: data.count)
-        emit.yield(.photoCaptured(CapturedPhoto(data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
-                                                needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto),
-                                                keepsDNG: plan.keepsDNG(isRawPhoto: photo.isRawPhoto), aspect: aspect)))
+        let info = PhotoInfo(
+            metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto),
+            whiteBalance: whiteBalance, fileBytes: data.count)
+        emit.yield(
+            .photoCaptured(
+                CapturedPhoto(
+                    data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
+                    needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto),
+                    keepsDNG: plan.keepsDNG(isRawPhoto: photo.isRawPhoto), aspect: aspect)))
     }
 
     /// The capture's preview image, upright. Its pixels are as the sensor saw them; the photo's orientation tag
@@ -44,7 +51,10 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     }
 
     /// The last callback for a capture, so the session can release this delegate.
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+    func photoOutput(
+        _ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
         finished()
     }
 }
@@ -59,11 +69,16 @@ final class RecordingDelegate: NSObject, AVCaptureFileOutputRecordingDelegate {
         self.finished = finished
     }
 
-    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo url: URL, from connections: [AVCaptureConnection]) {
+    func fileOutput(
+        _ output: AVCaptureFileOutput, didStartRecordingTo url: URL, from connections: [AVCaptureConnection]
+    ) {
         emit.yield(.recordingStarted)
     }
 
-    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
+    func fileOutput(
+        _ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection],
+        error: Error?
+    ) {
         emit.yield(.recordingFinished(url, RecordingOutcome(error: error)))
         finished()
     }

@@ -1,7 +1,8 @@
 import Foundation
 import os
+
 #if !LOCKED_CAPTURE
-import LockedCameraCapture
+    import LockedCameraCapture
 #endif
 
 /// The copies of captures made from the Lock Screen. The capture extension can't reach the app's Documents folder,
@@ -34,24 +35,26 @@ enum LockScreenCaptures {
     }
 
     #if !LOCKED_CAPTURE
-    /// In the app: brings in what Lock Screen sessions left, now and as more arrive, and tells the system each
-    /// folder is finished with. Runs for as long as the app does.
-    @available(iOS 18.0, *)
-    static func collect() async {
-        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        for await update in LockedCameraCaptureManager.shared.sessionContentUpdates {
-            let folders: [URL]
-            switch update {
-            case .initial(let urls): folders = urls
-            case .added(let url): folders = [url]
-            case .removed: folders = []
-            @unknown default: folders = []
+        /// In the app: brings in what Lock Screen sessions left, now and as more arrive, and tells the system each
+        /// folder is finished with. Runs for as long as the app does.
+        @available(iOS 18.0, *)
+        static func collect() async {
+            guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                return
             }
-            for folder in folders {
-                moveFiles(from: folder, to: documents)
-                try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: folder)
+            for await update in LockedCameraCaptureManager.shared.sessionContentUpdates {
+                let folders: [URL]
+                switch update {
+                case .initial(let urls): folders = urls
+                case .added(let url): folders = [url]
+                case .removed: folders = []
+                @unknown default: folders = []
+                }
+                for folder in folders {
+                    moveFiles(from: folder, to: documents)
+                    try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: folder)
+                }
             }
         }
-    }
     #endif
 }

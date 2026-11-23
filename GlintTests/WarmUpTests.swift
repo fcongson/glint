@@ -1,13 +1,14 @@
 import Foundation
-import UIKit
 import Testing
+import UIKit
+
 @testable import Glint
 
 /// Outside the suite it gates: a suite's trait can't refer to the suite itself.
 #if targetEnvironment(simulator)
-private let runsOnDevice = false
+    private let runsOnDevice = false
 #else
-private let runsOnDevice = true
+    private let runsOnDevice = true
 #endif
 
 struct WarmUpBundleTests {

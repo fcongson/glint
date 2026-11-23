@@ -1,5 +1,6 @@
 import AVFoundation
 import Testing
+
 @testable import Glint
 
 @Suite("Camera interruption")
@@ -14,8 +15,10 @@ struct CameraInterruptionTests {
     }
 
     @Test func saysWhyExceptInTheBackground() {
-        #expect(CameraInterruption.background.message == nil)   // not on screen, nothing to say
-        for reason in [CameraInterruption.inUseByAnotherApp, .multipleForegroundApps, .audioInUse, .systemPressure, .other] {
+        #expect(CameraInterruption.background.message == nil)  // not on screen, nothing to say
+        for reason in [
+            CameraInterruption.inUseByAnotherApp, .multipleForegroundApps, .audioInUse, .systemPressure, .other,
+        ] {
             #expect(reason.message?.isEmpty == false)
         }
     }

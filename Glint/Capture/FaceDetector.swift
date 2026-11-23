@@ -9,7 +9,7 @@ final class FaceDetector: NSObject, AVCaptureMetadataOutputObjectsDelegate {
     let output = AVCaptureMetadataOutput()
     private let queue = DispatchQueue(label: "glint.faces")
     private let report: @Sendable ([CGRect]) -> Void
-    private var pacer = FaceReportPacer()   // only touched on `queue`
+    private var pacer = FaceReportPacer()  // only touched on `queue`
 
     init(report: @escaping @Sendable ([CGRect]) -> Void) {
         self.report = report
@@ -24,8 +24,10 @@ final class FaceDetector: NSObject, AVCaptureMetadataOutputObjectsDelegate {
         if output.metadataObjectTypes != types { output.metadataObjectTypes = types }
     }
 
-    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
-                        from connection: AVCaptureConnection) {
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
         let faces = metadataObjects.filter { $0.type == .face }.map(\.bounds)
         if pacer.shouldReport(count: faces.count, now: CFAbsoluteTimeGetCurrent()) { report(faces) }
     }

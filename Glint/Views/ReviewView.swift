@@ -3,7 +3,7 @@ import SwiftUI
 /// Full-screen photo review; tap anywhere to close. In the app it pages through every photo Glint has saved; in the
 /// Lock Screen camera, only the ones taken in that session.
 struct ReviewView: View {
-    let angle: Angle   // device rotation; the screen stays portrait, so the image turns instead
+    let angle: Angle  // device rotation; the screen stays portrait, so the image turns instead
     /// Deletes a photo and says whether it's gone. Nil where photos can't be deleted (the Lock Screen camera).
     let onDelete: ((ReviewEntry) async -> Bool)?
     @State private var entries: [ReviewEntry]
@@ -17,7 +17,7 @@ struct ReviewView: View {
         self.angle = angle
         self.onDelete = onDelete
         _entries = State(initialValue: entries)
-        _selection = State(initialValue: entries.last?.id)   // open on the newest photo
+        _selection = State(initialValue: entries.last?.id)  // open on the newest photo
     }
 
     private var current: Shot? { selection.flatMap { loaded[$0] } }
@@ -27,13 +27,15 @@ struct ReviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
                 .onTapGesture { dismiss() }
-                .accessibilityHidden(true)   // the "Back to camera" button is the accessible way out
+                .accessibilityHidden(true)  // the "Back to camera" button is the accessible way out
             // Swipe sideways to move between photos.
             TabView(selection: $selection) {
                 ForEach(entries) { entry in
-                    ReviewPage(entry: entry, angle: angle, onTap: { dismiss() },
-                               onLoaded: { loaded[entry.id] = $0 }, onUnloaded: { loaded[entry.id] = nil })
-                        .tag(Optional(entry.id))
+                    ReviewPage(
+                        entry: entry, angle: angle, onTap: { dismiss() },
+                        onLoaded: { loaded[entry.id] = $0 }, onUnloaded: { loaded[entry.id] = nil }
+                    )
+                    .tag(Optional(entry.id))
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -66,7 +68,7 @@ struct ReviewView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
         }
-        .accessibilityAction(.escape) { dismiss() }   // two-finger scrub closes the review
+        .accessibilityAction(.escape) { dismiss() }  // two-finger scrub closes the review
     }
 
     private func roundButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
@@ -86,7 +88,8 @@ struct ReviewView: View {
     /// the next photo, or the one before if that was the last, and closes when none are left.
     private func deleteCurrent() async {
         guard let onDelete, !isDeleting, let entry = currentEntry,
-              let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+            let index = entries.firstIndex(where: { $0.id == entry.id })
+        else { return }
         isDeleting = true
         defer { isDeleting = false }
         guard await onDelete(entry) else { return }
@@ -221,10 +224,13 @@ private struct ReviewPage: View {
         guard shot == nil, var loaded = await entry.load() else { return }
         shot = loaded
         onLoaded(loaded)
-        image = if let prepared = loaded.preparedImage { prepared }
-                else { await UIImage(data: loaded.imageData)?.byPreparingForDisplay() }
+        image =
+            if let prepared = loaded.preparedImage { prepared } else {
+                await UIImage(data: loaded.imageData)?.byPreparingForDisplay()
+            }
         if entry.needsPlace, loaded.place == nil, let location = loaded.location,
-           let place = await LocationProvider.placeName(for: location) {
+            let place = await LocationProvider.placeName(for: location)
+        {
             loaded.place = place
             onLoaded(loaded)
         }

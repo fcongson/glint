@@ -1,12 +1,14 @@
 import CoreVideo
 import Testing
+
 @testable import Glint
 
 struct HistogramTests {
     /// A 420f buffer whose luma plane is filled by `luma(x, y)`.
     private func pixelBuffer(width: Int = 64, height: Int = 64, luma: (Int, Int) -> UInt8) throws -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
-        let status = CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, nil, &buffer)
+        let status = CVPixelBufferCreate(
+            nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, nil, &buffer)
         let pb = try #require(buffer, "CVPixelBufferCreate failed: \(status)")
         CVPixelBufferLockBaseAddress(pb, [])
         defer { CVPixelBufferUnlockBaseAddress(pb, []) }
@@ -78,16 +80,19 @@ struct HistogramTests {
 
     @Test func strayBrightPixelsAboveThePlateauDontHideIt() throws {
         // As measured: most of the frame clipped at 236, a few sharpening halos up at 248, the rest midtones.
-        let h = try #require(Histogram(lumaOf: pixelBuffer { x, y in
-            x == 0 && y == 0 ? 248 : (x < 40 ? 236 : 120)
-        }))
+        let h = try #require(
+            Histogram(
+                lumaOf: pixelBuffer { x, y in
+                    x == 0 && y == 0 ? 248 : (x < 40 ? 236 : 120)
+                }))
         #expect(h.whiteLevel == 236)
         #expect(h.clipsHighlights)
     }
 
     @Test func aBrighterSubjectAboveASpikeMeansItIsntWhite() throws {
         // A flat grey card at 210 with a lot of real detail brighter than it: the card isn't the ceiling.
-        let h = try #require(Histogram(lumaOf: pixelBuffer { x, y in x < 32 ? 210 : UInt8(220 + (x / 8 + y / 8) % 30) }))
+        let h = try #require(
+            Histogram(lumaOf: pixelBuffer { x, y in x < 32 ? 210 : UInt8(220 + (x / 8 + y / 8) % 30) }))
         #expect(h.whiteLevel == nil)
     }
 }
