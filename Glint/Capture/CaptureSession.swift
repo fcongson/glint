@@ -1,6 +1,7 @@
 import AVFoundation
 import ImageIO
 import UIKit
+import os
 
 /// Owns the AVCaptureSession, its inputs and outputs, and the active camera device.
 ///
@@ -142,6 +143,7 @@ actor CaptureSession {
         observeSession()
         wantsRunning = true
         session.startRunning()   // returns once the preview is running; deferred outputs follow shortly after
+        Log.camera.notice("[\(Log.copy, privacy: .public)] camera started")
         restoreAfterReconfiguration()
         subjectAreaObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: nil, queue: nil) { [weak self] _ in
@@ -167,6 +169,7 @@ actor CaptureSession {
             center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [emit] note in
                 let raw = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
                 let reason = raw.flatMap { AVCaptureSession.InterruptionReason(rawValue: $0) }
+                Log.camera.notice("[\(Log.copy, privacy: .public)] session interrupted by the system, reason \(raw ?? -1)")
                 emit.yield(.interrupted(CameraInterruption(reason)))
             },
             center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [emit, weak self] _ in
@@ -591,9 +594,11 @@ actor CaptureSession {
     /// on, and starts it again after. Never stops mid-recording or mid-shot: see `stopIfIdle`.
     func setRunning(_ running: Bool) {
         wantsRunning = running
+        Log.camera.notice("[\(Log.copy, privacy: .public)] setRunning(\(running)), session running: \(self.session.isRunning)")
         if running {
             if !session.isRunning {
                 session.startRunning()   // blocks until frames are flowing
+                Log.camera.notice("[\(Log.copy, privacy: .public)] camera started again")
                 emit.yield(.resumed)
                 schedulePhotoPreparation()   // skipped while it was stopped
                 applyVideoLight()            // stopping put it out
@@ -607,8 +612,12 @@ actor CaptureSession {
     /// (opening review straight after the shutter), and stopping mid-recording would end the recording. Called
     /// again as each capture and recording finishes, so the stop that was held back happens then.
     private func stopIfIdle() {
-        guard !wantsRunning, session.isRunning, !movieOutput.isRecording, photoDelegates.isEmpty else { return }
+        guard !wantsRunning, session.isRunning, !movieOutput.isRecording, photoDelegates.isEmpty else {
+            Log.camera.notice("[\(Log.copy, privacy: .public)] stop held back (wants running \(self.wantsRunning), running \(self.session.isRunning), recording \(self.movieOutput.isRecording), shots in flight \(self.photoDelegates.count))")
+            return
+        }
         session.stopRunning()
+        Log.camera.notice("[\(Log.copy, privacy: .public)] camera stopped, so it's free for the other copy")
         analyzer.releaseViewfinderResources()   // no frames to draw while stopped; made again on the next one
     }
 

@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreLocation
 import SwiftUI
+import os
 
 /// Whether the big capture button takes a photo or records video.
 enum CaptureMode: Sendable, Codable { case photo, video }
@@ -123,7 +124,12 @@ final class CameraController {
         viewfinderRenderer = renderer
         capture = CaptureSession(viewfinder: renderer)
         isPeakingEnabled = renderer != nil
-        if let saved = SavedSettings.load(from: defaults) { restore(saved) }
+        if let saved = SavedSettings.load(from: defaults) {
+            restore(saved)
+            Log.settings.notice("[\(Log.copy, privacy: .public)] loaded at start: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)")
+        } else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] nothing saved yet, starting from the defaults")
+        }
     }
 
     // MARK: Saved settings
@@ -144,7 +150,11 @@ final class CameraController {
     /// quit from the app switcher. Only a change made here is written. Saving every time the screen is left would
     /// let a copy that's been waiting in memory overwrite what the other copy saved in the meantime.
     func flushSettings() {
-        guard hasUnsavedSettings else { return }
+        guard hasUnsavedSettings else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] leaving the screen: nothing changed here, nothing written")
+            return
+        }
+        Log.settings.notice("[\(Log.copy, privacy: .public)] leaving the screen with a change not yet saved")
         saveSettings()
     }
 
@@ -152,7 +162,12 @@ final class CameraController {
         saveTask?.cancel()
         hasUnsavedSettings = false
         let current = savedSettings
-        if current != SavedSettings.load(from: defaults) { current.save(to: defaults) }   // taking up the other copy's save isn't a change to write back
+        if current != SavedSettings.load(from: defaults) {
+            current.save(to: defaults)
+            Log.settings.notice("[\(Log.copy, privacy: .public)] saved: file \(String(describing: current.fileType), privacy: .public), aspect \(String(describing: current.aspect), privacy: .public)")
+        } else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] save skipped: what's saved is already this")   // taking up the other copy's save isn't a change to write back
+        }
     }
 
     /// Saves shortly after each change, not only on leaving the screen: the Lock Screen camera can be closed by
@@ -180,7 +195,15 @@ final class CameraController {
     /// waiting in memory. Called when the screen becomes active: takes up what was saved since, and does nothing
     /// when nothing differs, which includes this copy's own save. Left alone mid-recording and in review.
     func reloadSavedSettings() {
-        guard isCameraReady, !isRecording, !isReviewing, let saved = SavedSettings.load(from: defaults), saved != savedSettings else { return }
+        guard isCameraReady, !isRecording, !isReviewing else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] active: no reload (camera ready \(self.isCameraReady), recording \(self.isRecording), review \(self.isReviewing))")
+            return
+        }
+        guard let saved = SavedSettings.load(from: defaults), saved != savedSettings else {
+            Log.settings.notice("[\(Log.copy, privacy: .public)] active: saved settings match, nothing to take up")
+            return
+        }
+        Log.settings.notice("[\(Log.copy, privacy: .public)] active: taking up the other copy's settings: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)")
         let before = savedSettings
         let exposureChanged = saved.manual != before.manual || saved.iso != before.iso
             || saved.shutterDenominator != before.shutterDenominator || saved.whiteBalanceKelvin != before.whiteBalanceKelvin
@@ -380,9 +403,11 @@ final class CameraController {
             sendExposureMode(keepWhiteBalance: true)
             recordingFinished(url, outcome)
         case .interrupted(let reason):
+            Log.camera.notice("[\(Log.copy, privacy: .public)] interrupted: \(String(describing: reason), privacy: .public)")
             interruption = reason
             if let message = reason.message { AccessibilityNotification.Announcement(message).post() }
         case .interruptionEnded:
+            Log.camera.notice("[\(Log.copy, privacy: .public)] interruption ended")
             interruption = nil
         case .status(let message):
             post(message)
@@ -791,6 +816,7 @@ final class CameraController {
     private var isInForeground = true
 
     func setInForeground(_ inForeground: Bool) {
+        Log.lifecycle.notice("[\(Log.copy, privacy: .public)] foreground \(inForeground) (was \(self.isInForeground))")
         guard inForeground != isInForeground else { return }
         isInForeground = inForeground
         let running = inForeground && !isReviewing

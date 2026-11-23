@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The defaults the app and the Lock Screen capture extension share. The two run as separate processes, each with
 /// its own `UserDefaults.standard`, so settings kept there would never reach the other; an app group's defaults are
@@ -21,7 +22,10 @@ enum SharedDefaults {
     /// group holds a setting, that's the one both copies of Glint use, and the old value mustn't bring it back.
     static func migrate(from old: UserDefaults, to shared: UserDefaults) {
         for key in migratedKeys where shared.object(forKey: key) == nil {
-            if let value = old.object(forKey: key) { shared.set(value, forKey: key) }
+            if let value = old.object(forKey: key) {
+                shared.set(value, forKey: key)
+                Log.settings.notice("[\(Log.copy, privacy: .public)] moved \(key, privacy: .public) into the shared settings")
+            }
         }
     }
 }
