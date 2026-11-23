@@ -17,7 +17,7 @@ enum WhiteBalanceSetting: Equatable, Sendable {
 /// Optional fields are ones the photo's metadata may not report.
 struct PhotoInfo: Sendable {
     let format: PhotoFormat
-    let whiteBalance: WhiteBalanceSetting
+    let whiteBalance: WhiteBalanceSetting?   // nil for a photo found in the library: the file doesn't record it
     let iso: Int?
     let exposureSeconds: Double?
     let fNumber: Double?
@@ -30,7 +30,7 @@ struct PhotoInfo: Sendable {
     private(set) var pixelHeight: Int?
     private(set) var fileBytes: Int
 
-    init(metadata: [String: Any], format: PhotoFormat, whiteBalance: WhiteBalanceSetting, fileBytes: Int) {
+    init(metadata: [String: Any], format: PhotoFormat, whiteBalance: WhiteBalanceSetting?, fileBytes: Int) {
         self.format = format
         self.whiteBalance = whiteBalance
         self.fileBytes = fileBytes
@@ -84,4 +84,6 @@ struct Shot: Identifiable {
     let info: PhotoInfo
     let location: CLLocation?
     var place: String?
+    /// An image already decoded for display, for photos found in the library (whose `imageData` is empty).
+    var preparedImage: UIImage?
 }
