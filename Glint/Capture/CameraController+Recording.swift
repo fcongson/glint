@@ -11,7 +11,7 @@ extension CameraController {
                     at: url, report: report,
                     saved: { ok in
                         guard ok else { return }
-                        Task { @MainActor in await self?.showLatestSavedPhoto() }
+                        Task { @MainActor in await self?.shotLibrary.showLatestSaved() }
                     })
             }
         #endif
