@@ -388,64 +388,37 @@ final class ViewfinderRenderer: @unchecked Sendable {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         let work = input.work
         let size = MTLSize(width: work.width, height: work.height, depth: 1)
-        let group = MTLSize(width: 16, height: 16, depth: 1)
 
-        let source = encodeSource(encoder, input)
-        var lumaScale = source.lumaScale
-
-        encoder.setComputePipelineState(blurPipeline)
-        encoder.setTexture(source.texture, index: 0)
-        encoder.setTexture(work.blurred, index: 1)
-        encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 0)
-        encoder.dispatchThreads(size, threadsPerThreadgroup: group)
-
-        if input.sweep != .off {
-            encoder.setComputePipelineState(responsePipeline)
-            encoder.setTexture(work.blurred, index: 0)
-            encoder.setTexture(work.response, index: 1)
-            encoder.dispatchThreads(size, threadsPerThreadgroup: group)
-
-            encoder.setComputePipelineState(edgesPipeline)
-            encoder.setTexture(work.response, index: 0)
-            encoder.setTexture(work.edges, index: 1)
-            encoder.setTexture(source.texture, index: 2)
-            encoder.setBuffer(input.partials, offset: 0, index: 0)
-            encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 1)
-            encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)  // whole groups, for the sums
+        // At full resolution the camera's luma plane is read directly rather than copied first; its values are
+        // 0 … 1, so `lumaScale` brings them to the 0 … 255 the shrunk texture holds.
+        var source = input.luma
+        var lumaScale: Float = 255
+        if let small = work.small {
+            var factor = UInt32(work.factor)
+            encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
+            encoder.run(downscalePipeline, [input.luma, small], over: size)
+            source = small
+            lumaScale = 1
         }
 
-        encoder.setComputePipelineState(sharpnessPipeline)
-        encoder.setTexture(work.blurred, index: 0)
-        encoder.setTexture(work.sharp, index: 1)
-        encoder.dispatchThreads(size, threadsPerThreadgroup: group)
+        encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 0)
+        encoder.run(blurPipeline, [source, work.blurred], over: size)
+
+        if input.sweep != .off {
+            encoder.run(responsePipeline, [work.blurred, work.response], over: size)
+            encoder.setBuffer(input.partials, offset: 0, index: 0)
+            encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 1)
+            encoder.run(edgesPipeline, [work.response, work.edges, source], groups: work.groups)  // whole, for the sums
+        }
+
+        encoder.run(sharpnessPipeline, [work.blurred, work.sharp], over: size)
 
         var params = MaskParams(
             cutoff: input.cutoff, tilesAcross: UInt32(work.groups.width), sweep: input.sweep == .applying ? 1 : 0)
-        encoder.setComputePipelineState(maskPipeline)
-        encoder.setTexture(work.edges, index: 0)
-        encoder.setTexture(work.mask, index: 1)
-        encoder.setTexture(work.sharp, index: 2)
         encoder.setBytes(&params, length: MemoryLayout<MaskParams>.stride, index: 0)
         encoder.setBuffer(input.verdicts, offset: 0, index: 1)
-        encoder.dispatchThreads(size, threadsPerThreadgroup: group)
+        encoder.run(maskPipeline, [work.edges, work.mask, work.sharp], over: size)
         encoder.endEncoding()
-    }
-
-    /// Step 1's shrink. At full resolution the camera's luma plane is read directly rather than copied first; its
-    /// values are 0 … 1, so `lumaScale` brings them to the 0 … 255 the shrunk texture holds.
-    private func encodeSource(
-        _ encoder: any MTLComputeCommandEncoder, _ input: AnalysisInput
-    ) -> (texture: any MTLTexture, lumaScale: Float) {
-        guard let small = input.work.small else { return (input.luma, 255) }
-        var factor = UInt32(input.work.factor)
-        encoder.setComputePipelineState(downscalePipeline)
-        encoder.setTexture(input.luma, index: 0)
-        encoder.setTexture(small, index: 1)
-        encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
-        encoder.dispatchThreads(
-            MTLSize(width: input.work.width, height: input.work.height, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
-        return (small, 1)
     }
 
     private func texture(_ pixelBuffer: CVPixelBuffer, plane: Int, format: MTLPixelFormat) -> CVMetalTexture? {
@@ -525,13 +498,8 @@ final class ViewfinderRenderer: @unchecked Sendable {
             return work.mask
         }
         var poolFactor = UInt32(factor)
-        encoder.setComputePipelineState(poolPipeline)
-        encoder.setTexture(work.mask, index: 0)
-        encoder.setTexture(texture, index: 1)
         encoder.setBytes(&poolFactor, length: MemoryLayout<UInt32>.size, index: 0)
-        encoder.dispatchThreads(
-            MTLSize(width: w, height: h, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+        encoder.run(poolPipeline, [work.mask, texture], over: MTLSize(width: w, height: h, depth: 1))
         encoder.endEncoding()
         return texture
     }
@@ -636,5 +604,28 @@ final class ViewfinderRenderer: @unchecked Sendable {
 
         let bytes = readback.contents().bindMemory(to: UInt8.self, capacity: w * h)
         return Analysis(width: w, height: h, mask: Array(UnsafeBufferPointer(start: bytes, count: w * h)))
+    }
+}
+
+extension MTLComputeCommandEncoder {
+    /// One compute pass: `pipeline` with `textures` bound from index 0 in order, a thread per texel of `size`.
+    /// Bytes and buffers are bound beforehand; Metal keeps them across pipeline changes.
+    fileprivate func run(_ pipeline: any MTLComputePipelineState, _ textures: [any MTLTexture], over size: MTLSize) {
+        bind(pipeline, textures)
+        dispatchThreads(size, threadsPerThreadgroup: threadgroup)
+    }
+
+    /// The same, in whole threadgroups, for kernels that sum over each one.
+    fileprivate func run(_ pipeline: any MTLComputePipelineState, _ textures: [any MTLTexture], groups: MTLSize) {
+        bind(pipeline, textures)
+        dispatchThreadgroups(groups, threadsPerThreadgroup: threadgroup)
+    }
+
+    /// The tiles Viewfinder.metal's edge kernel sums over are this size too.
+    private var threadgroup: MTLSize { MTLSize(width: 16, height: 16, depth: 1) }
+
+    private func bind(_ pipeline: any MTLComputePipelineState, _ textures: [any MTLTexture]) {
+        setComputePipelineState(pipeline)
+        for (index, texture) in textures.enumerated() { setTexture(texture, index: index) }
     }
 }
