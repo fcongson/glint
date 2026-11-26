@@ -33,16 +33,13 @@ struct FocusPeakingTests {
         return buffer
     }
 
-    /// The outline mask for a frame at a sensitivity, with the threshold taken from the frame's own statistics.
+    /// The outline mask for a frame at a sensitivity.
     private func mask(
         _ sensitivity: PeakingSensitivity = .medium,
         _ value: (Int, Int) -> Int
     ) throws -> ViewfinderRenderer.Analysis {
         let renderer = try #require(ViewfinderRenderer.make())
-        let buffer = try frame(value)
-        let stats = try #require(renderer.analyse(buffer, level: nil))
-        let level = ViewfinderRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity)
-        return try #require(renderer.analyse(buffer, level: level))
+        return try #require(renderer.analyse(try frame(value), sensitivity: sensitivity))
     }
 
     private func columns(_ a: ViewfinderRenderer.Analysis) -> Set<Int> {
@@ -70,9 +67,9 @@ struct FocusPeakingTests {
     @Test func aSharpEdgeIsOutlined() throws {
         let m = try mask { x, _ in x < 32 ? 0 : 255 }
         #expect(m.width == 64 && m.height == 48)
-        // A continuous line, two pixels wide, centred on the edge, all the way down bar the border rows.
-        #expect(columns(m) == [31, 32])
-        #expect((2..<46).allSatisfy { m.mask[$0 * 64 + 31] > 0 && m.mask[$0 * 64 + 32] > 0 })
+        // A continuous line, one pixel wide, on the edge, all the way down bar the border rows.
+        #expect(columns(m) == [31])
+        #expect((4..<44).allSatisfy { m.mask[$0 * 64 + 31] > 0 })
     }
 
     /// The scratch textures are freed when the viewfinder stops drawing; the next frame has to make them again
@@ -80,36 +77,34 @@ struct FocusPeakingTests {
     @Test func outlinesAreTheSameAfterTheWorkspaceIsReleased() throws {
         let renderer = try #require(ViewfinderRenderer.make())
         let buffer = try frame { x, _ in x < 32 ? 0 : 255 }
-        let stats = try #require(renderer.analyse(buffer, level: nil))
-        let level = ViewfinderRenderer.level(mean: stats.mean, deviation: stats.deviation, sensitivity: .medium)
-        let before = try #require(renderer.analyse(buffer, level: level))
+        let before = try #require(renderer.analyse(buffer, sensitivity: .medium))
         renderer.releaseWorkspace()
-        let after = try #require(renderer.analyse(buffer, level: level))
+        let after = try #require(renderer.analyse(buffer, sensitivity: .medium))
         #expect(count(before) > 0)
         #expect(after.mask == before.mask)
-        #expect(after.mean == before.mean && after.deviation == before.deviation)
     }
 
     @Test func aSharpDarkEdgeIsOutlined() throws {
-        #expect(columns(try mask { x, _ in x < 32 ? 20 : 60 }) == [31, 32])
+        #expect(columns(try mask { x, _ in x < 32 ? 20 : 60 }) == [31])
     }
 
     @Test func horizontalEdgesCountToo() throws {
         let m = try mask { _, y in y < 24 ? 20 : 200 }
         let rows = Set(m.mask.indices.filter { m.mask[$0] > 0 }.map { $0 / m.width })
-        #expect(rows == [23, 24])
+        #expect(rows == [23])
     }
 
     @Test func onlyTheSharpEdgeIsOutlined() throws {
         // The soft edge is just as big a change, but the high-pass filter barely responds to it.
-        #expect(columns(try mask { x, _ in Self.sharpAndSoft(x) }) == [15, 16])
+        #expect(columns(try mask { x, _ in Self.sharpAndSoft(x) }) == [15])
     }
 
     @Test func onlyTheSharpEdgeIsOutlinedThroughNoise() throws {
         for sensitivity in PeakingSensitivity.allCases {
             let m = try mask(sensitivity) { x, y in Self.sharpAndSoft(x) + Self.noise(x, y) }
             let marked = columns(m)
-            #expect(!marked.isEmpty && marked.isSubset(of: 14...17), "\(sensitivity): \(marked)")
+            // Noise this heavy can pick out a stray point on the soft edge at the most generous setting, no more.
+            #expect(marked.contains(15) && marked.subtracting(14...17).count <= 1, "\(sensitivity): \(marked)")
         }
     }
 
@@ -117,7 +112,7 @@ struct FocusPeakingTests {
         let counts = try PeakingSensitivity.allCases.map { sensitivity in
             count(try mask(sensitivity) { x, y in Self.sharpAndSoft(x) + Self.noise(x, y) })
         }
-        #expect(counts[0] < counts[1] && counts[1] <= counts[2])
+        #expect(counts[0] <= counts[1] && counts[1] <= counts[2] && counts[0] < counts[2], "\(counts)")
     }
 
     @Test func noiseAloneIsNot() throws {
@@ -136,15 +131,9 @@ struct FocusPeakingTests {
         // 4100 wide shrinks by 2; each 2 × 2 block of a checkerboard averages to 127 and is flat: no detail at all.
         let renderer = try #require(ViewfinderRenderer.make())
         let buffer = try frame(width: 4100, height: 12) { x, y in (x + y).isMultiple(of: 2) ? 255 : 0 }
-        let a = try #require(renderer.analyse(buffer, level: nil))
+        let a = try #require(renderer.analyse(buffer, sensitivity: .high))
         #expect(a.width == 2050 && a.height == 6)
-        #expect(a.mean < 0.01)
-    }
-
-    @Test func thresholdFollowsDetailOrNoise() {
-        // Lots of detail: the spread sets it. Little but noise: a multiple of the mean does.
-        #expect(ViewfinderRenderer.level(mean: 1, deviation: 10, sensitivity: .medium) == 31)
-        #expect(ViewfinderRenderer.level(mean: 4, deviation: 1, sensitivity: .medium) == 10)
+        #expect(count(a) == 0)
     }
 
     /// Analysed at full resolution: only frames past 4096 on the long side (48 MP) are shrunk.
@@ -160,11 +149,74 @@ struct FocusPeakingTests {
         #expect(ViewfinderRenderer.fitScale(frameWidth: 3840, frameHeight: 2160, viewSize: box) == SIMD2(0.75, 1))
     }
 
-    @Test func theThresholdEasesTowardEachFrame() {
-        var threshold = PeakingThreshold()
-        #expect(threshold.update(100) == 100)  // the first frame sets it outright
-        #expect(abs(threshold.update(200) - 130) < 0.001)
-        threshold.reset()
-        #expect(threshold.update(50) == 50)
+    // MARK: Crispness, not contrast
+
+    /// Blocks of random brightness 9 × 7 pixels, standing in for fine detail, blurred by `sigma` pixels, with a
+    /// little sensor noise; `contrast` is how far apart the brightest and darkest blocks are.
+    private func blurredDetail(sigma: Double, contrast: Double, sensitivity: PeakingSensitivity = .medium) throws -> Int
+    {
+        let width = 256, height = 192
+        func block(_ x: Int, _ y: Int) -> Double {
+            var v = UInt32(x / 9) &* 374_761_393 &+ UInt32(y / 7) &* 668_265_263 &+ 7 &* 2_246_822_519
+            v = (v ^ (v >> 13)) &* 1_274_126_177
+            return Double((v ^ (v >> 16)) & 0xFFFF) / 65535 - 0.5
+        }
+        let radius = max(1, Int((sigma * 3).rounded(.up)))
+        var kernel = (-radius...radius).map { exp(-Double($0 * $0) / (2 * max(sigma, 0.01) * max(sigma, 0.01))) }
+        kernel = kernel.map { $0 / kernel.reduce(0, +) }
+        func sample(_ x: Int, _ y: Int) -> Double {
+            128 + contrast * block(min(max(x, 0), width - 1), min(max(y, 0), height - 1))
+        }
+        var across = [Double](repeating: 0, count: width * height)
+        for y in 0..<height {
+            for x in 0..<width {
+                across[y * width + x] =
+                    sigma == 0
+                    ? sample(x, y) : (-radius...radius).reduce(0) { $0 + kernel[$1 + radius] * sample(x + $1, y) }
+            }
+        }
+        let renderer = try #require(ViewfinderRenderer.make())
+        let buffer = try frame(width: width, height: height) { x, y in
+            let value =
+                sigma == 0
+                ? across[y * width + x]
+                : (-radius...radius).reduce(0.0) {
+                    $0 + kernel[$1 + radius] * across[min(max(y + $1, 0), height - 1) * width + x]
+                }
+            return Int(value + Double(Self.noise(x, y)) * 0.4)
+        }
+        return count(try #require(renderer.analyse(buffer, sensitivity: sensitivity)))
+    }
+
+    @Test func outlinesFadeAsFocusIsLostAndGoWhenItsGone() throws {
+        let counts = try [0.0, 0.75, 1.0, 1.25, 1.5, 2.0].map { try blurredDetail(sigma: $0, contrast: 200) }
+        #expect(zip(counts, counts.dropFirst()).allSatisfy { $0 >= $1 }, "never more as it gets softer: \(counts)")
+        #expect(
+            counts[0] > 2000 && counts[3] < counts[0] / 10, "plenty when crisp, far fewer a little softer: \(counts)")
+        #expect(counts[5] <= counts[0] / 100, "next to nothing when soft: \(counts)")
+    }
+
+    @Test func aSoftSceneIsNotOutlinedJustBecauseItIsTheBestInTheFrame() throws {
+        // The statistics a frame's own detail gives used to set the threshold, so a uniformly soft frame lowered it
+        // until its strongest edges were marked, however soft.
+        for sensitivity in PeakingSensitivity.allCases {
+            let crisp = try blurredDetail(sigma: 0, contrast: 200, sensitivity: sensitivity)
+            let soft = try blurredDetail(sigma: 3, contrast: 200, sensitivity: sensitivity)
+            #expect(crisp > 2000 && soft <= crisp / 50, "\(sensitivity): \(soft) soft against \(crisp) crisp")
+        }
+    }
+
+    @Test func crispDetailIsOutlinedWhateverItsContrast() throws {
+        let strong = try blurredDetail(sigma: 0.5, contrast: 200)
+        let weak = try blurredDetail(sigma: 0.5, contrast: 60)
+        #expect(weak > strong / 3, "a third of the contrast is outlined about as readily: \(weak) against \(strong)")
+        #expect(try blurredDetail(sigma: 2, contrast: 60) <= weak / 50, "and just as readily gone when soft")
+    }
+
+    @Test func softerFocusNeedsALooserSensitivityToBeOutlined() throws {
+        let counts = try PeakingSensitivity.allCases.map {
+            try blurredDetail(sigma: 1.25, contrast: 200, sensitivity: $0)
+        }
+        #expect(counts[0] <= counts[1] && counts[1] < counts[2], "\(counts)")
     }
 }

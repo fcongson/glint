@@ -5,6 +5,10 @@ using namespace metal;
 // peaking outlines, so they can't lag behind the picture, and magnified from the full-resolution frame. See
 // ViewfinderRenderer.swift for the steps and why.
 
+// Standard peaking asks how steep an edge is next to how steep the same edge is at a coarser scale, so what it
+// reports is focus, not contrast, and doesn't depend on the rest of the frame. Sweep peaking measures high-pass
+// response instead (steps 2b and 3), and uses the standard test where it has no verdict.
+
 // 1. Shrink the luma plane by a whole factor, averaging each block. Output is luma in 0…255.
 kernel void peakingDownscale(texture2d<float, access::read> luma [[texture(0)]],
                              texture2d<float, access::write> small [[texture(1)]],
@@ -58,6 +62,46 @@ kernel void peakingResponse(texture2d<float, access::read> blurred [[texture(0)]
     response.write(float4(value), gid);
 }
 
+// 2c. How sharp an edge is, as a number that doesn't depend on its contrast or on what else is in the frame: the
+//     slope across ±1 pixel divided by the slope across ±3. A step blurred by sigma has the same slope everywhere
+//     in its middle at any scale, so this is about 2.5 for a pixel-sharp edge, 1.9 for a crisp lens, 1.5 for a
+//     slightly soft one and falls toward 1 as the edge spreads, whatever the edge's brightness. It's only worked
+//     out at the strongest pixel across an edge (non-maximum suppression), which makes lines one pixel thin, and
+//     only where the edge crosses at least `minimumContrast` luma steps in ±3 pixels, so noise isn't measured.
+//     Everything else is 0. Reads the blurred frame; the border stays 0.
+constant float minimumContrast = 24;
+
+static float2 slope(texture2d<float, access::read> image, int2 p, int span) {
+    int2 right = p + int2(span, 0), left = p - int2(span, 0), down = p + int2(0, span), up = p - int2(0, span);
+    return float2(image.read(uint2(right)).r - image.read(uint2(left)).r,
+                  image.read(uint2(down)).r - image.read(uint2(up)).r) / float(2 * span);
+}
+
+kernel void peakingSharpness(texture2d<float, access::read> blurred [[texture(0)]],
+                             texture2d<float, access::write> sharp [[texture(1)]],
+                             uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(blurred.get_width(), blurred.get_height());
+    int2 p = int2(gid);
+    if (p.x >= size.x || p.y >= size.y) return;
+    float value = 0;
+    if (p.x >= 3 && p.y >= 3 && p.x < size.x - 3 && p.y < size.y - 3) {
+        float2 fine = slope(blurred, p, 1);
+        float coarse = length(slope(blurred, p, 3));
+        if (coarse * 6 >= minimumContrast) {
+            float strength = length(fine);
+            int2 across = abs(fine.x) >= abs(fine.y) ? int2(1, 0) : int2(0, 1);
+            int2 along = int2(across.y, across.x);
+            float before = length(slope(blurred, p - across, 1)), after = length(slope(blurred, p + across, 1));
+            if (strength > before && strength >= after) {
+                // Averaged with its neighbours along the edge, so noise on one pixel doesn't make it look crisp.
+                float2 steady = (fine + slope(blurred, p - along, 1) + slope(blurred, p + along, 1)) / 3;
+                value = length(steady) / coarse;
+            }
+        }
+    }
+    sharp.write(float4(value), gid);
+}
+
 // 3. Average the response over 3×3. Along an edge this evens out the pixel-to-pixel wobble that otherwise breaks
 //    outlines into dots; an isolated noise spike is diluted instead. The outer ring stays 0. Each 16×16
 //    threadgroup (a tile) also sums its values, their squares and its brightness into `partials`: the frame's
@@ -97,36 +141,41 @@ kernel void peakingEdges(texture2d<float, access::read> response [[texture(0)]],
 }
 
 struct MaskParams {
-    float cutoff;       // the frame's threshold
+    float cutoff;       // how sharp an edge has to be (see peakingSharpness)
     uint tilesAcross;
     uint sweep;         // 1: use each tile's verdict from `tiles` (see SweepTracker)
 };
 
-// 4. Mark what clears the cutoff and has at least two marked neighbours: edges are lines, stray noise is dots.
-//    In sweep mode a tile's verdict overrides the frame's cutoff: its own cutoff at its sharpest, none past it.
+// 4. Mark edges sharp enough, with at least two marked neighbours: edges are lines, stray noise is dots. In sweep
+//    mode a tile's verdict overrides that where it has one: its own high-pass cutoff at its sharpest, none past it.
+static bool clears(texture2d<float, access::read> edges, texture2d<float, access::read> sharp,
+                   int2 q, bool highPass, float cutoff) {
+    return (highPass ? edges.read(uint2(q)).r : sharp.read(uint2(q)).r) > cutoff;
+}
+
 kernel void peakingMask(texture2d<float, access::read> edges [[texture(0)]],
                         texture2d<float, access::write> mask [[texture(1)]],
+                        texture2d<float, access::read> sharp [[texture(2)]],
                         constant MaskParams &params [[buffer(0)]],
                         device const float *tiles [[buffer(1)]],
                         uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(edges.get_width(), edges.get_height());
     int2 p = int2(gid);
     if (p.x >= size.x || p.y >= size.y) return;
-    float cutoff = params.cutoff;
-    if (params.sweep != 0) {
-        float verdict = tiles[(gid.y / 16) * params.tilesAcross + gid.x / 16];
-        if (verdict < 0) cutoff = INFINITY;
-        else if (verdict > 0) cutoff = verdict;
-    }
+    float verdict = params.sweep != 0 ? tiles[(gid.y / 16) * params.tilesAcross + gid.x / 16] : 0;
+    bool highPass = verdict > 0;
+    float cutoff = highPass ? verdict : params.cutoff;
     float marked = 0;
-    if (p.x >= 1 && p.y >= 1 && p.x < size.x - 1 && p.y < size.y - 1 && edges.read(gid).r > cutoff) {
-        int neighbours = 0;
-        for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
-                if ((dx != 0 || dy != 0) && edges.read(uint2(p + int2(dx, dy))).r > cutoff) neighbours++;
+    if (verdict >= 0 && p.x >= 1 && p.y >= 1 && p.x < size.x - 1 && p.y < size.y - 1) {
+        if (clears(edges, sharp, p, highPass, cutoff)) {
+            int neighbours = 0;
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    if ((dx != 0 || dy != 0) && clears(edges, sharp, p + int2(dx, dy), highPass, cutoff)) neighbours++;
+                }
             }
+            if (neighbours >= 2) marked = 1;
         }
-        if (neighbours >= 2) marked = 1;
     }
     mask.write(float4(marked), gid);
 }

@@ -3,19 +3,22 @@ import Foundation
 // Focus peaking settings shared by the controller and the GPU renderer. The pipeline itself, done the way cameras
 // do it, is described in ViewfinderRenderer.swift and lives in Viewfinder.metal.
 //
-// Like any camera's peaking it marks the sharpest fine detail, not focus as such, so on a phone's deep depth of
-// field a lot can be marked at once. It is most telling close up, where manual focus matters most.
+// Peaking outlines edges that are crisp, judged by the edge itself and not by how it compares with the rest of the
+// frame, so outlines go away as an edge goes soft and come back when it's sharp again. It can't tell focus from
+// the camera's own sharpening, and on a phone's deep depth of field a lot can be crisp at once: it's most telling
+// close up, where manual focus matters most.
 
-/// How readily peaking marks detail: how many standard deviations above the frame's mean a pixel's high-pass
-/// response has to be.
+/// How crisp an edge has to be to be outlined: the ratio of its slope across a pixel to its slope across three
+/// (see `peakingSharpness` in Viewfinder.metal). About 2.5 for a pixel-sharp step, about 1.9 for a crisp lens, and
+/// falling toward 1 as the edge spreads, whatever its brightness.
 enum PeakingSensitivity: Int, CaseIterable, Sendable, Codable {
     case low, medium, high
 
-    var deviations: Double {
+    var sharpness: Float {
         switch self {
-        case .low: 4
-        case .medium: 3
-        case .high: 2
+        case .low: 1.75
+        case .medium: 1.6
+        case .high: 1.5
         }
     }
 
@@ -26,21 +29,6 @@ enum PeakingSensitivity: Int, CaseIterable, Sendable, Codable {
         case .high: "High"
         }
     }
-}
-
-/// The threshold, eased from frame to frame so outlines don't flicker as the frame's statistics wobble. Each new
-/// frame moves it `response` of the way to that frame's own threshold, settling in a few tenths of a second.
-struct PeakingThreshold {
-    static let response = 0.3
-    private(set) var level: Double?
-
-    mutating func update(_ frame: Double) -> Double {
-        let next = level.map { $0 + Self.response * (frame - $0) } ?? frame
-        level = next
-        return next
-    }
-
-    mutating func reset() { level = nil }
 }
 
 /// The outlines' colour. Cameras offer a few, because any one colour disappears against some subjects, and some
@@ -94,10 +82,9 @@ struct PeakingAppearance: Equatable, Sendable, Codable {
     var lines = PeakingLines.bold
 }
 
-/// What peaking outlines. Standard is a camera's peaking: the sharpest fine detail in the frame, which favours
-/// high contrast (a bold edge that's slightly soft can outrank fine detail that's perfectly sharp). Sweep
-/// compares each part of the picture with itself as you focus, and outlines what's at its sharpest now, at any
-/// contrast; it needs focus moved past the subject and back, and falls back to standard until it has.
+/// What peaking outlines. Standard outlines edges that are crisp, at any contrast. Sweep compares each part of the
+/// picture with itself as you focus, and outlines what's at its sharpest now, so it can pick out the best of a
+/// soft scene; it needs focus moved past the subject and back, and falls back to standard until it has.
 enum PeakingMode: Int, CaseIterable, Sendable, Codable {
     case standard, sweep
 
