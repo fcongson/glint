@@ -31,10 +31,7 @@ enum MediaLibrary {
     /// Notes the saved photos in the log review reads from: each created asset with the Documents copies of it.
     /// `files` lines up with `assets`.
     private static func record(_ assets: CreatedAssets, files: [[String]]) {
-        let ids = assets.all
-        guard ids.count == files.count else { return }
-        let now = Date()
-        SavedPhotoLog.shared?.append(zip(ids, files).map { SavedPhoto(assetID: $0, files: $1, savedAt: now) })
+        SavedPhotoLog.shared?.append(SavedPhoto.entries(assetIDs: assets.all, files: files, savedAt: Date()))
     }
 
     /// The capture ID keeps file names unique when several shots land in the same second.
@@ -137,8 +134,12 @@ enum MediaLibrary {
         return options
     }
 
-    /// Copies a finished recording into Documents, adds it to Photos, then deletes the temporary file.
-    static func saveVideo(at tempURL: URL, report: @escaping @Sendable (String) -> Void) {
+    /// Copies a finished recording into Documents, adds it to Photos, then deletes the temporary file. It's noted in
+    /// the log beside the photos, so review can find it. `saved` says whether it reached Photos.
+    static func saveVideo(
+        at tempURL: URL, report: @escaping @Sendable (String) -> Void,
+        saved: @escaping @Sendable (Bool) -> Void = { _ in }
+    ) {
         if let dir = documentsDirectory {
             do {
                 let copy = dir.appendingPathComponent(tempURL.lastPathComponent)
@@ -149,10 +150,14 @@ enum MediaLibrary {
         let removeTemp: @Sendable () -> Void = { try? FileManager.default.removeItem(at: tempURL) }
         requestAddAccess { granted in
             guard granted else { report("Photos access denied"); removeTemp(); return }
+            let created = CreatedAssets()
             PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempURL)
+                let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempURL)
+                created.add(request?.placeholderForCreatedAsset?.localIdentifier)
             }) { ok, _ in
+                if ok { record(created, files: [[tempURL.lastPathComponent]]) }
                 report(ok ? "Video saved" : "Video save failed")
+                saved(ok)
                 removeTemp()
             }
         }

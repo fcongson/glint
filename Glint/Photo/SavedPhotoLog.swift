@@ -8,6 +8,15 @@ struct SavedPhoto: Codable, Equatable, Sendable {
     let savedAt: Date
 }
 
+extension SavedPhoto {
+    /// The log entries for assets just created, each with its Documents copies. Nothing when `files` doesn't line up
+    /// with the assets, since then it can't be said which copy belongs to which.
+    static func entries(assetIDs: [String], files: [[String]], savedAt: Date) -> [SavedPhoto] {
+        guard assetIDs.count == files.count else { return [] }
+        return zip(assetIDs, files).map { SavedPhoto(assetID: $0, files: $1, savedAt: savedAt) }
+    }
+}
+
 /// A list of the photos Glint has saved, so review can show them all and not only this session's. Both the app and
 /// the Lock Screen camera add to it (it's a file in the app group), but only the app reads it back: the Lock Screen
 /// camera never looks at it, or at the Photos library.

@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 /// Full-screen photo review; tap anywhere to close. In the app it pages through every photo Glint has saved; in the
@@ -10,6 +11,7 @@ struct ReviewView: View {
     @State private var selection: String?
     /// The photos on pages that are on or near the screen, for the details card (see `ReviewPage`).
     @State private var loaded: [String: Shot] = [:]
+    @State private var loadedVideos: [String: VideoInfo] = [:]
     @State private var isDeleting = false
     /// Whether the photo on screen is zoomed in, which clears the details card off the pixels.
     @State private var isZoomed = false
@@ -33,17 +35,34 @@ struct ReviewView: View {
             // Swipe sideways to move between photos.
             TabView(selection: $selection) {
                 ForEach(entries) { entry in
-                    ReviewPage(
-                        entry: entry, angle: angle, onTap: { dismiss() },
-                        onZoomChange: { if selection == entry.id { isZoomed = $0 } },
-                        onLoaded: { loaded[entry.id] = $0 }, onUnloaded: { loaded[entry.id] = nil }
-                    )
+                    Group {
+                        if entry.isVideo {
+                            VideoReviewPage(
+                                entry: entry, isCurrent: selection == entry.id,
+                                onLoaded: { loadedVideos[entry.id] = $0 }, onUnloaded: { loadedVideos[entry.id] = nil })
+                        } else {
+                            ReviewPage(
+                                entry: entry, angle: angle, onTap: { dismiss() },
+                                onZoomChange: { if selection == entry.id { isZoomed = $0 } },
+                                onLoaded: { loaded[entry.id] = $0 }, onUnloaded: { loaded[entry.id] = nil }
+                            )
+                        }
+                    }
                     .tag(Optional(entry.id))
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
-            if let shot = current, !isZoomed {
+            if let selection, let video = loadedVideos[selection] {
+                VStack {
+                    Spacer()
+                    videoCard(for: video)
+                        .accessibilityElement(children: .combine)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 24)
+                }
+                .allowsHitTesting(false)
+            } else if let shot = current, !isZoomed {
                 // The card stays put at the bottom, like the camera buttons; only the settings row's items turn.
                 VStack {
                     Spacer()
@@ -62,8 +81,10 @@ struct ReviewView: View {
                     roundButton("xmark", label: "Back to camera") { dismiss() }
                     Spacer()
                     if onDelete != nil, currentEntry?.canDelete == true {
-                        roundButton("trash", label: "Delete photo") { Task { await deleteCurrent() } }
-                            .disabled(isDeleting)
+                        roundButton("trash", label: currentEntry?.isVideo == true ? "Delete video" : "Delete photo") {
+                            Task { await deleteCurrent() }
+                        }
+                        .disabled(isDeleting)
                     }
                 }
                 Spacer()
@@ -155,6 +176,33 @@ struct ReviewView: View {
             .padding(.top, 4)
         }
         .font(.system(size: 11, design: .monospaced))
+        .foregroundStyle(Color.white.opacity(0.7))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// The recording's date and details, above the player's own controls.
+    private func videoCard(for info: VideoInfo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let date = info.capturedAt {
+                Text(date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).year().hour().minute()))
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white)
+            }
+            HStack {
+                Text(SettingsText.videoDetail(info))
+                Spacer()
+                if let codec = info.codec {
+                    Text(codec)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.15), in: Capsule())
+                        .foregroundStyle(Color.white)
+                }
+            }
+        }
+        .font(.system(size: 11, weight: .medium, design: .monospaced))
         .foregroundStyle(Color.white.opacity(0.7))
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -265,5 +313,55 @@ private struct ReviewPage: View {
             loaded.place = place
             onLoaded(loaded)
         }
+    }
+}
+
+/// One recording in review: its first frame while it loads, then a player with the system's controls. It starts
+/// paused, and pauses again when you swipe away; the player is let go with the page.
+private struct VideoReviewPage: View {
+    let entry: ReviewEntry
+    let isCurrent: Bool
+    let onLoaded: (VideoInfo) -> Void
+    let onUnloaded: () -> Void
+    @State private var video: ReviewVideo?
+    @State private var player: AVPlayer?
+    @State private var isPlaying = false
+    @State private var playbackObservation: NSKeyValueObservation?
+
+    var body: some View {
+        ZStack {
+            if let player {
+                VideoPlayer(player: player)
+            } else if let poster = video?.poster {
+                Image(uiImage: poster).resizable().scaledToFit()
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("video-page")
+        .accessibilityValue(isPlaying ? "Playing" : "Paused")
+        .task { await load() }
+        .onChange(of: isCurrent) { if !isCurrent { player?.pause() } }
+        .onDisappear {
+            player?.pause()
+            playbackObservation = nil
+            player = nil
+            video = nil
+            onUnloaded()
+        }
+    }
+
+    private func load() async {
+        guard video == nil, let load = entry.loadVideo, let loaded = await load() else { return }
+        video = loaded
+        onLoaded(loaded.info)
+        // Playback should sound whatever the ring switch says, like Photos'.
+        try? AVAudioSession.sharedInstance().setCategory(.playback)
+        let player = AVPlayer(playerItem: AVPlayerItem(asset: loaded.asset))
+        playbackObservation = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+            Task { @MainActor in isPlaying = player.timeControlStatus != .paused }
+        }
+        self.player = player
     }
 }

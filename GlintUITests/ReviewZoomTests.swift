@@ -1,7 +1,7 @@
 import XCTest
 
-/// Zooming in review, on a real phone that has at least one photo Glint can show. Needs Glint installed with access
-/// to Photos.
+/// Zooming in review, on a real phone. Each test takes a photo first, so the newest item is a photo and not a recording.
+/// Needs Glint installed with access to the camera and full access to Photos; the photos it takes are left in Photos.
 @MainActor
 final class ReviewZoomUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.frankcongson.glint")
@@ -9,11 +9,16 @@ final class ReviewZoomUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app.launch()
+        XCTAssertTrue(app.buttons["PHOTO"].waitForExistence(timeout: 10), "the capture mode switch")
+        app.buttons["PHOTO"].tap()
+        app.buttons["Take photo"].tap()
         let review = app.buttons["Review photos"]
-        XCTAssertTrue(review.waitForExistence(timeout: 10), "the review button")
-        try XCTSkipUnless(review.isEnabled, "no photos to review")
+        let enabled = NSPredicate(format: "isEnabled == true")
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [expectation(for: enabled, evaluatedWith: review)], timeout: 15), .completed)
+        sleep(3)  // the shot is saved and its thumbnail is on the button
         review.tap()
-        XCTAssertTrue(photo.waitForExistence(timeout: 10), "the photo in review")
+        XCTAssertTrue(photo.waitForExistence(timeout: 15), "the photo just taken, the newest item")
     }
 
     private var photo: XCUIElement {

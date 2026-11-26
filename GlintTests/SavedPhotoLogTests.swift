@@ -76,3 +76,25 @@ struct SavedPhotoLogTests {
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("IMG-2.heic").path))
     }
 }
+
+@Suite("Saved recordings")
+struct SavedRecordingTests {
+    private let saved = Date(timeIntervalSince1970: 9)
+
+    @Test func aRecordingIsLoggedWithItsDocumentsCopy() {
+        let entries = SavedPhoto.entries(assetIDs: ["clip"], files: [["IMG_0001.MOV"]], savedAt: saved)
+        #expect(entries == [SavedPhoto(assetID: "clip", files: ["IMG_0001.MOV"], savedAt: saved)])
+    }
+
+    @Test func aRecordingSurvivesTheLogRoundTrip() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("glint-log-\(UUID().uuidString)")
+        let log = SavedPhotoLog(url: folder.appendingPathComponent("saved-photos.json"))
+        log.append(SavedPhoto.entries(assetIDs: ["clip"], files: [["IMG_0001.MOV"]], savedAt: saved))
+        #expect(log.load().map(\.assetID) == ["clip"])
+        #expect(log.load().first?.files == ["IMG_0001.MOV"])
+    }
+
+    @Test func entriesThatDontLineUpWithTheirFilesAreNotLogged() {
+        #expect(SavedPhoto.entries(assetIDs: ["a", "b"], files: [["a.heic"]], savedAt: saved).isEmpty)
+    }
+}

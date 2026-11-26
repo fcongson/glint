@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import UIKit
 
@@ -12,6 +13,17 @@ struct ReviewEntry: Identifiable {
     let load: @MainActor () async -> Shot?
     /// The photo at its full resolution, for zooming in to its pixels. Nil where only the review image exists.
     var loadFullResolution: (@MainActor () async -> UIImage?)?
+    /// Set for a recording, which review plays instead of showing a still.
+    var loadVideo: (@MainActor () async -> ReviewVideo?)?
+
+    var isVideo: Bool { loadVideo != nil }
+}
+
+/// A recording found in the library: the file to play, a still of it to show while that loads, and its details.
+struct ReviewVideo {
+    let asset: AVAsset
+    let poster: UIImage?
+    let info: VideoInfo
 }
 
 /// The decisions behind review that don't depend on the Photos library, so they can be tested without one.

@@ -1059,7 +1059,7 @@ final class CameraController {
                 post(failure)
                 return { message in post("\(failure). \(message)") }
             } ?? post
-        Task.detached(priority: .utility) { MediaLibrary.saveVideo(at: url, report: report) }
+        saveRecording(at: url, report: report)
     }
 
     // MARK: Status
