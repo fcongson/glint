@@ -54,6 +54,10 @@ final class CameraController {
     /// Counts photos asked for, by the shutter button or a hardware one, for the screen's blink and the haptic.
     private(set) var shutterPresses = 0
     @ObservationIgnored private var isReviewing = false
+    /// Whether the screen is in the foreground. The system stops the camera of a backgrounded app by itself, but a
+    /// Lock Screen extension isn't "backgrounded" that way and would keep the camera, so opening Glint afterwards
+    /// said "Camera in use by another app". Leaving the screen lets go of the camera; coming back takes it again.
+    private var isInForeground = true
     /// VoiceOver's description of the picture, while VoiceOver is on.
     @ObservationIgnored private let narrator = SceneNarrator()
     /// Draws the viewfinder with peaking outlines, on the GPU. Nil without Metal, which leaves peaking off.
@@ -192,9 +196,6 @@ final class CameraController {
         }
     }
 
-    /// For the preview layer only; configuration goes through `CaptureSession`.
-    var session: AVCaptureSession { capture.session }
-
     // MARK: Setup
 
     /// Safe to call more than once (e.g. `onAppear` firing again after the review cover closes);
@@ -242,6 +243,9 @@ final class CameraController {
             await processor.warmUp()
         }
     }
+
+    /// For the preview layer only; configuration goes through `CaptureSession`.
+    var session: AVCaptureSession { capture.session }
 
     /// The preview layer is now showing the session, so rotation can be tied to it.
     func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
@@ -555,15 +559,7 @@ final class CameraController {
         capture.enqueue { $0.setVideoLight(on) }
     }
 
-    // MARK: Viewfinder aids and spoken descriptions
-
-    /// VoiceOver came on or went off; see `SceneNarrator`.
-    private func voiceOverChanged(_ isOn: Bool) {
-        guard isOn != narrator.isOn, isCameraReady else { return }
-        narrator.setOn(isOn)
-        capture.enqueue { $0.setFaceDetection(isOn) }
-        updateLevelSensor()
-    }
+    // MARK: Viewfinder aids, power and heat
 
     private func lowPowerModeChanged(_ isOn: Bool) {
         if let message = aids.lowPowerModeChanged(isOn) { statusLine.post(message) }
@@ -590,6 +586,25 @@ final class CameraController {
         }
     }
 
+    /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
+    private func sendAnalysis() {
+        let histogram = aids.isHistogramEnabled, rgb = aids.histogramStyle == .rgb
+        let viewfinder = aids.viewfinderSettings(isAutofocus: isAutofocus)
+        capture.enqueue { $0.setAnalysis(histogram: histogram, rgb: rgb, viewfinder: viewfinder) }
+    }
+
+    // MARK: VoiceOver
+
+    /// VoiceOver came on or went off; see `SceneNarrator`.
+    private func voiceOverChanged(_ isOn: Bool) {
+        guard isOn != narrator.isOn, isCameraReady else { return }
+        narrator.setOn(isOn)
+        capture.enqueue { $0.setFaceDetection(isOn) }
+        updateLevelSensor()
+    }
+
+    // MARK: Camera running
+
     /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
     func setReviewing(_ isReviewing: Bool) {
         self.isReviewing = isReviewing
@@ -600,24 +615,12 @@ final class CameraController {
         capture.enqueue { $0.setRunning(running) }
     }
 
-    /// Whether the screen is in the foreground. The system stops the camera of a backgrounded app by itself, but a
-    /// Lock Screen extension isn't "backgrounded" that way and would keep the camera, so opening Glint afterwards
-    /// said "Camera in use by another app". Leaving the screen lets go of the camera; coming back takes it again.
-    private var isInForeground = true
-
     func setInForeground(_ inForeground: Bool) {
         Log.lifecycle.notice("[\(Log.copy, privacy: .public)] foreground \(inForeground) (was \(self.isInForeground))")
         guard inForeground != isInForeground else { return }
         isInForeground = inForeground
         let running = inForeground && !isReviewing
         capture.enqueue { $0.setRunning(running) }
-    }
-
-    /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
-    private func sendAnalysis() {
-        let histogram = aids.isHistogramEnabled, rgb = aids.histogramStyle == .rgb
-        let viewfinder = aids.viewfinderSettings(isAutofocus: isAutofocus)
-        capture.enqueue { $0.setAnalysis(histogram: histogram, rgb: rgb, viewfinder: viewfinder) }
     }
 
     // MARK: Focus
@@ -724,22 +727,5 @@ final class CameraController {
 
     func toggleRecording() {
         capture.enqueue { $0.toggleRecording() }  // isRecording follows the session's recording events
-    }
-
-    /// Saves the recording if its file is good, and says why it stopped if it wasn't the user who stopped it. The
-    /// reason stays in front of the save's own message ("Video saved"), which would otherwise replace it at once.
-    private func recordingFinished(_ url: URL, _ outcome: RecordingOutcome) {
-        let post = statusLine.reporter
-        guard outcome.hasUsableFile else {
-            post(outcome.failure ?? "Recording failed")
-            Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: url) }
-            return
-        }
-        let report: @Sendable (String) -> Void =
-            outcome.failure.map { failure in
-                post(failure)
-                return { message in post("\(failure). \(message)") }
-            } ?? post
-        saveRecording(at: url, report: report)
     }
 }
