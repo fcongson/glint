@@ -1,6 +1,7 @@
 import CoreGraphics
 import CoreVideo
 import Foundation
+import QuartzCore
 import Testing
 
 @testable import Glint
@@ -134,6 +135,36 @@ struct FocusPeakingTests {
         let a = try #require(renderer.analyse(buffer, sensitivity: .high))
         #expect(a.width == 2050 && a.height == 6)
         #expect(count(a) == 0)
+    }
+
+    /// Every way a frame is drawn finishes on the GPU and hands its slot back. More frames than can be in flight at
+    /// once would otherwise wait forever: outlines analysed and reused (every other frame), magnified, with zebras.
+    @MainActor
+    @Test(.timeLimit(.minutes(1)), arguments: [PeakingMode.standard, .sweep])
+    func renderingKeepsGoing(mode: PeakingMode) async throws {
+        let renderer = try #require(ViewfinderRenderer.make())
+        let layer = CAMetalLayer()
+        renderer.configure(layer)
+        layer.drawableSize = CGSize(width: 64, height: 48)
+        renderer.attach(layer, drawableSize: layer.drawableSize)
+        renderer.setAnalysisInterval(2)
+        nonisolated(unsafe) let buffer = try frame { x, _ in x < 32 ? 0 : 255 }
+        let magnified = Magnifier(center: CGPoint(x: 0.5, y: 0.5), magnification: .double)
+        let settings = [
+            ViewfinderSettings(outlines: true, mode: mode),
+            ViewfinderSettings(outlines: true, mode: mode, magnifier: magnified, zebras: .hundred),
+        ]
+        let drawn = await Task.detached {
+            var drawn = 0
+            for _ in 0..<4 {
+                for each in settings {
+                    renderer.render(buffer, settings: each)
+                    drawn += 1
+                }
+            }
+            return drawn
+        }.value
+        #expect(drawn == 8)
     }
 
     /// Analysed at full resolution: only frames past 4096 on the long side (48 MP) are shrunk.
