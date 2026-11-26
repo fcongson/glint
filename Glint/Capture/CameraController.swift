@@ -37,7 +37,6 @@ final class CameraController {
     private(set) var videoFormat = VideoFormat()
     private(set) var videoCapabilities = VideoCapabilities()
     private(set) var audioLevel: Float = 0  // 0 … 1, while recording
-    private(set) var status = ""  // transient message; cleared automatically by `post`
     private(set) var lenses: [Lens] = []
     private(set) var currentLensID = ""
     private(set) var aperture: Float = 0
@@ -66,11 +65,13 @@ final class CameraController {
     private(set) var systemPressure = SystemPressure.nominal
     /// Whether the GPU viewfinder draws, for outlines, zebras or magnifying.
     var isViewfinderDrawn: Bool { aids.viewfinderSettings(isAutofocus: isAutofocus) != nil }
-    private(set) var timing = ""
     private(set) var isCameraReady = false  // the preview is running; secondary controls fade in then
     private(set) var isCameraDenied = false  // camera access refused: the viewfinder offers the way to Settings
     private(set) var interruption: CameraInterruption?  // why the preview is frozen, while the system has the camera
-    @ObservationIgnored private var timings = DebugTimings()  // dev-only; `timing` is its readout
+    /// The transient message over the viewfinder.
+    let statusLine = StatusLine()
+    /// Dev-only timings over the viewfinder; empty in release builds.
+    let debugReadout = DebugReadout()
     /// This session's photos and the review button's thumbnail.
     let shotLibrary = ShotLibrary()
 
@@ -80,7 +81,6 @@ final class CameraController {
     @ObservationIgnored private var hasStarted = false
     // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
     @ObservationIgnored private var modeGeneration = 0
-    @ObservationIgnored private var statusGeneration = 0
     @ObservationIgnored private weak var previewLayer: AVCaptureVideoPreviewLayer?
 
     /// Where settings are saved and loaded: the group's defaults, shared with the other copy of Glint.
@@ -194,8 +194,8 @@ final class CameraController {
         guard !hasStarted else { return }
         hasStarted = true
         settingsSync.saveAsTheyChange()
-        startTimer("launch")
-        startTimer("outputs")
+        debugReadout.start("launch")
+        debugReadout.start("outputs")
         #if !LOCKED_CAPTURE  // location permission belongs to the app; Lock Screen shots are saved untagged
             locationProvider.start()
             if #available(iOS 18.0, *) {
@@ -244,15 +244,15 @@ final class CameraController {
     private func handle(_ event: CaptureEvent) {
         switch event {
         case .ready(let lenses, let device):
-            stopTimer("launch", appending: true)  // the deferred outputs can finish first
+            debugReadout.stop("launch", appending: true)  // the deferred outputs can finish first
             let firstStart = !isCameraReady
             isCameraReady = true
             self.lenses = lenses
             apply(device)
             if firstStart { applySavedSettingsToCamera() }
         case .lensChanged(let device), .formatChanged(let device):
-            stopTimer("lens")
-            stopTimer("mode")
+            debugReadout.stop("lens")
+            debugReadout.stop("mode")
             apply(device)
             viewfinderLock = nil  // a new lens or format starts in auto
             // A new device or format starts in auto, so re-lock exposure/WB if in MANUAL, and focus if by hand.
@@ -300,18 +300,18 @@ final class CameraController {
         case .photoPreview(let image, let requestedAt):
             shotLibrary.showPreview(image)
             #if DEBUG
-                timings.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
+                debugReadout.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
             #endif
         case .photoCaptured(let photo):
             photoCaptured(photo)
         case .deferredStartFinished:
-            stopTimer("outputs", appending: true)  // under launch's line: preview first, then everything else
+            debugReadout.stop("outputs", appending: true)  // under launch's line: preview first, then everything else
         case .debug(let message):
-            if DebugInfo.isOn { post(message) }
+            if DebugInfo.isOn { statusLine.post(message) }
         case .systemPressure(let level):
             systemPressureChanged(level)
         case .resumed:
-            stopTimer("resume")
+            debugReadout.stop("resume")
         case .recordingStarted:
             isRecording = true
             recordingStartedAt = Date()
@@ -331,7 +331,7 @@ final class CameraController {
             Log.camera.notice("[\(Log.copy, privacy: .public)] interruption ended")
             interruption = nil
         case .status(let message):
-            post(message)
+            statusLine.post(message)
         }
     }
 
@@ -350,7 +350,7 @@ final class CameraController {
     func switchLens(to lens: Lens) {
         guard lens.id != currentLensID, !isRecording else { return }
         let id = lens.id
-        startTimer("lens")
+        debugReadout.start("lens")
         capture.enqueue { $0.switchLens(to: id) }
     }
 
@@ -361,7 +361,7 @@ final class CameraController {
         guard mode != captureMode, !isRecording else { return }
         captureMode = mode
         modeGeneration += 1
-        startTimer("mode")
+        debugReadout.start("mode")
         let format = videoFormat
         guard mode == .video else {
             capture.enqueue { $0.setCaptureMode(video: false, format: format, withAudio: false) }
@@ -518,7 +518,7 @@ final class CameraController {
     }
 
     private func lowPowerModeChanged(_ isOn: Bool) {
-        if let message = aids.lowPowerModeChanged(isOn) { post(message) }
+        if let message = aids.lowPowerModeChanged(isOn) { statusLine.post(message) }
     }
 
     /// Heat or load on the camera changed. Glint gives things up in order (see `SystemPressure`): peaking analyses
@@ -529,7 +529,7 @@ final class CameraController {
         guard level != old else { return }
         systemPressure = level
         #if DEBUG
-            if DebugInfo.isOn { post("System pressure: \(level)") }  // a message below, if any, replaces it
+            if DebugInfo.isOn { statusLine.post("System pressure: \(level)") }  // a message below, if any, replaces it
         #endif
         viewfinderRenderer?.setAnalysisInterval(level.peakingInterval)
         if level.reducesFrameRate != old.reducesFrameRate {
@@ -537,7 +537,9 @@ final class CameraController {
             capture.enqueue { $0.setFrameRateReduced(reduced) }
         }
         let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        if let message = aids.pressureChanged(from: old, to: level, lowPowerModeIsOn: lowPower) { post(message) }
+        if let message = aids.pressureChanged(from: old, to: level, lowPowerModeIsOn: lowPower) {
+            statusLine.post(message)
+        }
     }
 
     /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
@@ -545,7 +547,7 @@ final class CameraController {
         self.isReviewing = isReviewing
         updateLevelSensor()
         let running = !isReviewing && isInForeground
-        if running { startTimer("resume") }
+        if running { debugReadout.start("resume") }
         locationProvider.setPaused(isReviewing)  // no photo can be taken from review
         capture.enqueue { $0.setRunning(running) }
     }
@@ -614,7 +616,7 @@ final class CameraController {
     @discardableResult
     func lockFocusAndExposure(at point: CGPoint) -> Bool {
         guard let lock = ViewfinderLock(isAutofocus: isAutofocus, manual: manual, auto: auto) else {
-            post("Nothing to lock: focus and exposure are both manual")
+            statusLine.post("Nothing to lock: focus and exposure are both manual")
             return false
         }
         viewfinderLock = lock
@@ -653,7 +655,7 @@ final class CameraController {
     private func photoCaptured(_ photo: CapturedPhoto) {
         let shotTime = CFAbsoluteTimeGetCurrent() - photo.requestedAt
         let location = locationProvider.current  // the fix at the moment the photo arrives
-        let report = statusReporter
+        let report = statusLine.reporter
         let processor = photoProcessor
         Task.detached(priority: .userInitiated) { [weak self] in
             let result = await processor.process(photo, location: location, report: report)
@@ -681,23 +683,8 @@ final class CameraController {
         if let image = result.review { shotLibrary.add(image, info: result.info, location: location) }
         photoProcessing(started: false)
         #if DEBUG
-            timings.shotFinished(shotTime: shotTime, developTime: result.developTime, renderTime: result.renderTime)
-            timing = timings.readout
-        #endif
-    }
-
-    /// Dev-only timings for the readout over the viewfinder (see `DebugTimings`). Compiled out of release builds
-    /// here, at the call, so a release build does no work for them at all.
-    private func startTimer(_ name: String) {
-        #if DEBUG
-            timings.start(name)
-        #endif
-    }
-
-    private func stopTimer(_ name: String, appending: Bool = false) {
-        #if DEBUG
-            timings.stop(name, appending: appending)
-            timing = timings.readout
+            debugReadout.shotFinished(
+                shotTime: shotTime, developTime: result.developTime, renderTime: result.renderTime)
         #endif
     }
 
@@ -710,7 +697,7 @@ final class CameraController {
     /// Saves the recording if its file is good, and says why it stopped if it wasn't the user who stopped it. The
     /// reason stays in front of the save's own message ("Video saved"), which would otherwise replace it at once.
     private func recordingFinished(_ url: URL, _ outcome: RecordingOutcome) {
-        let post = statusReporter
+        let post = statusLine.reporter
         guard outcome.hasUsableFile else {
             post(outcome.failure ?? "Recording failed")
             Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: url) }
@@ -722,26 +709,5 @@ final class CameraController {
                 return { message in post("\(failure). \(message)") }
             } ?? post
         saveRecording(at: url, report: report)
-    }
-
-    // MARK: Status
-
-    /// For the views: says something in the status line, e.g. why the review didn't open.
-    func notify(_ message: String) { post(message) }
-
-    /// Shows a transient status message, cleared after a moment unless a newer one has replaced it.
-    private func post(_ message: String) {
-        status = message
-        statusGeneration += 1
-        let generation = statusGeneration
-        Task {
-            try? await Task.sleep(for: .seconds(2.5))
-            if statusGeneration == generation { status = "" }
-        }
-    }
-
-    /// For work running off the main actor (e.g. `MediaLibrary`) to report back through `post`.
-    nonisolated private var statusReporter: @Sendable (String) -> Void {
-        { [weak self] message in Task { @MainActor in self?.post(message) } }
     }
 }
