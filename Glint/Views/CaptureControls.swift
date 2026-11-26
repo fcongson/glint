@@ -113,7 +113,7 @@ struct CaptureControls: View {
             Task { await openReview() }
         } label: {
             Group {
-                if let img = cam.lastThumbnail {
+                if let img = cam.shotLibrary.lastThumbnail {
                     Image(uiImage: img).resizable().scaledToFill()
                 } else {
                     Color.white.opacity(0.1)
@@ -127,7 +127,7 @@ struct CaptureControls: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.5), lineWidth: 1))
         }
         .accessibilityLabel("Review photos")
-        .disabled(!cam.canOpenReview)
+        .disabled(!cam.shotLibrary.canOpenReview)
         .fullScreenCover(isPresented: $showReview) {
             ReviewView(entries: reviewEntries, angle: deviceAngle, onDelete: deleteFromReview)
         }
@@ -144,11 +144,11 @@ struct CaptureControls: View {
             let canRead = await PhotoHistory.requestReadAccess()
         #endif
         switch ReviewPlan.source(isLockScreen: isLockScreen, canReadLibrary: canRead) {
-        case .thisSession: reviewEntries = cam.sessionReviewEntries()
+        case .thisSession: reviewEntries = cam.shotLibrary.reviewEntries()
         case .library:
             #if !LOCKED_CAPTURE
                 reviewEntries = PhotoHistory.entries()
-                await cam.showLatestSavedPhoto(onlyIfNone: true)  // access may have just been given
+                await cam.shotLibrary.showLatestSaved(onlyIfNone: true)  // access may have just been given
             #endif
         }
         showReview = !reviewEntries.isEmpty
@@ -167,7 +167,7 @@ struct CaptureControls: View {
         #else
             { entry in
                 let deleted = await PhotoHistory.delete(assetID: entry.id)
-                if deleted { await cam.showLatestSavedPhoto() }
+                if deleted { await cam.shotLibrary.showLatestSaved() }
                 return deleted
             }
         #endif

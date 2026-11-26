@@ -71,9 +71,8 @@ final class CameraController {
     private(set) var isCameraDenied = false  // camera access refused: the viewfinder offers the way to Settings
     private(set) var interruption: CameraInterruption?  // why the preview is frozen, while the system has the camera
     @ObservationIgnored private var timings = DebugTimings()  // dev-only; `timing` is its readout
-    private(set) var lastThumbnail: UIImage?
-    private(set) var shots: [Shot] = []  // this session's photos, oldest first, for swiping through in review
-    private let maxShots = 30  // each keeps a compressed review image (`ReviewImage`), so memory stays bounded
+    /// This session's photos and the review button's thumbnail.
+    let shotLibrary = ShotLibrary()
 
     private let capture: CaptureSession
     private let locationProvider = LocationProvider()
@@ -202,7 +201,7 @@ final class CameraController {
             if #available(iOS 18.0, *) {
                 Task.detached(priority: .utility) { await LockScreenCaptures.collect() }
             }
-            Task { await showLatestSavedPhoto(onlyIfNone: true) }  // the thumbnail isn't empty on opening
+            Task { await shotLibrary.showLatestSaved(onlyIfNone: true) }  // the thumbnail isn't empty on opening
         #endif
         Task {
             for await event in capture.events { handle(event) }
@@ -299,7 +298,7 @@ final class CameraController {
         case .faces(let faces):
             narrator.facesFound(faces, in: previewLayer)
         case .photoPreview(let image, let requestedAt):
-            lastThumbnail = image  // the review image replaces it once it's rendered (`addShot`)
+            shotLibrary.showPreview(image)
             #if DEBUG
                 timings.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
             #endif
@@ -649,33 +648,8 @@ final class CameraController {
         }
     }
 
-    /// Whether the thumbnail button can open review: there's a photo to show, or (in the app) Photos hasn't been
-    /// asked for read access yet, which opening review does.
-    var canOpenReview: Bool {
-        #if LOCKED_CAPTURE
-            lastThumbnail != nil
-        #else
-            lastThumbnail != nil || PhotoHistory.canAskForReadAccess
-        #endif
-    }
-
-    /// This session's photos as pages for review, oldest first. They can't be deleted from there.
-    func sessionReviewEntries() -> [ReviewEntry] {
-        shots.map { shot in ReviewEntry(id: shot.id.uuidString, canDelete: false, needsPlace: false) { shot } }
-    }
-
-    #if !LOCKED_CAPTURE
-        /// Shows the newest photo Glint has saved on the thumbnail button, from the library, when it can be read without
-        /// asking. After one is deleted this brings the one before it forward (or empties the button).
-        func showLatestSavedPhoto(onlyIfNone: Bool = false) async {
-            guard !onlyIfNone || lastThumbnail == nil, PhotoHistory.canRead else { return }
-            let latest = await PhotoHistory.latestThumbnail()
-            if !onlyIfNone || lastThumbnail == nil { lastThumbnail = latest }
-        }
-    #endif
-
-    /// Developing, saving and drawing the review image run off the main actor (`PhotoProcessor`); the result is
-    /// added to `shots` here.
+    /// Developing, saving and drawing the review image run off the main actor (`PhotoProcessor`); the result goes
+    /// to `shotLibrary`.
     private func photoCaptured(_ photo: CapturedPhoto) {
         let shotTime = CFAbsoluteTimeGetCurrent() - photo.requestedAt
         let location = locationProvider.current  // the fix at the moment the photo arrives
@@ -704,13 +678,7 @@ final class CameraController {
     }
 
     private func addShot(_ result: PhotoProcessor.Result, location: CLLocation?, shotTime: Double) {
-        if let image = result.review {
-            lastThumbnail = image.thumbnail
-            let shot = Shot(thumbnail: image.thumbnail, imageData: image.data, info: result.info, location: location)
-            shots.append(shot)
-            if shots.count > maxShots { shots.removeFirst(shots.count - maxShots) }
-            if let location { resolvePlace(for: shot.id, at: location) }
-        }
+        if let image = result.review { shotLibrary.add(image, info: result.info, location: location) }
         photoProcessing(started: false)
         #if DEBUG
             timings.shotFinished(shotTime: shotTime, developTime: result.developTime, renderTime: result.renderTime)
@@ -731,16 +699,6 @@ final class CameraController {
             timings.stop(name, appending: appending)
             timing = timings.readout
         #endif
-    }
-
-    /// Looks up a place name off the main actor, then attaches it to the shot if review hasn't dropped it meanwhile.
-    private func resolvePlace(for id: UUID, at location: CLLocation) {
-        Task {
-            guard let place = await LocationProvider.placeName(for: location),
-                let index = shots.firstIndex(where: { $0.id == id })
-            else { return }
-            shots[index].place = place
-        }
     }
 
     // MARK: Video

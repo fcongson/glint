@@ -3,7 +3,7 @@ import CoreLocation
 import Foundation
 
 /// What happens to a photo once it's captured: develop it if a HEIC is wanted, save the files, and draw the review
-/// image. Slow, so it runs off the main actor; `CameraController` adds the result to this session's shots.
+/// image. Slow, so it runs off the main actor; `ShotLibrary` keeps the result among this session's shots.
 struct PhotoProcessor: Sendable {
     struct Result: Sendable {
         let review: ReviewImage?  // nil if the review image couldn't be drawn; the photo is saved regardless
