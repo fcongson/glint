@@ -30,8 +30,8 @@ extension CaptureSession {
         if video { checkHardwareCost() }
         restoreAfterReconfiguration()
         let info = applyDeviceSettings(d)
-        emit.yield(.videoCapabilities(videoCapabilities(d)))
-        emit.yield(.formatChanged(info))
+        emit.yield(.device(.videoCapabilities(videoCapabilities(d))))
+        emit.yield(.device(.formatChanged(info)))
     }
 
     /// The microphone is attached only in VIDEO. While attached it keeps the audio system recording, which costs
@@ -62,8 +62,8 @@ extension CaptureSession {
         configureVideoFormat(d)
         checkHardwareCost()
         let info = applyDeviceSettings(d)
-        emit.yield(.videoCapabilities(videoCapabilities(d)))
-        emit.yield(.formatChanged(info))
+        emit.yield(.device(.videoCapabilities(videoCapabilities(d))))
+        emit.yield(.device(.formatChanged(info)))
     }
 
     /// Apple: after committing a configuration, check `hardwareCost` is at or below 1; above it, the camera hardware
@@ -95,7 +95,7 @@ extension CaptureSession {
         }
         if wanted != videoFormat {
             videoFormat = wanted
-            emit.yield(.videoFormatResolved(wanted))
+            emit.yield(.device(.videoFormatResolved(wanted)))
         }
     }
 
@@ -150,13 +150,13 @@ extension CaptureSession {
     private func reportAudioLevel() {
         guard let channel = movieOutput.connection(with: .audio)?.audioChannels.first else { return }
         // -50 dB (a quiet room) … 0 dB (full scale), as 0 … 1.
-        emit.yield(.audioLevel(min(max((channel.averagePowerLevel + 50) / 50, 0), 1)))
+        emit.yield(.recording(.audioLevel(min(max((channel.averagePowerLevel + 50) / 50, 0), 1))))
     }
 
     private func stopAudioMeter() {
         audioMeterTask?.cancel()
         audioMeterTask = nil
-        emit.yield(.audioLevel(0))
+        emit.yield(.recording(.audioLevel(0)))
     }
 
     /// Called when a recording has finished, however it ended: stops the meter and lifts the exposure lock.
@@ -169,7 +169,7 @@ extension CaptureSession {
 
     // MARK: Video
 
-    /// Starts recording, or stops it if already recording. Emits `.recordingStarted` and `.recordingFinished`.
+    /// Starts recording, or stops it if already recording. Emits `.recording(.started)` and `.recording(.finished)`.
     func toggleRecording() {
         if movieOutput.isRecording {
             movieOutput.stopRecording()

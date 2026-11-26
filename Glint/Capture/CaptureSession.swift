@@ -69,8 +69,8 @@ actor CaptureSession {
         let (events, emit) = AsyncStream.makeStream(of: CaptureEvent.self)
         self.events = events
         self.emit = emit
-        analyzer = FrameAnalyzer(histogram: { emit.yield(.histogram($0)) }, renderer: viewfinder)
-        faceDetector = FaceDetector(report: { emit.yield(.faces($0)) })
+        analyzer = FrameAnalyzer(histogram: { emit.yield(.analysis(.histogram($0))) }, renderer: viewfinder)
+        faceDetector = FaceDetector(report: { emit.yield(.analysis(.faces($0))) })
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
         self.commands = commands
@@ -160,8 +160,8 @@ actor CaptureSession {
             // Whether Bayer RAW on this lens supports it isn't documented, so say once in debug builds.
             emit.yield(.debug("Responsive capture \(photoOutput.isResponsiveCaptureEnabled ? "on" : "not supported")"))
         #endif
-        emit.yield(.ready(lenses: lenses, device: info))
-        emit.yield(.videoCapabilities(videoCapabilities(wide)))
+        emit.yield(.device(.ready(lenses: lenses, device: info)))
+        emit.yield(.device(.videoCapabilities(videoCapabilities(wide))))
     }
 
     // MARK: Configuration
@@ -282,11 +282,11 @@ actor CaptureSession {
     private func observeMeterAndLens(_ d: AVCaptureDevice) {
         // Each meter reading also drives shutter/ISO priority and refreshes the auto readouts.
         let meter = Throttled(interval: 0.1, minChange: 0.05) { [emit, weak self] offset in
-            emit.yield(.exposureOffset(offset))
+            emit.yield(.exposure(.offset(offset)))
             guard let self else { return }
             Task { await self.followAuto(offset: offset) }
         }
-        let lens = Throttled(interval: 0.1, minChange: 0.005) { [emit] position in emit.yield(.lensPosition(position)) }
+        let lens = Throttled(interval: 0.1, minChange: 0.005) { [emit] in emit.yield(.focus(.lensPosition($0))) }
         let temperature = Throttled(interval: 0.25, minChange: 50) { [weak self] kelvin in
             guard let self else { return }
             Task { await self.reportAutoWhiteBalance(kelvin) }
@@ -298,7 +298,7 @@ actor CaptureSession {
                 temperature.send(d.temperatureAndTintValues(for: d.deviceWhiteBalanceGains).temperature)
             },
             d.observe(\.systemPressureState, options: [.initial, .new]) { [emit] d, _ in
-                emit.yield(.systemPressure(SystemPressure(d.systemPressureState.level)))
+                emit.yield(.session(.systemPressure(SystemPressure(d.systemPressureState.level))))
             },
         ]
     }
@@ -346,10 +346,10 @@ actor CaptureSession {
         let previewLayer = session.connections.lazy.compactMap(\.videoPreviewLayer).first
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
         rotationCoordinator = coordinator
-        emit.yield(.previewRotation(angle: coordinator.videoRotationAngleForHorizonLevelPreview))
+        emit.yield(.session(.previewRotation(angle: coordinator.videoRotationAngleForHorizonLevelPreview)))
         rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.new]) {
             [emit] c, _ in
-            emit.yield(.previewRotation(angle: c.videoRotationAngleForHorizonLevelPreview))
+            emit.yield(.session(.previewRotation(angle: c.videoRotationAngleForHorizonLevelPreview)))
         }
     }
 
@@ -385,8 +385,8 @@ actor CaptureSession {
         if isVideo { configureVideoFormat(current) }  // each lens has its own formats
         let info = applyDeviceSettings(current)
         updateRotationCoordinator()
-        emit.yield(.videoCapabilities(videoCapabilities(current)))
-        emit.yield(.lensChanged(info))
+        emit.yield(.device(.videoCapabilities(videoCapabilities(current))))
+        emit.yield(.device(.lensChanged(info)))
     }
 
     // MARK: Exposure and white balance
@@ -447,9 +447,8 @@ actor CaptureSession {
                     let tt = d.temperatureAndTintValues(for: gains)
                     wbTint = tt.tint
                     d.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
-                    emit.yield(
-                        .whiteBalanceSeeded(
-                            kelvin: ExposureScale.nearest(tt.temperature, in: ExposureScale.whiteBalanceKelvins)))
+                    let kelvin = ExposureScale.nearest(tt.temperature, in: ExposureScale.whiteBalanceKelvins)
+                    emit.yield(.exposure(.whiteBalanceSeeded(kelvin: kelvin)))
                 }
             }
             applyFocus(d, lockedAt: manualFocus)
@@ -533,13 +532,13 @@ actor CaptureSession {
                     iso: AVCaptureDevice.currentISO)
             }
         }
-        emit.yield(
-            .autoValues(iso: auto.iso ? d.iso : nil, shutterSeconds: auto.shutter ? d.exposureDuration.seconds : nil))
+        let shutterSeconds = auto.shutter ? d.exposureDuration.seconds : nil
+        emit.yield(.exposure(.autoValues(iso: auto.iso ? d.iso : nil, shutterSeconds: shutterSeconds)))
     }
 
     private func reportAutoWhiteBalance(_ kelvin: Float) {
         guard isManual, autoSettings.whiteBalance, kelvin.isFinite else { return }
-        emit.yield(.autoWhiteBalance(kelvin: kelvin))
+        emit.yield(.exposure(.autoWhiteBalance(kelvin: kelvin)))
     }
 
     func applyWhiteBalance(kelvin: Float) {
@@ -602,7 +601,7 @@ actor CaptureSession {
             if !session.isRunning {
                 session.startRunning()  // blocks until frames are flowing
                 Log.camera.notice("[\(Log.copy, privacy: .public)] camera started again")
-                emit.yield(.resumed)
+                emit.yield(.session(.resumed))
                 schedulePhotoPreparation()  // skipped while it was stopped
                 applyVideoLight()  // stopping put it out
             }
@@ -669,14 +668,14 @@ actor CaptureSession {
     func setManualFocus(_ position: Float?) {
         guard let d = device else { return }
         guard d.isLockingFocusWithCustomLensPositionSupported else {
-            emit.yield(.manualFocusUnavailable)
+            emit.yield(.focus(.manualFocusUnavailable))
             emit.yield(.status("Manual focus isn't available on this lens"))
             return
         }
         withLockedDevice(d, failure: "Focus") { d in
             let target = position ?? d.lensPosition
             applyFocus(d, lockedAt: target)
-            if position == nil { emit.yield(.manualFocusSeeded(target)) }
+            if position == nil { emit.yield(.focus(.manualFocusSeeded(target))) }
         }
     }
 
@@ -785,7 +784,7 @@ actor CaptureSession {
 
     // MARK: Stills
 
-    /// Emits `.photoCaptured` (or a status on failure). `whiteBalance` is recorded with the photo for review.
+    /// Emits `.photo(.captured)` (or a status on failure). `whiteBalance` is recorded with the photo for review.
     func capturePhoto(
         fileType: PhotoFileType, aspect: AspectRatio, whiteBalance: WhiteBalanceSetting,
         flash: FlashSetting, requestedAt: CFAbsoluteTime
