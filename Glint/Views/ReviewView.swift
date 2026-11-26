@@ -356,8 +356,9 @@ private struct VideoReviewPage: View {
         guard video == nil, let load = entry.loadVideo, let loaded = await load() else { return }
         video = loaded
         onLoaded(loaded.info)
-        // Playback should sound whatever the ring switch says, like Photos'.
-        try? AVAudioSession.sharedInstance().setCategory(.playback)
+        // Playback should sound whatever the ring switch says, like Photos'. Off the main thread: the call can block
+        // while the audio system is busy, which is a hang risk there.
+        await Task.detached { try? AVAudioSession.sharedInstance().setCategory(.playback) }.value
         let player = AVPlayer(playerItem: AVPlayerItem(asset: loaded.asset))
         playbackObservation = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
             Task { @MainActor in isPlaying = player.timeControlStatus != .paused }
