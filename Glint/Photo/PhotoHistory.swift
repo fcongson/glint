@@ -1,10 +1,14 @@
 // The app's way back into the Photos library, for review of every photo Glint has saved and for deleting from it.
 // None of this is in the Lock Screen camera: it can add to the library but never read it.
 #if !LOCKED_CAPTURE
+    import AVFoundation
     import ImageIO
     import Photos
     import UIKit
     import UniformTypeIdentifiers
+
+    /// Carries a value Photos hands to its callback (not yet annotated as Sendable) back to the caller's isolation.
+    private struct UncheckedSendable<T>: @unchecked Sendable { let value: T }
 
     enum PhotoHistory {
         /// Whether the library can be read now, without asking. Limited access counts: the photos Glint saved are
@@ -44,7 +48,12 @@
         @MainActor
         static func entries() -> [ReviewEntry] {
             assets().map { asset in
-                ReviewEntry(
+                if asset.mediaType == .video {
+                    return ReviewEntry(
+                        id: asset.localIdentifier, canDelete: true, needsPlace: false,
+                        load: { nil }, loadVideo: { await video(for: asset) })
+                }
+                return ReviewEntry(
                     id: asset.localIdentifier, canDelete: true, needsPlace: true,
                     load: { await shot(for: asset) },
                     loadFullResolution: { await image(for: asset, targetSize: PHImageManagerMaximumSize) })
@@ -55,6 +64,37 @@
         static func latestThumbnail() async -> UIImage? {
             guard canRead, let asset = assets().last else { return nil }
             return await image(for: asset, longestSide: 200)
+        }
+
+        // MARK: One recording
+
+        private static func video(for asset: PHAsset) async -> ReviewVideo? {
+            guard let avAsset = await avAsset(for: asset) else { return nil }
+            let poster = await image(for: asset, longestSide: ReviewImageRenderer.maxPixelSize)
+            let track = try? await avAsset.loadTracks(withMediaType: .video).first
+            let frameRate = try? await track?.load(.nominalFrameRate)
+            let formats = (try? await track?.load(.formatDescriptions)) ?? []
+            let codec = formats.first.flatMap { VideoInfo.codecName(code: $0.mediaSubType.rawValue) }
+            let bytes =
+                ((avAsset as? AVURLAsset).flatMap { try? $0.url.resourceValues(forKeys: [.fileSizeKey]).fileSize }) ?? 0
+            let info = VideoInfo(
+                capturedAt: asset.creationDate, durationSeconds: asset.duration,
+                pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight, frameRate: frameRate.map(Double.init),
+                codec: codec, fileBytes: bytes)
+            return ReviewVideo(asset: avAsset, poster: poster, info: info)
+        }
+
+        /// The recording itself, fetched from iCloud if it isn't on the phone.
+        private static func avAsset(for asset: PHAsset) async -> AVAsset? {
+            let options = PHVideoRequestOptions()
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .automatic
+            let found: UncheckedSendable<AVAsset?> = await withCheckedContinuation { continuation in
+                PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+                    continuation.resume(returning: UncheckedSendable(value: avAsset))
+                }
+            }
+            return found.value
         }
 
         // MARK: One photo

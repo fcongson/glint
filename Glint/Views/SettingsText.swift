@@ -176,6 +176,18 @@ enum SettingsText {
             : String(format: "%02d:%02d", s / 60, s % 60)
     }
 
+    /// "00:42 \u{2022} 3840 \u{00D7} 2160 \u{2022} 24 fps \u{2022} 213 MB", leaving out whatever isn't known.
+    static func videoDetail(_ info: VideoInfo) -> String {
+        var parts = [duration(seconds: Int(info.durationSeconds.rounded()))]
+        if let w = info.pixelWidth, let h = info.pixelHeight { parts.append(dimensions(width: w, height: h)) }
+        if let fps = info.frameRate, fps > 0 {
+            let whole = fps.rounded() == fps || abs(fps - fps.rounded()) < 0.01
+            parts.append(whole ? "\(Int(fps.rounded())) fps" : String(format: "%.2f fps", fps))
+        }
+        if info.fileBytes > 0 { parts.append(fileSize(bytes: info.fileBytes)) }
+        return parts.joined(separator: " \u{2022} ")
+    }
+
     /// Spoken value for a toggle that is shown only by colour.
     static func onOff(_ isOn: Bool) -> String { isOn ? "On" : "Off" }
 

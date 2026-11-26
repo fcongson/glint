@@ -74,3 +74,24 @@ struct ReviewPlanTests {
         #expect(ReviewPlan.ordered(items, date: \.date).map(\.name) == ["undated", "old", "new"])
     }
 }
+
+@Suite("Review entries")
+struct ReviewEntryTests {
+    @Test func anEntryWithAVideoLoaderIsARecording() {
+        let clip = ReviewEntry(id: "clip", canDelete: true, needsPlace: false, load: { nil }, loadVideo: { nil })
+        #expect(clip.isVideo)
+    }
+
+    @Test func anEntryWithoutOneIsAPhoto() {
+        let photo = ReviewEntry(id: "photo", canDelete: true, needsPlace: true, load: { nil })
+        #expect(!photo.isVideo)
+    }
+
+    @Test func recordingsAndPhotosAreOrderedByWhenTheyWereMade() {
+        let items = [
+            ("clip", Date(timeIntervalSince1970: 30)), ("old", Date(timeIntervalSince1970: 10)),
+            ("photo", Date(timeIntervalSince1970: 20)),
+        ]
+        #expect(ReviewPlan.ordered(items, date: { $0.1 }).map(\.0) == ["old", "photo", "clip"])
+    }
+}
