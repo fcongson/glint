@@ -69,99 +69,6 @@ struct Chip: View {
     }
 }
 
-/// Text over the picture (status, timings, MAGNIFIED) on a dark plate, so it reads over any scene.
-struct OverlayLabel: View {
-    let text: String
-    let color: Color
-
-    init(_ text: String, color: Color = .white) {
-        self.text = text
-        self.color = color
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 15, weight: .medium, design: .monospaced))
-            .foregroundStyle(color)
-            .multilineTextAlignment(.leading)
-            .padding(8)
-            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-/// A small caption over a large value, e.g. "ISO" over "400". Highlighted when it's the one being adjusted.
-struct SettingReadout: View {
-    let label: String
-    let value: String
-    var highlighted = false
-    var isAuto = false  // a red A before the value, like the A on a Leica dial: the camera chose it
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.6))
-            HStack(spacing: 3) {
-                if isAuto {
-                    Text("A")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color.autoRed)
-                }
-                Text(value)
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(highlighted ? Color.amber : Color.white)
-            }
-        }
-    }
-}
-
-/// Leica-style meter: ▶ lights when under, ● on target, ◀ when over, with the offset in stops beside it.
-struct ExposureMeterView: View {
-    let meter: ExposureMeter
-
-    var body: some View {
-        HStack(spacing: 4) {
-            led("▶", lit: meter.reading == .under)
-            led("●", lit: meter.reading == .onTarget)
-            led("◀", lit: meter.reading == .over)
-            Text(SettingsText.meterOffset(meter.offset))
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.white)
-                .frame(width: 36, alignment: .trailing)
-        }
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Exposure meter")
-        .accessibilityValue(SettingsText.meterSpoken(meter))
-    }
-
-    private func led(_ symbol: String, lit: Bool) -> some View {
-        Text(symbol)
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(lit ? Color.red : Color.red.opacity(0.25))
-    }
-}
-
-/// Microphone level beside the recording time: five bars, the last two red near full scale.
-struct AudioLevelMeter: View {
-    let level: Float  // 0 … 1
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<5, id: \.self) { i in
-                let lit = level >= Float(i + 1) / 6
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(lit ? (i >= 3 ? Color.red : Color.white) : Color.white.opacity(0.25))
-                    .frame(width: 3, height: CGFloat(5 + i * 2))
-            }
-        }
-        .animation(.linear(duration: 0.1), value: level)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Audio level")
-        .accessibilityValue("\(Int((level * 100).rounded())) percent")
-    }
-}
-
 /// One choice in a `SegmentedSwitch`.
 struct SwitchOption<Value: Hashable> {
     let title: String
@@ -197,29 +104,5 @@ struct SegmentedSwitch<Value: Hashable>: View {
         .background(Color.white.opacity(0.12), in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
-    }
-}
-
-extension Color {
-    /// Glint's accent, the amber from the app icon (#F5A524). Black text on it is about 10:1.
-    static let amber = Color(red: 0xF5 / 255, green: 0xA5 / 255, blue: 0x24 / 255)
-    /// The red of the A on a Leica dial (#FF4A3A), marking settings the camera chooses. About 6:1 on black either way.
-    static let autoRed = Color(red: 1, green: 0x4A / 255, blue: 0x3A / 255)
-}
-
-extension Angle {
-    /// True at ±90° (and 270°…): the content's width now runs along the screen's height.
-    /// `rotationEffect` doesn't change layout, so rotated views need their frame swapped by hand.
-    var isQuarterTurn: Bool { !Int((degrees / 90).rounded()).isMultiple(of: 2) }
-}
-
-extension View {
-    /// At launch the preview and the shutter come first and the other controls fade in once the camera is running,
-    /// as Apple recommends for a fast launch. Until then they're hidden from touch and VoiceOver too.
-    func shownWhenReady(_ ready: Bool) -> some View {
-        opacity(ready ? 1 : 0)
-            .allowsHitTesting(ready)
-            .accessibilityHidden(!ready)
-            .animation(.easeOut(duration: 0.25), value: ready)
     }
 }
