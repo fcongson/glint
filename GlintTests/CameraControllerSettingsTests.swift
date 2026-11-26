@@ -73,7 +73,7 @@ struct CameraControllerSettingsTests {
         let theirs = SavedSettings(fileType: .heic, aspect: .oneOne)
         theirs.save(to: defaults)
 
-        cam.flushSettings()
+        cam.settingsSync.flush()
 
         #expect(SavedSettings.load(from: defaults) == theirs)
     }
@@ -81,13 +81,13 @@ struct CameraControllerSettingsTests {
     @Test func aChangeMadeHereIsSavedWhenTheScreenIsLeft() async throws {
         let defaults = try emptyDefaults()
         let cam = CameraController(defaults: defaults)
-        cam.saveDelay = .seconds(60)  // so only leaving the screen can have saved it
-        cam.saveSettingsAsTheyChange()
+        cam.settingsSync.saveDelay = .seconds(60)  // so only leaving the screen can have saved it
+        cam.settingsSync.saveAsTheyChange()
 
         cam.setFileType(.heic)
         // The change is noticed a moment later; flushing before then would find nothing to write.
         try? await Task.sleep(for: .milliseconds(100))
-        cam.flushSettings()
+        cam.settingsSync.flush()
 
         #expect(SavedSettings.load(from: defaults)?.fileType == .heic)
     }
@@ -95,8 +95,8 @@ struct CameraControllerSettingsTests {
     @Test func aChangeIsSavedShortlyAfterItsMade() async throws {
         let defaults = try emptyDefaults()
         let cam = CameraController(defaults: defaults)
-        cam.saveDelay = .milliseconds(20)
-        cam.saveSettingsAsTheyChange()
+        cam.settingsSync.saveDelay = .milliseconds(20)
+        cam.settingsSync.saveAsTheyChange()
 
         cam.setAspect(.sixteenNine)
         cam.setFileType(.rawAndHEIC)
@@ -109,8 +109,8 @@ struct CameraControllerSettingsTests {
     @Test func nothingIsSavedUntilSomethingChanges() async throws {
         let defaults = try emptyDefaults()
         let cam = CameraController(defaults: defaults)
-        cam.saveDelay = .milliseconds(20)
-        cam.saveSettingsAsTheyChange()
+        cam.settingsSync.saveDelay = .milliseconds(20)
+        cam.settingsSync.saveAsTheyChange()
 
         try? await Task.sleep(for: .milliseconds(150))
 

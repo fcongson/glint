@@ -79,10 +79,6 @@ final class CameraController {
     private let locationProvider = LocationProvider()
     private let photoProcessor = PhotoProcessor()
     @ObservationIgnored private var hasStarted = false
-    @ObservationIgnored private var saveTask: Task<Void, Never>?
-    /// How long after a change its save waits, so a slider drag is one save. Short in tests.
-    @ObservationIgnored var saveDelay = Duration.milliseconds(400)
-    @ObservationIgnored private var hasUnsavedSettings = false
     // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
     @ObservationIgnored private var modeGeneration = 0
     @ObservationIgnored private var statusGeneration = 0
@@ -90,6 +86,10 @@ final class CameraController {
 
     /// Where settings are saved and loaded: the group's defaults, shared with the other copy of Glint.
     @ObservationIgnored private let defaults: UserDefaults
+    /// Saves these settings as they change and takes up the other copy's.
+    @ObservationIgnored private(set) lazy var settingsSync = SettingsSync(defaults: defaults) { [unowned self] in
+        savedSettings
+    }
 
     init(defaults: UserDefaults = SharedDefaults.store) {
         self.defaults = defaults
@@ -97,14 +97,7 @@ final class CameraController {
         viewfinderRenderer = renderer
         capture = CaptureSession(viewfinder: renderer)
         aids = ViewfinderAidsModel(isGPUAvailable: renderer != nil)
-        if let saved = SavedSettings.load(from: defaults) {
-            restore(saved)
-            Log.settings.notice(
-                "[\(Log.copy, privacy: .public)] loaded at start: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)"
-            )
-        } else {
-            Log.settings.notice("[\(Log.copy, privacy: .public)] nothing saved yet, starting from the defaults")
-        }
+        if let saved = settingsSync.loadAtStart() { restore(saved) }
         aids.analysisChanged = { [weak self] in self?.sendAnalysis() }
     }
 
@@ -124,58 +117,9 @@ final class CameraController {
             isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
     }
 
-    /// Writes any change that hasn't been saved yet, when the screen is left: the last chance before the app is
-    /// quit from the app switcher. Only a change made here is written. Saving every time the screen is left would
-    /// let a copy that's been waiting in memory overwrite what the other copy saved in the meantime.
-    func flushSettings() {
-        guard hasUnsavedSettings else {
-            Log.settings.notice(
-                "[\(Log.copy, privacy: .public)] leaving the screen: nothing changed here, nothing written")
-            return
-        }
-        Log.settings.notice("[\(Log.copy, privacy: .public)] leaving the screen with a change not yet saved")
-        saveSettings()
-    }
-
-    private func saveSettings() {
-        saveTask?.cancel()
-        hasUnsavedSettings = false
-        let current = savedSettings
-        if current != SavedSettings.load(from: defaults) {
-            current.save(to: defaults)
-            Log.settings.notice(
-                "[\(Log.copy, privacy: .public)] saved: file \(String(describing: current.fileType), privacy: .public), aspect \(String(describing: current.aspect), privacy: .public)"
-            )
-        } else {
-            // taking up the other copy's save isn't a change to write back
-            Log.settings.notice("[\(Log.copy, privacy: .public)] save skipped: what's saved is already this")
-        }
-    }
-
-    /// Saves shortly after each change, not only on leaving the screen: the Lock Screen camera can be closed by
-    /// unlocking without ever reporting that it left, which lost its changes before the app could see them.
-    func saveSettingsAsTheyChange() {
-        withObservationTracking {
-            _ = savedSettings
-        } onChange: { [weak self] in
-            Task { @MainActor in self?.settingsChanged() }
-        }
-    }
-
-    private func settingsChanged() {
-        hasUnsavedSettings = true
-        saveTask?.cancel()
-        saveTask = Task {
-            try? await Task.sleep(for: saveDelay)
-            guard !Task.isCancelled else { return }
-            saveSettings()
-        }
-        saveSettingsAsTheyChange()
-    }
-
     /// The other copy of Glint (the app, or the Lock Screen camera) may have changed settings while this one was
-    /// waiting in memory. Called when the screen becomes active: takes up what was saved since, and does nothing
-    /// when nothing differs, which includes this copy's own save. Left alone mid-recording and in review.
+    /// waiting in memory. Called when the screen becomes active: takes up what was saved since. Left alone
+    /// mid-recording and in review.
     func reloadSavedSettings() {
         guard isCameraReady, !isRecording, !isReviewing else {
             Log.settings.notice(
@@ -183,20 +127,8 @@ final class CameraController {
             )
             return
         }
-        guard let saved = SavedSettings.load(from: defaults), saved != savedSettings else {
-            Log.settings.notice("[\(Log.copy, privacy: .public)] active: saved settings match, nothing to take up")
-            return
-        }
-        Log.settings.notice(
-            "[\(Log.copy, privacy: .public)] active: taking up the other copy's settings: file \(String(describing: saved.fileType), privacy: .public), aspect \(String(describing: saved.aspect), privacy: .public)"
-        )
-        let before = savedSettings
-        let exposureChanged =
-            saved.manual != before.manual || saved.iso != before.iso
-            || saved.shutterDenominator != before.shutterDenominator
-            || saved.whiteBalanceKelvin != before.whiteBalanceKelvin
-            || saved.hasManualWhiteBalance != before.hasManualWhiteBalance || saved.auto != before.auto
-            || saved.exposureBias != before.exposureBias
+        guard let saved = settingsSync.otherCopysChanges() else { return }
+        let exposureChanged = saved.changesExposure(from: savedSettings)
 
         // The capture mode and video format go through their setters, which tell the camera; the rest is values
         // the camera is sent below, as at launch (`applySavedSettingsToCamera`).
@@ -262,7 +194,7 @@ final class CameraController {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        saveSettingsAsTheyChange()
+        settingsSync.saveAsTheyChange()
         startTimer("launch")
         startTimer("outputs")
         #if !LOCKED_CAPTURE  // location permission belongs to the app; Lock Screen shots are saved untagged
