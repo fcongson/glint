@@ -21,7 +21,7 @@ One type, one job. Lint caps sizes, but a file can stay under them and still tak
 
 - `CameraController` is the camera screen's capture state: mode, exposure, focus, lens, stills, recording. It owns the feature models and sends their changes to `CaptureSession`. A new feature gets its own `@MainActor @Observable` model, owned by the controller and exposed for views (`aids`, `shotLibrary`, `levelModel`), not more properties on the controller.
 - Rules and wording are value types with no framework state (`SceneDescription`, `ViewfinderAidPauses`, `CapturePlan`); a class around them keeps only state and timing (`SceneNarrator`, `ViewfinderAidsModel`). Inject clocks and side effects so the class can be tested.
-- Folders by job: `Capture/` device and session work; `Exposure/`; `Photo/` developing, saving, review; `Video/`; `Viewfinder/` per-frame aids and rendering; `Accessibility/` VoiceOver; `Settings/` what is saved between launches and keeping the two copies of Glint in step; `Views/` display only, calling a model's setters.
+- Folders by job: `Capture/` device and session work; `Exposure/`; `Photo/` developing, saving, review; `Video/`; `Viewfinder/` per-frame aids and rendering; `Accessibility/` VoiceOver; `Settings/` what is saved between launches and keeping the two copies of Glint in step; `Support/` logging and small utilities with no feature of their own; `Views/` display only, calling a model's setters.
 - `CaptureSession` is one actor; split it with `CaptureSession+Topic.swift` extensions, not new types.
 - A `// MARK:` section whose name no longer covers its contents means a type should come out.
 - A new model or rule type gets its own test file in `GlintTests/`.
