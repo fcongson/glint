@@ -36,7 +36,7 @@ struct ContentView: View {
                 "[\(Log.copy, privacy: .public)] scene phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public)"
             )
             // Remembered between launches, like a camera's settings. Leaving the screen comes before any quit.
-            if phase != .active { cam.flushSettings() } else { cam.reloadSavedSettings() }
+            if phase != .active { cam.settingsSync.flush() } else { cam.reloadSavedSettings() }
             #if LOCKED_CAPTURE  // the app's camera is stopped by the system in the background; the extension's isn't
                 cam.setInForeground(phase == .active)
             #endif

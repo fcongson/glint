@@ -35,4 +35,17 @@ struct SavedSettingsTests {
             loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil
                 && loaded.isLevelEnabled == nil)
     }
+
+    @Test func onlyExposureSettingsChangeTheExposure() {
+        let before = SavedSettings(manual: true, iso: 400, isGridEnabled: false)
+        var after = before
+        after.isGridEnabled = true
+        after.fileType = .heic
+        #expect(!after.changesExposure(from: before))
+        after.iso = 800
+        #expect(after.changesExposure(from: before))
+        after = before
+        after.auto = AutoSettings(iso: true)
+        #expect(after.changesExposure(from: before))
+    }
 }

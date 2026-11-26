@@ -34,6 +34,15 @@ struct SavedSettings: Codable, Equatable {
 
     static let key = "settings"
 
+    /// Whether going from `other` to these settings changes how the camera exposes: the mode, the values, or which
+    /// of them the camera chooses.
+    func changesExposure(from other: SavedSettings) -> Bool {
+        manual != other.manual || iso != other.iso || shutterDenominator != other.shutterDenominator
+            || whiteBalanceKelvin != other.whiteBalanceKelvin
+            || hasManualWhiteBalance != other.hasManualWhiteBalance || auto != other.auto
+            || exposureBias != other.exposureBias
+    }
+
     static func load(from defaults: UserDefaults = SharedDefaults.store) -> SavedSettings? {
         guard let data = defaults.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(SavedSettings.self, from: data)
