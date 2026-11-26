@@ -48,8 +48,12 @@ struct SharedDefaultsTests {
     }
 
     /// An app group that's missing from a target's entitlements doesn't fail: `UserDefaults(suiteName:)` still hands
-    /// back a store, just one only that process sees, which is the bug the group fixes. So check the files.
-    @Test(arguments: ["Glint.entitlements", "GlintCapture.entitlements"])
+    /// back a store, just one only that process sees, which is the bug the group fixes. So check what each target is
+    /// signed with: on a phone, the built app and extension; on the simulator, whose builds aren't signed with
+    /// entitlements, the files they're signed from.
+    @Test(
+        .enabled(if: !onPhone, "A phone can't read the Mac's source files; the signed build is checked there instead"),
+        arguments: ["Glint.entitlements", "GlintCapture.entitlements"])
     func theAppAndTheCaptureExtensionAreBothInTheGroup(file: String) throws {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -59,4 +63,22 @@ struct SharedDefaultsTests {
         let groups = plist["com.apple.security.application-groups"] as? [String]
         #expect(groups == [SharedDefaults.groupID])
     }
+
+    @Test(
+        .enabled(if: onPhone, "Simulator builds aren't signed with entitlements; the source files are checked there"),
+        arguments: ["Glint.app", "Extensions/GlintCapture.appex"])
+    func theSignedAppAndCaptureExtensionAreBothInTheGroup(bundle path: String) throws {
+        let app = Bundle.main.bundleURL
+        #expect(app.lastPathComponent == "Glint.app", "the tests aren't hosted in Glint")
+        let url = path == "Glint.app" ? app : app.appendingPathComponent(path)
+        let executable = try #require(Bundle(url: url)?.executableURL, "no \(path) in the built app")
+        let entitlements = try #require(try SignedEntitlements.of(executable), "\(path) isn't signed with entitlements")
+        #expect(entitlements["com.apple.security.application-groups"] as? [String] == [SharedDefaults.groupID])
+    }
 }
+
+#if targetEnvironment(simulator)
+    private let onPhone = false
+#else
+    private let onPhone = true
+#endif
