@@ -411,45 +411,13 @@ actor CaptureSession {
         focusHeld = false  // the modes set here replace a long press's hold
         exposureHeld = false
         exposureQueue.reset()  // superseded by what's set here
+        let exposure = ManualExposure(iso: iso, shutterDenominator: shutterDenominator, auto: auto, bias: bias)
+        let whiteBalance = ManualWhiteBalance(kelvin: kelvin, tint: wbTint, keep: keepWhiteBalance)
         withLockedDevice(d, failure: "Config") { d in
-            guard manual else {
-                if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
-                if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
-                    d.whiteBalanceMode = .continuousAutoWhiteBalance
-                }
-                applyBias(0, d)
-                applyFocus(d, lockedAt: manualFocus)
-                return
-            }
-            applyBias(auto.usesCompensation ? bias : 0, d)
-            if auto.isProgram {
-                if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
-            } else if d.isExposureModeSupported(.custom) {  // setExposureModeCustom raises if unsupported
-                // The setting on auto starts from where the camera has it now; the meter corrects it from there.
-                let duration =
-                    auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
-                let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
-                d.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
-            }
-            if auto.whiteBalance {
-                if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
-                    d.whiteBalanceMode = .continuousAutoWhiteBalance
-                }
-            } else if d.isWhiteBalanceModeSupported(.locked) {
-                if keepWhiteBalance {
-                    let tt = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: wbTint)
-                    d.setWhiteBalanceModeLocked(
-                        with: clampedGains(d.deviceWhiteBalanceGains(for: tt), d), completionHandler: nil)
-                } else {
-                    // Lock auto's exact gains. The ruler shows the nearest stop, which is display only until the
-                    // user changes it.
-                    let gains = d.deviceWhiteBalanceGains
-                    let tt = d.temperatureAndTintValues(for: gains)
-                    wbTint = tt.tint
-                    d.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
-                    let kelvin = ExposureScale.nearest(tt.temperature, in: ExposureScale.whiteBalanceKelvins)
-                    emit.yield(.exposure(.whiteBalanceSeeded(kelvin: kelvin)))
-                }
+            if let seeded = DeviceControl.applyModes(d, manual: manual, exposure: exposure, whiteBalance: whiteBalance)
+            {
+                wbTint = seeded.tint
+                emit.yield(.exposure(.whiteBalanceSeeded(kelvin: seeded.kelvin)))
             }
             applyFocus(d, lockedAt: manualFocus)
         }
@@ -460,11 +428,10 @@ actor CaptureSession {
         guard let d = device, d.isExposureModeSupported(.custom), !autoSettings.isProgram, !exposureFrozen else {
             return
         }
-        let auto = autoSettings
         let shutterDenominator =
             isVideo ? max(shutterDenominator, videoFormat.slowestShutterDenominator) : shutterDenominator
-        let duration = auto.shutter ? AVCaptureDevice.currentExposureDuration : clampedDuration(shutterDenominator, d)
-        let isoValue = auto.iso ? AVCaptureDevice.currentISO : clampedISO(iso, d)
+        let exposure = ManualExposure(iso: iso, shutterDenominator: shutterDenominator, auto: autoSettings, bias: 0)
+        let (duration, isoValue) = DeviceControl.customExposure(d, exposure)
         requestExposure(duration: duration, iso: isoValue)
     }
 
@@ -500,13 +467,7 @@ actor CaptureSession {
     /// Exposure compensation, in stops.
     func applyExposureBias(_ bias: Float) {
         guard let d = device, isManual, autoSettings.usesCompensation, !exposureFrozen else { return }
-        withLockedDevice(d, failure: "Config") { d in applyBias(bias, d) }
-    }
-
-    /// The device must already be locked. Clamped to what the lens allows.
-    private func applyBias(_ bias: Float, _ d: AVCaptureDevice) {
-        let clamped = min(max(bias, d.minExposureTargetBias), d.maxExposureTargetBias)
-        if d.exposureTargetBias != clamped { d.setExposureTargetBias(clamped, completionHandler: nil) }
+        withLockedDevice(d, failure: "Config") { d in DeviceControl.applyBias(d, bias) }
     }
 
     /// Called with each meter reading. In shutter or ISO priority, nudges the setting on auto toward the
@@ -543,8 +504,7 @@ actor CaptureSession {
 
     func applyWhiteBalance(kelvin: Float) {
         guard let d = device, d.isWhiteBalanceModeSupported(.locked) else { return }
-        let tt = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: wbTint)
-        let gains = clampedGains(d.deviceWhiteBalanceGains(for: tt), d)
+        let gains = DeviceControl.gains(d, kelvin: kelvin, tint: wbTint)
         withLockedDevice(d, failure: "Config") { d in
             d.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
         }
@@ -563,30 +523,9 @@ actor CaptureSession {
         changes(d)
     }
 
-    private func clampedGains(_ g: AVCaptureDevice.WhiteBalanceGains, _ d: AVCaptureDevice)
-        -> AVCaptureDevice.WhiteBalanceGains
-    {
-        var g = g
-        let m = d.maxWhiteBalanceGain
-        g.redGain = min(max(g.redGain, 1), m)
-        g.greenGain = min(max(g.greenGain, 1), m)
-        g.blueGain = min(max(g.blueGain, 1), m)
-        return g
-    }
-
     /// In video the shutter on A follows the 180° rule and manual shutters stay within one frame.
     private func effective(auto: AutoSettings, shutterDenominator: Double) -> (AutoSettings, Double) {
         isVideo ? videoFormat.exposure(auto: auto, shutterDenominator: shutterDenominator) : (auto, shutterDenominator)
-    }
-
-    private func clampedDuration(_ denom: Double, _ d: AVCaptureDevice) -> CMTime {
-        let want = CMTime(seconds: 1.0 / denom, preferredTimescale: 1_000_000)
-        return CMTimeMaximum(
-            d.activeFormat.minExposureDuration, CMTimeMinimum(d.activeFormat.maxExposureDuration, want))
-    }
-
-    private func clampedISO(_ v: Float, _ d: AVCaptureDevice) -> Float {
-        min(max(v, d.activeFormat.minISO), d.activeFormat.maxISO)
     }
 
     // MARK: Running and analysis
@@ -660,9 +599,6 @@ actor CaptureSession {
 
     // MARK: Focus
 
-    /// Whether the user has exposure locked; read from the device itself so there's no second copy of the flag.
-    private func isManualExposure(_ d: AVCaptureDevice) -> Bool { d.exposureMode == .custom }
-
     /// Manual focus: locks the lens at `position` (0 nearest … 1 farthest). With no position it locks wherever
     /// autofocus has the lens right now and reports that as `.manualFocusSeeded`, so taking over doesn't jump.
     func setManualFocus(_ position: Float?) {
@@ -688,14 +624,7 @@ actor CaptureSession {
     /// Locks the lens at `position`, or with nil returns to continuous autofocus. The device must already be locked.
     private func applyFocus(_ d: AVCaptureDevice, lockedAt position: Float?) {
         focusHeld = false  // focus is being set some other way
-        if let position, d.isLockingFocusWithCustomLensPositionSupported {
-            manualFocusPosition = position
-            d.isSubjectAreaChangeMonitoringEnabled = false
-            d.setFocusModeLocked(lensPosition: FocusScale.clamp(position), completionHandler: nil)
-        } else {
-            manualFocusPosition = nil
-            if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
-        }
+        manualFocusPosition = DeviceControl.lockFocus(d, at: position)
     }
 
     /// Tap to focus: one autofocus pass at the tapped point (exposure follows in auto mode). Tapping also ends
@@ -707,15 +636,7 @@ actor CaptureSession {
         holdGeneration += 1
         withLockedDevice(d, failure: "Focus") { d in
             manualFocusPosition = nil
-            if d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.autoFocus) {
-                d.focusPointOfInterest = point
-                d.focusMode = .autoFocus
-            }
-            if !isManualExposure(d), d.isExposurePointOfInterestSupported, d.isExposureModeSupported(.autoExpose) {
-                d.exposurePointOfInterest = point
-                d.exposureMode = .autoExpose
-            }
-            d.isSubjectAreaChangeMonitoringEnabled = true
+            DeviceControl.focusOnce(d, at: point)
         }
     }
 
@@ -729,21 +650,9 @@ actor CaptureSession {
         exposureHeld = exposure  // in shutter or ISO priority this is what stops `followAuto` correcting
         holdGeneration += 1
         var lockExposureLater = false
+        let focus = focusHeld
         withLockedDevice(d, failure: "Focus") { d in
-            if focusHeld, d.isFocusModeSupported(.autoFocus) {
-                if d.isFocusPointOfInterestSupported { d.focusPointOfInterest = point }
-                d.focusMode = .autoFocus  // one pass, and the lens stays where it lands
-            }
-            if exposure, !isManualExposure(d) {
-                if d.isExposurePointOfInterestSupported { d.exposurePointOfInterest = point }
-                if d.isExposureModeSupported(.autoExpose) {
-                    d.exposureMode = .autoExpose  // meters once, then locks itself
-                } else if d.isExposureModeSupported(.continuousAutoExposure), d.isExposureModeSupported(.locked) {
-                    d.exposureMode = .continuousAutoExposure
-                    lockExposureLater = true
-                }
-            }
-            d.isSubjectAreaChangeMonitoringEnabled = false  // a changing scene mustn't hand control back
+            lockExposureLater = DeviceControl.hold(d, at: point, focus: focus, exposure: exposure)
         }
         guard lockExposureLater else { return }
         // Without a meter-once mode: let auto exposure settle on the point for a moment, then lock it.
@@ -763,23 +672,9 @@ actor CaptureSession {
 
     private func resumeContinuousFocus() {
         guard let d = device, !focusHeld, !exposureHeld else { return }
-        withLockedDevice(d, failure: "Focus") { d in
-            let center = CGPoint(x: 0.5, y: 0.5)
-            // A notification still in flight must not undo manual focus set since the tap.
-            if manualFocusPosition == nil, d.isFocusPointOfInterestSupported,
-                d.isFocusModeSupported(.continuousAutoFocus)
-            {
-                d.focusPointOfInterest = center
-                d.focusMode = .continuousAutoFocus
-            }
-            if !isManualExposure(d), d.isExposurePointOfInterestSupported,
-                d.isExposureModeSupported(.continuousAutoExposure)
-            {
-                d.exposurePointOfInterest = center
-                d.exposureMode = .continuousAutoExposure
-            }
-            d.isSubjectAreaChangeMonitoringEnabled = false
-        }
+        // A notification still in flight must not undo manual focus set since the tap.
+        let manualFocus = manualFocusPosition != nil
+        withLockedDevice(d, failure: "Focus") { d in DeviceControl.resumeContinuous(d, manualFocus: manualFocus) }
     }
 
     // MARK: Stills
