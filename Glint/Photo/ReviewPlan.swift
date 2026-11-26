@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// One page of review: a photo from this session, or one found in the Photos library.
 struct ReviewEntry: Identifiable {
@@ -9,6 +10,8 @@ struct ReviewEntry: Identifiable {
     /// Library photos don't come with a place name; review looks it up once the page is showing.
     let needsPlace: Bool
     let load: @MainActor () async -> Shot?
+    /// The photo at its full resolution, for zooming in to its pixels. Nil where only the review image exists.
+    var loadFullResolution: (@MainActor () async -> UIImage?)?
 }
 
 /// The decisions behind review that don't depend on the Photos library, so they can be tested without one.
