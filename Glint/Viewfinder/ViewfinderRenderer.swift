@@ -16,33 +16,28 @@ import QuartzCore
 /// 1. Analyse at full resolution, up to a long side of 4096 (12 MP frames as they are; 48 MP ones shrunk by
 ///    averaging 2×2 blocks). Shrinking a frame shrinks its blur too, so a slightly soft edge would look crisp;
 ///    at full size the test matches what you'll see zoomed into the photo.
-/// 2. Blur lightly (3×3 binomial, its own pass to keep reads down at full resolution) and high-pass with a Laplacian, which responds to the finest detail and falls
-///    away fast as an edge blurs, where a gradient filter like Sobel keeps responding to big, soft edges.
-/// 3. Average that response over 3×3, so outlines run as lines rather than breaking into dots, and noise spikes
-///    are diluted.
-/// 4. Mark pixels above the frame's mean plus 4, 3 or 2 standard deviations (the sensitivity), and above
-///    `relativeFloor` times the mean (in a frame with little detail, the mean is mostly noise), with at least two
-///    marked neighbours. The statistics come back from the GPU after each frame and set the next frame's
-///    threshold, eased over frames (`PeakingThreshold`) so outlines don't flicker.
+/// 2. Blur lightly (3×3 binomial, its own pass to keep reads down at full resolution), so single-pixel noise isn't
+///    taken for detail.
+/// 3. Measure how crisp each edge is (`peakingSharpness`): its slope across ±1 pixel against its slope across ±3.
+///    That ratio is about how fast the edge turns, whatever its brightness and whatever else is in the frame, so it
+///    falls steadily as focus is lost, where a threshold taken from the frame's own statistics marks the
+///    strongest detail however soft it is. It's measured only at the strongest pixel across each edge (lines one
+///    pixel thin) and only where the edge crosses enough brightness for noise not to count.
+/// 4. Mark pixels whose edge is crisper than the sensitivity asks, with at least two marked neighbours. Sweep
+///    peaking also needs the high-pass response, which is worked out (and averaged over 3×3, with each 16 × 16
+///    tile's statistics coming back from the GPU) only in that mode.
 /// 5. Shrink the mask to about screen resolution, keeping every mark, and draw the frame upright and fitted like
 ///    the preview, with the outlines in the chosen colour and weight.
 ///
 /// `render` is called on the analysis queue, one frame at a time. The target layer is set from the main thread
 /// and the threshold from Metal's completion handlers, so both sit behind `lock`.
 final class ViewfinderRenderer: @unchecked Sendable {
-    /// Lowest smoothed response (in luma steps) ever marked, so a featureless frame isn't outlined at all.
+    /// Lowest smoothed high-pass response (in luma steps) sweep peaking ever marks, so a featureless tile isn't
+    /// outlined at all.
     static let minimumStrength: Float = 4
-    /// Nothing is marked below this multiple of the frame's mean response, which keeps noise out of frames that
-    /// have little else in them.
-    static let relativeFloor = 2.5
     /// Frames are shrunk until their long side is at most this.
     static let targetSize = 4096
     private static let framesInFlight = 3
-
-    /// The threshold a frame's statistics call for, before easing.
-    static func level(mean: Double, deviation: Double, sensitivity: PeakingSensitivity) -> Double {
-        max(relativeFloor * mean, mean + sensitivity.deviations * deviation)
-    }
 
     /// The whole factor a frame is shrunk by.
     static func scale(width: Int, height: Int) -> Int {
@@ -55,6 +50,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
     private let downscalePipeline: any MTLComputePipelineState
     private let blurPipeline: any MTLComputePipelineState
     private let responsePipeline: any MTLComputePipelineState
+    private let sharpnessPipeline: any MTLComputePipelineState
     private let poolPipeline: any MTLComputePipelineState
     private let edgesPipeline: any MTLComputePipelineState
     private let maskPipeline: any MTLComputePipelineState
@@ -63,8 +59,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
 
     private let lock = NSLock()
     private var target: (layer: CAMetalLayer, size: CGSize)?  // behind `lock`
-    private var threshold = PeakingThreshold()  // behind `lock`
-    private var thresholdGeneration = 0  // behind `lock`; bumped when it starts over
+    private var generation = 0  // behind `lock`; bumped when sensitivity or mode changes
     private var sweep = SweepTracker()  // behind `lock`
     private var latestVerdicts: (any MTLBuffer)?  // behind `lock`: the last tile verdicts worked out
     private var analysisPaused = false  // behind `lock`
@@ -87,7 +82,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         /// The shrunk frame. Nil at factor 1, where the camera's luma plane is read directly: at 12 MP that's a
         /// 24 MB texture that would never be written.
         let small: (any MTLTexture)?
-        let blurred: any MTLTexture, response: any MTLTexture, edges: any MTLTexture
+        let blurred: any MTLTexture, response: any MTLTexture, edges: any MTLTexture, sharp: any MTLTexture
         let mask: any MTLTexture
         let groups: MTLSize
         let partials: [any MTLBuffer]
@@ -138,6 +133,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         downscalePipeline = try device.makeComputePipelineState(function: try function("peakingDownscale"))
         blurPipeline = try device.makeComputePipelineState(function: try function("peakingBlur"))
         responsePipeline = try device.makeComputePipelineState(function: try function("peakingResponse"))
+        sharpnessPipeline = try device.makeComputePipelineState(function: try function("peakingSharpness"))
         poolPipeline = try device.makeComputePipelineState(function: try function("peakingPool"))
         edgesPipeline = try device.makeComputePipelineState(function: try function("peakingEdges"))
         maskPipeline = try device.makeComputePipelineState(function: try function("peakingMask"))
@@ -179,7 +175,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         lock.withLock { analysisInterval = max(1, interval) }
     }
 
-    /// Frees the scratch textures (about 85 MB at 12 MP) once the GPU viewfinder stops drawing or the camera stops;
+    /// Frees the scratch textures (about 110 MB at 12 MP) once the GPU viewfinder stops drawing or the camera stops;
     /// the next frame makes them again. Frames still on the GPU keep their own references until they finish.
     /// Call on the analysis queue, like `render`.
     func releaseWorkspace() {
@@ -201,7 +197,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         frameIndex &+= 1
         // Otherwise reuse the last outlines.
         let analyse = outlines && (interval == 1 || frameIndex.isMultiple(of: interval))
-        let level = outlines ? prepare(sensitivity, mode: mode) : nil
+        if outlines { prepare(sensitivity, mode: mode) }
         inFlight.wait()
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
             let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
@@ -224,8 +220,9 @@ final class ViewfinderRenderer: @unchecked Sendable {
             // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
             let verdicts = mode == .sweep ? lock.withLock({ latestVerdicts }) : nil
             encodeAnalysis(
-                commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
-                verdicts: verdicts ?? ownVerdicts, sweep: verdicts != nil)
+                commandBuffer, luma: lumaTexture, work: work, partials: partials, cutoff: sensitivity.sharpness,
+                verdicts: verdicts ?? ownVerdicts,
+                sweep: mode == .sweep ? (verdicts == nil ? .collecting : .applying) : .off)
             // Magnified, mask texels are already a screen pixel or more across: draw from the full mask.
             if settings.magnifier == nil {
                 outlineMask = encodePool(
@@ -279,57 +276,55 @@ final class ViewfinderRenderer: @unchecked Sendable {
             textures: [luma, chroma], partials: partials,
             groupCount: work.groups.width * work.groups.height,
             pixelCount: work.width * work.height)
-        let generation = lock.withLock { thresholdGeneration }
+        let startGeneration = lock.withLock { generation }
         let sweeping = mode == .sweep
         let verdictsOut = UncheckedBuffer(ownVerdicts)
         commandBuffer.addCompletedHandler { [self] _ in
-            guard analyse else {
+            guard analyse, sweeping else {
                 inFlight.signal()
                 return
             }
-            let stats = Self.statistics(frame)
-            let tiles = sweeping ? Self.tiles(frame) : nil
+            let tiles = Self.tiles(frame)
             lock.withLock {
                 // A frame from before a sensitivity or mode change mustn't pull the new state back.
-                guard thresholdGeneration == generation else { return }
-                _ = threshold.update(Self.level(mean: stats.mean, deviation: stats.deviation, sensitivity: sensitivity))
-                if let tiles {
-                    // Written to this frame's own buffer, which no frame still in flight reads: they read the
-                    // latest verdicts from before this frame finished, and frames finish in order.
-                    let cutoffs = sweep.update(
-                        sharpness: tiles.sharpness, luma: tiles.luma,
-                        minimumStrength: Self.minimumStrength)
-                    let out = verdictsOut.buffer.contents().bindMemory(to: Float.self, capacity: cutoffs.count)
-                    for (i, cutoff) in cutoffs.enumerated() { out[i] = cutoff }
-                    latestVerdicts = verdictsOut.buffer
-                }
+                guard generation == startGeneration else { return }
+                // Written to this frame's own buffer, which no frame still in flight reads: they read the
+                // latest verdicts from before this frame finished, and frames finish in order.
+                let cutoffs = sweep.update(
+                    sharpness: tiles.sharpness, luma: tiles.luma, minimumStrength: Self.minimumStrength)
+                let out = verdictsOut.buffer.contents().bindMemory(to: Float.self, capacity: cutoffs.count)
+                for (i, cutoff) in cutoffs.enumerated() { out[i] = cutoff }
+                latestVerdicts = verdictsOut.buffer
             }
             inFlight.signal()
         }
         commandBuffer.commit()
     }
 
-    /// The threshold for this frame: the one the previous frames' statistics settled on. A change of sensitivity
-    /// starts over, so it jumps straight to the new level.
-    private func prepare(_ sensitivity: PeakingSensitivity, mode: PeakingMode) -> Double? {
-        if sensitivity != self.sensitivity || mode != self.mode {
-            self.sensitivity = sensitivity
-            self.mode = mode
-            lock.withLock {
-                threshold.reset()
-                thresholdGeneration += 1
-                sweep.reset()
-                latestVerdicts = nil
-            }
+    /// A change of sensitivity or mode starts sweep peaking's memory over.
+    private func prepare(_ sensitivity: PeakingSensitivity, mode: PeakingMode) {
+        guard sensitivity != self.sensitivity || mode != self.mode else { return }
+        self.sensitivity = sensitivity
+        self.mode = mode
+        lock.withLock {
+            generation += 1
+            sweep.reset()
+            latestVerdicts = nil
         }
-        return lock.withLock { threshold.level }
     }
 
-    /// Steps 1–4: shrink, high-pass, smooth (with statistics into `partials`), and mark against `level`. With no level
-    /// yet (the first frame), nothing is marked.
+    /// What sweep peaking needs from a frame's analysis.
+    private enum SweepUse {
+        case off  // standard peaking only
+        case collecting  // the high-pass response and tile statistics, for the tracker, before it has verdicts
+        case applying  // that and the tracker's verdicts too
+    }
+
+    /// Steps 1–4: shrink, blur, measure how crisp the edges are, and mark those crisper than `cutoff`; with sweep
+    /// peaking, also the high-pass response and tile statistics (into `partials`).
     private func encodeAnalysis(
         _ commandBuffer: any MTLCommandBuffer, luma: any MTLTexture, work: Work,
-        partials: any MTLBuffer, level: Double?, verdicts: any MTLBuffer, sweep: Bool
+        partials: any MTLBuffer, cutoff: Float, verdicts: any MTLBuffer, sweep: SweepUse
     ) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         let size = MTLSize(width: work.width, height: work.height, depth: 1)
@@ -358,25 +353,32 @@ final class ViewfinderRenderer: @unchecked Sendable {
         encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 0)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
-        encoder.setComputePipelineState(responsePipeline)
+        if sweep != .off {
+            encoder.setComputePipelineState(responsePipeline)
+            encoder.setTexture(work.blurred, index: 0)
+            encoder.setTexture(work.response, index: 1)
+            encoder.dispatchThreads(size, threadsPerThreadgroup: group)
+
+            encoder.setComputePipelineState(edgesPipeline)
+            encoder.setTexture(work.response, index: 0)
+            encoder.setTexture(work.edges, index: 1)
+            encoder.setTexture(source, index: 2)
+            encoder.setBuffer(partials, offset: 0, index: 0)
+            encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 1)
+            encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)  // whole groups, for the sums
+        }
+
+        encoder.setComputePipelineState(sharpnessPipeline)
         encoder.setTexture(work.blurred, index: 0)
-        encoder.setTexture(work.response, index: 1)
+        encoder.setTexture(work.sharp, index: 1)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
-        encoder.setComputePipelineState(edgesPipeline)
-        encoder.setTexture(work.response, index: 0)
-        encoder.setTexture(work.edges, index: 1)
-        encoder.setTexture(source, index: 2)
-        encoder.setBuffer(partials, offset: 0, index: 0)
-        encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 1)
-        encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)  // whole groups, for the sums
-
         var params = MaskParams(
-            cutoff: level.map { max(Self.minimumStrength, Float($0)) } ?? .infinity,
-            tilesAcross: UInt32(work.groups.width), sweep: sweep ? 1 : 0)
+            cutoff: cutoff, tilesAcross: UInt32(work.groups.width), sweep: sweep == .applying ? 1 : 0)
         encoder.setComputePipelineState(maskPipeline)
         encoder.setTexture(work.edges, index: 0)
         encoder.setTexture(work.mask, index: 1)
+        encoder.setTexture(work.sharp, index: 2)
         encoder.setBytes(&params, length: MemoryLayout<MaskParams>.stride, index: 0)
         encoder.setBuffer(verdicts, offset: 0, index: 1)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
@@ -420,13 +422,13 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let small = factor > 1 ? make(.r16Float) : nil
         guard factor == 1 || small != nil,
             let blurred = make(.r16Float), let response = make(.r16Float),
-            let edges = make(.r16Float),
+            let edges = make(.r16Float), let sharp = make(.r16Float),
             let mask = make(.r8Unorm),
             partials.count == Self.framesInFlight, verdicts.count == Self.framesInFlight
         else { return nil }
         let new = Work(
             frameWidth: width, frameHeight: height, factor: factor, width: w, height: h, small: small, blurred: blurred,
-            response: response, edges: edges, mask: mask, groups: groups, partials: partials,
+            response: response, edges: edges, sharp: sharp, mask: mask, groups: groups, partials: partials,
             verdicts: verdicts)
         work = new
         slot = 0
@@ -481,18 +483,6 @@ final class ViewfinderRenderer: @unchecked Sendable {
             luma[i] = values[i].z / 256
         }
         return (sharpness, luma)
-    }
-
-    private static func statistics(_ frame: InFlight) -> (mean: Double, deviation: Double) {
-        let values = frame.partials.contents().bindMemory(to: SIMD4<Float>.self, capacity: frame.groupCount)
-        var sum = 0.0, sumOfSquares = 0.0
-        for i in 0..<frame.groupCount {
-            sum += Double(values[i].x)
-            sumOfSquares += Double(values[i].y)
-        }
-        let n = Double(max(frame.pixelCount, 1))
-        let mean = sum / n
-        return (mean, max(0, sumOfSquares / n - mean * mean).squareRoot())
     }
 
     // MARK: Drawing details
@@ -552,22 +542,19 @@ final class ViewfinderRenderer: @unchecked Sendable {
     struct Analysis {
         let width: Int
         let height: Int
-        let mean: Double
-        let deviation: Double
         let mask: [UInt8]  // 255 where outlined, row by row
     }
 
-    /// Runs steps 1–4 on a frame and waits for the result: with no `level`, only the statistics are meaningful.
-    func analyse(_ pixelBuffer: CVPixelBuffer, level: Double?) -> Analysis? {
+    /// Runs steps 1–4 on a frame, as standard peaking at `sensitivity`, and waits for the result.
+    func analyse(_ pixelBuffer: CVPixelBuffer, sensitivity: PeakingSensitivity) -> Analysis? {
         guard let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
             let lumaTexture = CVMetalTextureGetTexture(luma),
             let work = workspace(width: lumaTexture.width, height: lumaTexture.height),
             let commandBuffer = commandQueue.makeCommandBuffer()
         else { return nil }
-        let partials = work.partials[0]
         encodeAnalysis(
-            commandBuffer, luma: lumaTexture, work: work, partials: partials, level: level,
-            verdicts: work.verdicts[0], sweep: false)
+            commandBuffer, luma: lumaTexture, work: work, partials: work.partials[0], cutoff: sensitivity.sharpness,
+            verdicts: work.verdicts[0], sweep: .off)
 
         // Copy the private mask texture somewhere readable.
         let w = work.mask.width, h = work.mask.height
@@ -582,13 +569,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
 
-        let stats = Self.statistics(
-            InFlight(
-                textures: [luma], partials: partials,
-                groupCount: work.groups.width * work.groups.height, pixelCount: w * h))
         let bytes = readback.contents().bindMemory(to: UInt8.self, capacity: w * h)
-        return Analysis(
-            width: w, height: h, mean: stats.mean, deviation: stats.deviation,
-            mask: Array(UnsafeBufferPointer(start: bytes, count: w * h)))
+        return Analysis(width: w, height: h, mask: Array(UnsafeBufferPointer(start: bytes, count: w * h)))
     }
 }

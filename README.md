@@ -26,7 +26,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 **Viewfinder aids**
 - **Histogram:** HIST, Luma or RGB, with a clipping warning.
 - **Zebras:** ZEB marks areas at or above a level (100% by default), relative to where the frames' white actually is. The level is remembered per lens and format.
-- **Focus peaking:** PK outlines the sharpest detail while focusing by hand. Mode (Standard, Sweep), sensitivity, colour and line weight are in SET.
+- **Focus peaking:** PK outlines edges that are crisp while focusing by hand. Standard judges each edge by itself, how fast it turns compared with its own surroundings, so outlines fade as an edge goes soft whatever its contrast and whatever else is in the frame, and are one pixel thin. Sensitivity sets how crisp an edge has to be. Mode (Standard, Sweep), sensitivity, colour and line weight are in SET.
 - **Focus magnifier:** MAG punches in on the focus point while you touch the focus rail, and zooms back out a second after you let go.
 - **Grid and level:** GRID draws rule-of-thirds lines over the frame that will be kept; LEVEL shows a horizon line that turns amber within a degree of level.
 - **Exposure meter:** Leica-style LEDs in the top bar, with the offset in stops.
