@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// Decides which scroll positions a ruler may write back to its setting. A new ruler starts at offset 0 and reports
+/// stop 0 before it has scrolled to the setting's stop; writing that back would reset the setting to the start of
+/// its range, so nothing is accepted until the ruler has been placed.
+struct RulerSync {
+    private(set) var isPlaced = false
+
+    mutating func place() { isPlaced = true }
+
+    /// The stop to write to the setting for a scroll position, or nil when it's not a change the user made.
+    func accepted(position: Int?, current: Int) -> Int? {
+        guard isPlaced, let position, position != current else { return nil }
+        return position
+    }
+}
+
 /// Camera-style ruler: ticks scroll under a fixed centre marker and snap to discrete stops,
 /// with a haptic click on every stop.
 struct RulerPicker: View {
@@ -10,6 +25,7 @@ struct RulerPicker: View {
     let valueText: String  // VoiceOver value, e.g. "800"
 
     @State private var position: Int?
+    @State private var sync = RulerSync()
     private let tickSpacing: CGFloat = 14
     private let height: CGFloat = 44
 
@@ -30,22 +46,30 @@ struct RulerPicker: View {
 
     var body: some View {
         GeometryReader { geo in
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 0) {
-                    ForEach(0..<count, id: \.self) { i in
-                        let major = isMajor(i)
-                        Rectangle()
-                            .fill(Color.white.opacity(major ? 0.9 : 0.4))
-                            .frame(width: 1.5, height: major ? 26 : 14)
-                            .frame(width: tickSpacing, height: height)
-                            .id(i)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(0..<count, id: \.self) { i in
+                            let major = isMajor(i)
+                            Rectangle()
+                                .fill(Color.white.opacity(major ? 0.9 : 0.4))
+                                .frame(width: 1.5, height: major ? 26 : 14)
+                                .frame(width: tickSpacing, height: height)
+                                .id(i)
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
+                .scrollTargetBehavior(.viewAligned(limitBehavior: .never))
+                .scrollPosition(id: $position, anchor: .center)
+                .contentMargins(.horizontal, max(geo.size.width / 2 - tickSpacing / 2, 0), for: .scrollContent)
+                .task {
+                    proxy.scrollTo(index, anchor: .center)
+                    await Task.yield()
+                    position = index
+                    sync.place()
+                }
             }
-            .scrollTargetBehavior(.viewAligned(limitBehavior: .never))
-            .scrollPosition(id: $position, anchor: .center)
-            .contentMargins(.horizontal, max(geo.size.width / 2 - tickSpacing / 2, 0), for: .scrollContent)
         }
         .frame(height: height)
         .mask(
@@ -64,7 +88,7 @@ struct RulerPicker: View {
                 .allowsHitTesting(false)
         }
         .onChange(of: position) { _, new in
-            if let new, new != index { index = new }
+            if let stop = sync.accepted(position: new, current: index) { index = stop }
         }
         .onChange(of: index) { _, new in
             if position != new { position = new }  // external change, e.g. clamped by the device
@@ -77,6 +101,7 @@ struct RulerPicker: View {
                 : .impact(flexibility: .rigid, intensity: 0.6)
         }
         .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("ruler")
         .accessibilityLabel(label)
         .accessibilityValue(valueText)
         .accessibilityAdjustableAction { direction in

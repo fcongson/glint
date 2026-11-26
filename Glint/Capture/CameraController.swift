@@ -251,8 +251,8 @@ final class CameraController {
         fileType = saved.fileType ?? fileType
         aspect = saved.aspect ?? aspect
         manual = saved.manual ?? manual
-        iso = saved.iso ?? iso
-        shutterDenominator = saved.shutterDenominator ?? shutterDenominator
+        iso = ExposureScale.nearestISO(saved.iso ?? iso)
+        shutterDenominator = ExposureScale.nearestShutter(saved.shutterDenominator ?? shutterDenominator)
         whiteBalanceKelvin = saved.whiteBalanceKelvin ?? whiteBalanceKelvin
         hasManualWhiteBalance = saved.hasManualWhiteBalance ?? hasManualWhiteBalance
         auto = saved.auto ?? auto
@@ -439,11 +439,11 @@ final class CameraController {
         }
     }
 
-    private func apply(_ device: DeviceInfo) {
+    func apply(_ device: DeviceInfo) {
         currentLensID = device.lensID
         minISO = device.minISO
         maxISO = device.maxISO
-        iso = min(max(iso, device.minISO), device.maxISO)
+        iso = ExposureScale.nearest(iso, in: ExposureScale.isoStops(min: minISO, max: maxISO))
         aperture = device.aperture
         hasFlash = device.hasFlash
         hasVideoLight = device.hasTorch
