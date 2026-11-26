@@ -190,101 +190,152 @@ final class ViewfinderRenderer: @unchecked Sendable {
     /// attached.
     func render(_ pixelBuffer: CVPixelBuffer, settings: ViewfinderSettings) {
         guard let target = lock.withLock({ self.target }), target.size.width > 0, target.size.height > 0 else { return }
-        let sensitivity = settings.sensitivity, appearance = settings.appearance
-        let mode = settings.mode
-        let outlines = settings.outlines && !lock.withLock({ analysisPaused })
-        let interval = lock.withLock { analysisInterval }
-        frameIndex &+= 1
-        // Otherwise reuse the last outlines.
-        let analyse = outlines && (interval == 1 || frameIndex.isMultiple(of: interval))
-        if outlines { prepare(sensitivity, mode: mode) }
+        let outlines = outlines(for: settings)
+        if outlines.shown { prepare(settings.sensitivity, mode: settings.mode) }
         inFlight.wait()
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-            let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
-            let chroma = texture(pixelBuffer, plane: 1, format: .rg8Unorm),
-            let lumaTexture = CVMetalTextureGetTexture(luma), let chromaTexture = CVMetalTextureGetTexture(chroma),
-            let work = workspace(width: lumaTexture.width, height: lumaTexture.height)
+        guard let commandBuffer = commandQueue.makeCommandBuffer(), let frame = frame(pixelBuffer, target: target)
         else {
             inFlight.signal()
             return
         }
-        let partials = work.partials[slot], ownVerdicts = work.verdicts[slot]
+        let mask = encodeOutlines(commandBuffer, frame: frame, settings: settings, outlines: outlines)
+        updateColorSpace(of: target.layer, for: pixelBuffer)
+        encodeDraw(commandBuffer, frame: frame, mask: mask, settings: settings, outlines: outlines.shown)
+        commit(commandBuffer, frame: frame, sweepAnalysed: outlines.analysed && settings.mode == .sweep)
+    }
+
+    /// Whether a frame shows outlines, and whether it analyses for them or reuses the last ones.
+    private struct Outlines {
+        let shown: Bool
+        let analysed: Bool
+    }
+
+    /// One camera frame's textures and where it's going, for the passes that draw it.
+    private struct CurrentFrame {
+        let layer: CAMetalLayer
+        let textures: [CVMetalTexture]  // kept alive until the GPU is done with them
+        let luma: any MTLTexture
+        let chroma: any MTLTexture
+        let work: Work
+        let partials: any MTLBuffer
+        let verdicts: any MTLBuffer  // this frame's own, written when sweep's tile statistics come back
+        let scale: SIMD2<Float>
+        let matrix: SIMD4<Float>
+        let pictureWidthOnScreen: Float
+    }
+
+    /// Outlines pause while photos develop, and under pressure are analysed every `analysisInterval`th frame;
+    /// the frames between reuse the last ones.
+    private func outlines(for settings: ViewfinderSettings) -> Outlines {
+        let shown = settings.outlines && !lock.withLock({ analysisPaused })
+        let interval = lock.withLock { analysisInterval }
+        frameIndex &+= 1
+        return Outlines(shown: shown, analysed: shown && (interval == 1 || frameIndex.isMultiple(of: interval)))
+    }
+
+    /// The frame's planes as textures, the workspace for its size, and this frame's slot in the buffer ring.
+    private func frame(_ pixelBuffer: CVPixelBuffer, target: (layer: CAMetalLayer, size: CGSize)) -> CurrentFrame? {
+        guard let luma = texture(pixelBuffer, plane: 0, format: .r8Unorm),
+            let chroma = texture(pixelBuffer, plane: 1, format: .rg8Unorm),
+            let lumaTexture = CVMetalTextureGetTexture(luma), let chromaTexture = CVMetalTextureGetTexture(chroma),
+            let work = workspace(width: lumaTexture.width, height: lumaTexture.height)
+        else { return nil }
+        let partials = work.partials[slot], verdicts = work.verdicts[slot]
         slot = (slot + 1) % work.partials.count
         let scale = Self.fitScale(
-            frameWidth: lumaTexture.width, frameHeight: lumaTexture.height,
-            viewSize: target.size)
-        var outlineMask = work.mask
-        if outlines && !analyse, settings.magnifier == nil, let last = pooled?.texture {
-            outlineMask = last
-        } else if analyse {
-            // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
-            let verdicts = mode == .sweep ? lock.withLock({ latestVerdicts }) : nil
-            encodeAnalysis(
-                commandBuffer, luma: lumaTexture, work: work, partials: partials, cutoff: sensitivity.sharpness,
-                verdicts: verdicts ?? ownVerdicts,
-                sweep: mode == .sweep ? (verdicts == nil ? .collecting : .applying) : .off)
-            // Magnified, mask texels are already a screen pixel or more across: draw from the full mask.
-            if settings.magnifier == nil {
-                outlineMask = encodePool(
-                    commandBuffer, work: work,
-                    pictureWidthOnScreen: Float(target.size.width) * scale.x)
-            }
-        }
+            frameWidth: lumaTexture.width, frameHeight: lumaTexture.height, viewSize: target.size)
+        return CurrentFrame(
+            layer: target.layer, textures: [luma, chroma], luma: lumaTexture, chroma: chromaTexture, work: work,
+            partials: partials, verdicts: verdicts, scale: scale, matrix: Self.matrix(for: pixelBuffer),
+            pictureWidthOnScreen: Float(target.size.width) * scale.x)
+    }
 
-        updateColorSpace(of: target.layer, for: pixelBuffer)
-        if let drawable = target.layer.nextDrawable() {
-            let pass = MTLRenderPassDescriptor()
-            pass.colorAttachments[0].texture = drawable.texture
-            pass.colorAttachments[0].loadAction = .clear
-            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-            pass.colorAttachments[0].storeAction = .store
-            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
-                var magnify = SIMD4<Float>(0.5, 0.5, 1, 0)
-                if let magnifier = settings.magnifier {
-                    let zoom = Magnifier.zoom(
-                        for: magnifier.magnification, uprightFrameWidth: lumaTexture.height,
-                        pictureWidthOnScreen: Float(target.size.width) * scale.x)
-                    let centre = Magnifier.pictureCenter(viewCenter: magnifier.center, scale: scale, zoom: zoom)
-                    magnify = SIMD4(centre.x, centre.y, zoom, 0)
-                }
-                // Magnified, the mask's texels are already a few screen pixels across: draw them as they are.
-                let reach = magnify.z > 1 ? 0 : appearance.lines.reach
-                var uniforms = Uniforms(
-                    scale: scale,
-                    matrix: Self.matrix(for: pixelBuffer),
-                    color: SIMD4(appearance.color.rgb, 1),
-                    lines: SIMD4(
-                        1 / Float(outlineMask.width), 1 / Float(outlineMask.height), reach,
-                        outlines ? 1 : 0),
-                    magnify: magnify,
-                    // Stripes about 7 points wide at the screen's scale (drawable pixels per point ≈ 3).
-                    zebra: SIMD4(
-                        settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1,
-                        0))
-                encoder.setRenderPipelineState(drawPipeline)
-                encoder.setFragmentTexture(lumaTexture, index: 0)
-                encoder.setFragmentTexture(chromaTexture, index: 1)
-                encoder.setFragmentTexture(outlineMask, index: 2)
-                encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-                encoder.endEncoding()
-            }
-            commandBuffer.present(drawable)
-        }
+    /// Steps 1–4, and step 5's shrink: the mask to draw outlines from. Between analysed frames it's the last
+    /// pooled one; magnified, it's the full mask, whose texels are already a screen pixel or more across.
+    private func encodeOutlines(
+        _ commandBuffer: any MTLCommandBuffer, frame: CurrentFrame, settings: ViewfinderSettings, outlines: Outlines
+    ) -> any MTLTexture {
+        let work = frame.work
+        if outlines.shown && !outlines.analysed, settings.magnifier == nil, let last = pooled?.texture { return last }
+        guard outlines.analysed else { return work.mask }
+        // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
+        let sweeping = settings.mode == .sweep
+        let verdicts = sweeping ? lock.withLock({ latestVerdicts }) : nil
+        encodeAnalysis(
+            commandBuffer,
+            AnalysisInput(
+                luma: frame.luma, work: work, partials: frame.partials, cutoff: settings.sensitivity.sharpness,
+                verdicts: verdicts ?? frame.verdicts,
+                sweep: sweeping ? (verdicts == nil ? .collecting : .applying) : .off
+            ))
+        guard settings.magnifier == nil else { return work.mask }
+        return encodePool(commandBuffer, work: work, pictureWidthOnScreen: frame.pictureWidthOnScreen)
+    }
 
-        let frame = InFlight(
-            textures: [luma, chroma], partials: partials,
-            groupCount: work.groups.width * work.groups.height,
-            pixelCount: work.width * work.height)
+    /// Step 5's drawing: the frame upright and fitted like the preview, magnified if asked, with outlines and zebras.
+    private func encodeDraw(
+        _ commandBuffer: any MTLCommandBuffer, frame: CurrentFrame, mask: any MTLTexture, settings: ViewfinderSettings,
+        outlines: Bool
+    ) {
+        guard let drawable = frame.layer.nextDrawable() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        pass.colorAttachments[0].storeAction = .store
+        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
+            var uniforms = Self.uniforms(frame: frame, mask: mask, settings: settings, outlines: outlines)
+            encoder.setRenderPipelineState(drawPipeline)
+            encoder.setFragmentTexture(frame.luma, index: 0)
+            encoder.setFragmentTexture(frame.chroma, index: 1)
+            encoder.setFragmentTexture(mask, index: 2)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+        }
+        commandBuffer.present(drawable)
+    }
+
+    private static func uniforms(
+        frame: CurrentFrame, mask: any MTLTexture, settings: ViewfinderSettings, outlines: Bool
+    ) -> Uniforms {
+        var magnify = SIMD4<Float>(0.5, 0.5, 1, 0)
+        if let magnifier = settings.magnifier {
+            let zoom = Magnifier.zoom(
+                for: magnifier.magnification, uprightFrameWidth: frame.luma.height,
+                pictureWidthOnScreen: frame.pictureWidthOnScreen)
+            let centre = Magnifier.pictureCenter(viewCenter: magnifier.center, scale: frame.scale, zoom: zoom)
+            magnify = SIMD4(centre.x, centre.y, zoom, 0)
+        }
+        let appearance = settings.appearance
+        // Magnified, the mask's texels are already a few screen pixels across: draw them as they are.
+        let reach = magnify.z > 1 ? 0 : appearance.lines.reach
+        return Uniforms(
+            scale: frame.scale,
+            matrix: frame.matrix,
+            color: SIMD4(appearance.color.rgb, 1),
+            lines: SIMD4(1 / Float(mask.width), 1 / Float(mask.height), reach, outlines ? 1 : 0),
+            magnify: magnify,
+            // Stripes about 7 points wide at the screen's scale (drawable pixels per point ≈ 3).
+            zebra: SIMD4(
+                settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1, 0))
+    }
+
+    /// Sends the frame to the GPU. When sweep peaking analysed it, its tile statistics come back in the completion
+    /// handler and become the tracker's next verdicts.
+    private func commit(_ commandBuffer: any MTLCommandBuffer, frame: CurrentFrame, sweepAnalysed: Bool) {
+        let retained = InFlight(
+            textures: frame.textures, partials: frame.partials,
+            groupCount: frame.work.groups.width * frame.work.groups.height,
+            pixelCount: frame.work.width * frame.work.height)
         let startGeneration = lock.withLock { generation }
-        let sweeping = mode == .sweep
-        let verdictsOut = UncheckedBuffer(ownVerdicts)
+        let verdictsOut = UncheckedBuffer(frame.verdicts)
         commandBuffer.addCompletedHandler { [self] _ in
-            guard analyse, sweeping else {
+            guard sweepAnalysed else {
                 inFlight.signal()
                 return
             }
-            let tiles = Self.tiles(frame)
+            let tiles = Self.tiles(retained)
             lock.withLock {
                 // A frame from before a sensitivity or mode change mustn't pull the new state back.
                 guard generation == startGeneration else { return }
@@ -320,40 +371,35 @@ final class ViewfinderRenderer: @unchecked Sendable {
         case applying  // that and the tracker's verdicts too
     }
 
-    /// Steps 1–4: shrink, blur, measure how crisp the edges are, and mark those crisper than `cutoff`; with sweep
-    /// peaking, also the high-pass response and tile statistics (into `partials`).
-    private func encodeAnalysis(
-        _ commandBuffer: any MTLCommandBuffer, luma: any MTLTexture, work: Work,
-        partials: any MTLBuffer, cutoff: Float, verdicts: any MTLBuffer, sweep: SweepUse
-    ) {
+    /// What one frame's analysis reads and writes: marks edges crisper than `cutoff`, and with sweep peaking also
+    /// writes tile statistics into `partials` and reads the tracker's `verdicts`.
+    private struct AnalysisInput {
+        let luma: any MTLTexture
+        let work: Work
+        let partials: any MTLBuffer
+        let cutoff: Float
+        let verdicts: any MTLBuffer
+        let sweep: SweepUse
+    }
+
+    /// Steps 1–4: shrink, blur, measure how crisp the edges are, and mark those crisper than the cutoff; with sweep
+    /// peaking, also the high-pass response and tile statistics.
+    private func encodeAnalysis(_ commandBuffer: any MTLCommandBuffer, _ input: AnalysisInput) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        let work = input.work
         let size = MTLSize(width: work.width, height: work.height, depth: 1)
         let group = MTLSize(width: 16, height: 16, depth: 1)
 
-        // At full resolution, read the camera's luma plane directly rather than copying it first.
-        let source: any MTLTexture
-        var lumaScale: Float
-        if let small = work.small {
-            var factor = UInt32(work.factor)
-            encoder.setComputePipelineState(downscalePipeline)
-            encoder.setTexture(luma, index: 0)
-            encoder.setTexture(small, index: 1)
-            encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
-            encoder.dispatchThreads(size, threadsPerThreadgroup: group)
-            source = small
-            lumaScale = 1
-        } else {
-            source = luma
-            lumaScale = 255
-        }
+        let source = encodeSource(encoder, input)
+        var lumaScale = source.lumaScale
 
         encoder.setComputePipelineState(blurPipeline)
-        encoder.setTexture(source, index: 0)
+        encoder.setTexture(source.texture, index: 0)
         encoder.setTexture(work.blurred, index: 1)
         encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 0)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
-        if sweep != .off {
+        if input.sweep != .off {
             encoder.setComputePipelineState(responsePipeline)
             encoder.setTexture(work.blurred, index: 0)
             encoder.setTexture(work.response, index: 1)
@@ -362,8 +408,8 @@ final class ViewfinderRenderer: @unchecked Sendable {
             encoder.setComputePipelineState(edgesPipeline)
             encoder.setTexture(work.response, index: 0)
             encoder.setTexture(work.edges, index: 1)
-            encoder.setTexture(source, index: 2)
-            encoder.setBuffer(partials, offset: 0, index: 0)
+            encoder.setTexture(source.texture, index: 2)
+            encoder.setBuffer(input.partials, offset: 0, index: 0)
             encoder.setBytes(&lumaScale, length: MemoryLayout<Float>.size, index: 1)
             encoder.dispatchThreadgroups(work.groups, threadsPerThreadgroup: group)  // whole groups, for the sums
         }
@@ -374,15 +420,32 @@ final class ViewfinderRenderer: @unchecked Sendable {
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
 
         var params = MaskParams(
-            cutoff: cutoff, tilesAcross: UInt32(work.groups.width), sweep: sweep == .applying ? 1 : 0)
+            cutoff: input.cutoff, tilesAcross: UInt32(work.groups.width), sweep: input.sweep == .applying ? 1 : 0)
         encoder.setComputePipelineState(maskPipeline)
         encoder.setTexture(work.edges, index: 0)
         encoder.setTexture(work.mask, index: 1)
         encoder.setTexture(work.sharp, index: 2)
         encoder.setBytes(&params, length: MemoryLayout<MaskParams>.stride, index: 0)
-        encoder.setBuffer(verdicts, offset: 0, index: 1)
+        encoder.setBuffer(input.verdicts, offset: 0, index: 1)
         encoder.dispatchThreads(size, threadsPerThreadgroup: group)
         encoder.endEncoding()
+    }
+
+    /// Step 1's shrink. At full resolution the camera's luma plane is read directly rather than copied first; its
+    /// values are 0 … 1, so `lumaScale` brings them to the 0 … 255 the shrunk texture holds.
+    private func encodeSource(
+        _ encoder: any MTLComputeCommandEncoder, _ input: AnalysisInput
+    ) -> (texture: any MTLTexture, lumaScale: Float) {
+        guard let small = input.work.small else { return (input.luma, 255) }
+        var factor = UInt32(input.work.factor)
+        encoder.setComputePipelineState(downscalePipeline)
+        encoder.setTexture(input.luma, index: 0)
+        encoder.setTexture(small, index: 1)
+        encoder.setBytes(&factor, length: MemoryLayout<UInt32>.size, index: 0)
+        encoder.dispatchThreads(
+            MTLSize(width: input.work.width, height: input.work.height, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+        return (small, 1)
     }
 
     private func texture(_ pixelBuffer: CVPixelBuffer, plane: Int, format: MTLPixelFormat) -> CVMetalTexture? {
@@ -553,8 +616,10 @@ final class ViewfinderRenderer: @unchecked Sendable {
             let commandBuffer = commandQueue.makeCommandBuffer()
         else { return nil }
         encodeAnalysis(
-            commandBuffer, luma: lumaTexture, work: work, partials: work.partials[0], cutoff: sensitivity.sharpness,
-            verdicts: work.verdicts[0], sweep: .off)
+            commandBuffer,
+            AnalysisInput(
+                luma: lumaTexture, work: work, partials: work.partials[0], cutoff: sensitivity.sharpness,
+                verdicts: work.verdicts[0], sweep: .off))
 
         // Copy the private mask texture somewhere readable.
         let w = work.mask.width, h = work.mask.height
