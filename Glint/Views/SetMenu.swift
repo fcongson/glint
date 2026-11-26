@@ -177,23 +177,23 @@ struct SetMenu: View {
         case .peakingMode:
             SettingRow(
                 tile: tile, options: PeakingMode.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.peakingMode, onSelect: { cam.setPeakingMode($0) })
+                selection: cam.aids.peakingMode, onSelect: { cam.aids.setPeakingMode($0) })
         case .sensitivity:
             SettingRow(
                 tile: tile, options: PeakingSensitivity.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.peakingSensitivity, onSelect: { cam.setPeakingSensitivity($0) })
+                selection: cam.aids.peakingSensitivity, onSelect: { cam.aids.setPeakingSensitivity($0) })
         case .colour:
             SettingRow(
                 tile: tile, options: PeakingColor.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.peakingAppearance.color, onSelect: { cam.setPeakingColor($0) })
+                selection: cam.aids.peakingAppearance.color, onSelect: { cam.aids.setPeakingColor($0) })
         case .lines:
             SettingRow(
                 tile: tile, options: PeakingLines.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.peakingAppearance.lines, onSelect: { cam.setPeakingLines($0) })
+                selection: cam.aids.peakingAppearance.lines, onSelect: { cam.aids.setPeakingLines($0) })
         case .zebras:
             SettingRow(
                 tile: tile, options: ZebraLevel.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.zebraLevel, onSelect: { cam.setZebraLevel($0) })
+                selection: cam.aids.zebraLevel, onSelect: { cam.aids.setZebraLevel($0) })
         case .railSide:
             SettingRow(
                 tile: tile, options: RailSide.allCases.map { (title: $0.title, value: $0) },
@@ -255,7 +255,7 @@ struct SetMenu: View {
         case .histogram:
             SettingRow(
                 tile: tile, options: HistogramStyle.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.histogramStyle, onSelect: { cam.setHistogramStyle($0) },
+                selection: cam.aids.histogramStyle, onSelect: { cam.aids.setHistogramStyle($0) },
                 spoken: { $0 == .rgb ? "Red, green and blue" : "Brightness" })
         case .grid:
             SettingRow(

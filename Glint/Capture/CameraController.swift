@@ -42,9 +42,6 @@ final class CameraController {
     private(set) var currentLensID = ""
     private(set) var aperture: Float = 0
     private(set) var whiteBalanceKelvin: Float = 5500
-    private(set) var isHistogramEnabled = false
-    private(set) var histogramStyle = HistogramStyle.luma
-    let histogramModel = HistogramModel()
     private(set) var isGridEnabled = false  // rule-of-thirds lines over the picture
     private(set) var isLevelEnabled = false  // the horizon level over the picture
     let levelModel = LevelModel()
@@ -58,42 +55,17 @@ final class CameraController {
     /// Counts photos asked for, by the shutter button or a hardware one, for the screen's blink and the haptic.
     private(set) var shutterPresses = 0
     @ObservationIgnored private var isReviewing = false
-    // VoiceOver's description of the picture (see `SceneDescription`).
-    @ObservationIgnored private var isDescribingScene = false
-    @ObservationIgnored private var faceSpeech = SceneAnnouncer(saidAlready: SceneDescription.noFaces)
-    @ObservationIgnored private var levelSpeech = SceneAnnouncer()
-    @ObservationIgnored private var spokenTilt: SceneDescription.Tilt?
-    @ObservationIgnored private var heldQuarterTurns = 0  // how the phone was last held, from the level
-    @ObservationIgnored private var latestFaces = SceneDescription.noFaces
-    @ObservationIgnored private var faceRetry: Task<Void, Never>?
+    /// VoiceOver's description of the picture, while VoiceOver is on.
+    @ObservationIgnored private let narrator = SceneNarrator()
     /// Draws the viewfinder with peaking outlines, on the GPU. Nil without Metal, which leaves peaking off.
     let viewfinderRenderer: ViewfinderRenderer?
-    /// Focus peaking is shown while focusing by hand (AF off), as on a camera in MF. On by default.
-    private(set) var isPeakingEnabled = true
-    private(set) var peakingSensitivity = PeakingSensitivity.medium
-    private(set) var peakingAppearance = PeakingAppearance()
-    private(set) var peakingMode = PeakingMode.standard
+    /// The histogram, peaking, zebras and magnifier.
+    let aids: ViewfinderAidsModel
     @ObservationIgnored private var photosProcessing = 0
     @ObservationIgnored private var processingTimeout: Task<Void, Never>?
-    private(set) var isZebraEnabled = false
-    private(set) var zebraLevel = ZebraLevel.hundred
-    /// What Low Power Mode and heat switched off, so each comes back when its reason ends.
-    @ObservationIgnored private var aidPauses = ViewfinderAidPauses()
     private(set) var systemPressure = SystemPressure.nominal
-    var isPeakingShown: Bool { isPeakingEnabled && !isAutofocus }
-
-    // Focus magnifier (see Magnifier.swift). The point is where the viewfinder punches in: in manual focus a tap
-    // moves it, in autofocus it follows the tapped focus point.
-    private(set) var magnifyPoint = CGPoint(x: 0.5, y: 0.5)  // 0…1 across and down the viewfinder
-    private(set) var magnification = Magnification.actual
-    private(set) var isMagnifierEnabled = true  // MAG: whether touching the rail magnifies
-    private(set) var isRailHeld = false  // on while the focus rail is touched, and a moment after
-    @ObservationIgnored private var railReleaseTask: Task<Void, Never>?
-    var isMagnifierAvailable: Bool { viewfinderRenderer != nil }
-    var isMagnifying: Bool { isMagnifierAvailable && isMagnifierEnabled && isRailHeld }
-    /// Whether the GPU viewfinder draws, for outlines or magnifying.
-    var isViewfinderDrawn: Bool { isPeakingShown || isMagnifying || isZebraShown }
-    var isZebraShown: Bool { isZebraEnabled && viewfinderRenderer != nil }
+    /// Whether the GPU viewfinder draws, for outlines, zebras or magnifying.
+    var isViewfinderDrawn: Bool { aids.viewfinderSettings(isAutofocus: isAutofocus) != nil }
     private(set) var timing = ""
     private(set) var isCameraReady = false  // the preview is running; secondary controls fade in then
     private(set) var isCameraDenied = false  // camera access refused: the viewfinder offers the way to Settings
@@ -124,7 +96,7 @@ final class CameraController {
         let renderer = ViewfinderRenderer.make()
         viewfinderRenderer = renderer
         capture = CaptureSession(viewfinder: renderer)
-        isPeakingEnabled = renderer != nil
+        aids = ViewfinderAidsModel(isGPUAvailable: renderer != nil)
         if let saved = SavedSettings.load(from: defaults) {
             restore(saved)
             Log.settings.notice(
@@ -133,6 +105,7 @@ final class CameraController {
         } else {
             Log.settings.notice("[\(Log.copy, privacy: .public)] nothing saved yet, starting from the defaults")
         }
+        aids.analysisChanged = { [weak self] in self?.sendAnalysis() }
     }
 
     // MARK: Saved settings
@@ -143,11 +116,12 @@ final class CameraController {
             captureMode: captureMode, fileType: fileType, aspect: aspect, manual: manual, iso: iso,
             shutterDenominator: shutterDenominator, whiteBalanceKelvin: whiteBalanceKelvin,
             hasManualWhiteBalance: hasManualWhiteBalance, auto: auto, exposureBias: exposureBias,
-            videoFormat: videoFormat, isHistogramEnabled: isHistogramEnabled,
-            isPeakingEnabled: isPeakingEnabled, peakingSensitivity: peakingSensitivity,
-            peakingAppearance: peakingAppearance, peakingMode: peakingMode, isZebraEnabled: isZebraEnabled,
-            zebraLevel: zebraLevel, isMagnifierEnabled: isMagnifierEnabled, flash: flash,
-            histogramStyle: histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
+            videoFormat: videoFormat, isHistogramEnabled: aids.isHistogramEnabled,
+            isPeakingEnabled: aids.isPeakingEnabled, peakingSensitivity: aids.peakingSensitivity,
+            peakingAppearance: aids.peakingAppearance, peakingMode: aids.peakingMode,
+            isZebraEnabled: aids.isZebraEnabled, zebraLevel: aids.zebraLevel,
+            isMagnifierEnabled: aids.isMagnifierEnabled, flash: flash, histogramStyle: aids.histogramStyle,
+            isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
     }
 
     /// Writes any change that hasn't been saved yet, when the screen is left: the last chance before the app is
@@ -258,16 +232,8 @@ final class CameraController {
         auto = saved.auto ?? auto
         exposureBias = saved.exposureBias ?? exposureBias
         videoFormat = saved.videoFormat ?? videoFormat
-        isHistogramEnabled = saved.isHistogramEnabled ?? isHistogramEnabled
-        isPeakingEnabled = viewfinderRenderer != nil && (saved.isPeakingEnabled ?? isPeakingEnabled)
-        peakingSensitivity = saved.peakingSensitivity ?? peakingSensitivity
-        peakingAppearance = saved.peakingAppearance ?? peakingAppearance
-        peakingMode = saved.peakingMode ?? peakingMode
-        isZebraEnabled = viewfinderRenderer != nil && (saved.isZebraEnabled ?? isZebraEnabled)
-        zebraLevel = saved.zebraLevel ?? zebraLevel
-        isMagnifierEnabled = saved.isMagnifierEnabled ?? isMagnifierEnabled
+        aids.restore(saved)
         flash = saved.flash ?? flash
-        histogramStyle = saved.histogramStyle ?? histogramStyle
         isGridEnabled = saved.isGridEnabled ?? isGridEnabled
         isLevelEnabled = saved.isLevelEnabled ?? isLevelEnabled
     }
@@ -397,10 +363,9 @@ final class CameraController {
                 conn.videoRotationAngle = angle
             }
         case .histogram(let histogram):
-            // drop frames that were in flight when it was switched off
-            if isHistogramEnabled { histogramModel.show(histogram) }
+            aids.show(histogram)
         case .faces(let faces):
-            describeFaces(faces)
+            narrator.facesFound(faces, in: previewLayer)
         case .photoPreview(let image, let requestedAt):
             lastThumbnail = image  // the review image replaces it once it's rendered (`addShot`)
             #if DEBUG
@@ -578,23 +543,6 @@ final class CameraController {
         capture.enqueue { $0.applyExposure(iso: iso, shutterDenominator: denom) }
     }
 
-    // MARK: Histogram
-
-    func setHistogramEnabled(_ on: Bool) {
-        guard on != isHistogramEnabled else { return }
-        isHistogramEnabled = on
-        if !on { histogramModel.clear() }
-        aidPauses.userChose(.histogram)
-        sendAnalysis()
-    }
-
-    /// SET's HISTOGRAM row: brightness, or red, green and blue.
-    func setHistogramStyle(_ style: HistogramStyle) {
-        guard style != histogramStyle else { return }
-        histogramStyle = style
-        sendAnalysis()
-    }
-
     // MARK: Composition
 
     func setGridEnabled(_ on: Bool) { isGridEnabled = on }
@@ -609,14 +557,12 @@ final class CameraController {
     /// Gravity is read only while the level is on screen or VoiceOver is describing the picture, and never
     /// behind the review screen.
     private func updateLevelSensor() {
-        levelSensor.setRunning((isLevelEnabled || isDescribingScene) && isCameraReady && !isReviewing)
+        levelSensor.setRunning((isLevelEnabled || narrator.isOn) && isCameraReady && !isReviewing)
     }
 
     private func levelChanged(_ level: Level?) {
         if isLevelEnabled { levelModel.show(level) }
-        guard let level else { return }
-        heldQuarterTurns = level.quarterTurns
-        if isDescribingScene { describeLevel(level) }
+        if let level { narrator.levelChanged(level) }
     }
 
     // MARK: Flash and light
@@ -630,167 +576,23 @@ final class CameraController {
         capture.enqueue { $0.setVideoLight(on) }
     }
 
-    // MARK: Spoken descriptions
+    // MARK: Viewfinder aids and spoken descriptions
 
-    /// VoiceOver came on or went off. While it's on Glint says what the camera sees, as the system Camera does:
-    /// faces (the camera finds them) and whether the horizon is level.
+    /// VoiceOver came on or went off; see `SceneNarrator`.
     private func voiceOverChanged(_ isOn: Bool) {
-        guard isOn != isDescribingScene, isCameraReady else { return }
-        isDescribingScene = isOn
-        faceRetry?.cancel()
-        faceSpeech = SceneAnnouncer(saidAlready: SceneDescription.noFaces)
-        levelSpeech = SceneAnnouncer()
-        spokenTilt = nil
+        guard isOn != narrator.isOn, isCameraReady else { return }
+        narrator.setOn(isOn)
         capture.enqueue { $0.setFaceDetection(isOn) }
         updateLevelSensor()
     }
 
-    /// `faces` are in the metadata output's coordinates. The preview layer turns them into the screen's, and how
-    /// the phone is held into the picture's, so "left" is your left.
-    private func describeFaces(_ faces: [CGRect]) {
-        guard isDescribingScene, let layer = previewLayer, layer.bounds.width > 0, layer.bounds.height > 0 else {
-            return
-        }
-        let size = layer.bounds.size
-        let frames = faces.map { face -> CGRect in
-            let onScreen = layer.layerRectConverted(fromMetadataOutputRect: face)
-            let unit = CGRect(
-                x: onScreen.minX / size.width, y: onScreen.minY / size.height,
-                width: onScreen.width / size.width, height: onScreen.height / size.height)
-            return SceneDescription.rotated(unit, quarterTurns: heldQuarterTurns)
-        }
-        latestFaces = SceneDescription.faces(frames)
-        speakFaces()
-    }
-
-    /// Says the latest description if it's new. If it's too soon after the last one, tries again when it isn't:
-    /// the camera only reports again when something changes, so a description held back mustn't be lost.
-    private func speakFaces() {
-        faceRetry?.cancel()
-        let now = CFAbsoluteTimeGetCurrent()
-        if let text = faceSpeech.offer(key: latestFaces, text: latestFaces, now: now) {
-            AccessibilityNotification.Announcement(text).post()
-        } else if latestFaces != faceSpeech.lastKey {
-            let wait = faceSpeech.retryAfter(now: now) + 0.05
-            faceRetry = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(wait))
-                guard let self, !Task.isCancelled, isDescribingScene else { return }
-                speakFaces()
-            }
-        }
-    }
-
-    private func describeLevel(_ level: Level) {
-        let tilt = SceneDescription.Tilt(level, previous: spokenTilt)
-        let text = SceneDescription.level(tilt, degrees: level.tilt)
-        if let text = levelSpeech.offer(key: tilt.rawValue, text: text, now: CFAbsoluteTimeGetCurrent()) {
-            spokenTilt = tilt
-            AccessibilityNotification.Announcement(text).post()
-        }
-    }
-
-    func setPeakingEnabled(_ on: Bool) {
-        guard on != isPeakingEnabled, !on || viewfinderRenderer != nil else { return }
-        isPeakingEnabled = on
-        aidPauses.userChose(.peaking)
-        sendAnalysis()
-    }
-
-    /// The focus rail was touched or let go. Touching it punches in; letting go zooms back out a second later,
-    /// so a pause between turns doesn't bounce the view in and out.
-    func focusRailTouched(_ touching: Bool) {
-        railReleaseTask?.cancel()
-        if touching {
-            guard !isRailHeld else { return }
-            isRailHeld = true
-            sendAnalysis()
-        } else {
-            railReleaseTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(1))
-                guard let self, !Task.isCancelled else { return }
-                isRailHeld = false
-                sendAnalysis()
-            }
-        }
-    }
-
-    /// MAG: whether touching the focus rail magnifies, like a camera's MF Assist setting.
-    func setMagnifierEnabled(_ on: Bool) {
-        guard on != isMagnifierEnabled else { return }
-        isMagnifierEnabled = on
-        if !on { magnification = .actual }
-        sendAnalysis()
-    }
-
-    /// Moves the point the magnifier punches in on.
-    func setMagnifyPoint(_ point: CGPoint) {
-        magnifyPoint = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
-        sendAnalysis()
-    }
-
-    /// 1:1, then 2:1, then back.
-    func stepMagnification() {
-        magnification = magnification.next
-        sendAnalysis()
-    }
-
-    func setPeakingMode(_ mode: PeakingMode) {
-        guard mode != peakingMode else { return }
-        peakingMode = mode
-        sendAnalysis()
-    }
-
-    func setPeakingColor(_ color: PeakingColor) {
-        guard color != peakingAppearance.color else { return }
-        peakingAppearance.color = color
-        sendAnalysis()
-    }
-
-    func setPeakingLines(_ lines: PeakingLines) {
-        guard lines != peakingAppearance.lines else { return }
-        peakingAppearance.lines = lines
-        sendAnalysis()
-    }
-
-    func setPeakingSensitivity(_ sensitivity: PeakingSensitivity) {
-        guard sensitivity != peakingSensitivity else { return }
-        peakingSensitivity = sensitivity
-        sendAnalysis()
-    }
-
-    /// Low Power Mode turns off the histogram, peaking and zebras, the only extra work Glint does on every preview
-    /// frame. Turning one back on keeps it on; whatever was turned off comes back when Low Power Mode ends
-    /// (`ViewfinderAidPauses` keeps track).
     private func lowPowerModeChanged(_ isOn: Bool) {
-        if isOn {
-            let paused = aidPauses.lowPowerBegan(enabled: enabledAids)
-            guard paused.any else { return }
-            switchAids(paused, on: false)
-            post("Low Power Mode: histogram, peaking and zebras off")
-        } else {
-            let back = aidPauses.lowPowerEnded()
-            if back.any { switchAids(back, on: true) }
-        }
-    }
-
-    private var enabledAids: ViewfinderAids {
-        ViewfinderAids(histogram: isHistogramEnabled, peaking: isPeakingEnabled, zebras: isZebraEnabled)
-    }
-
-    /// Switches these aids on or off on Glint's own account (the user's switches are the `set…Enabled` methods).
-    private func switchAids(_ aids: ViewfinderAids, on: Bool) {
-        if aids.histogram {
-            isHistogramEnabled = on
-            if !on { histogramModel.clear() }
-        }
-        if aids.peaking { isPeakingEnabled = on }
-        if aids.zebras { isZebraEnabled = on }
-        sendAnalysis()
+        if let message = aids.lowPowerModeChanged(isOn) { post(message) }
     }
 
     /// Heat or load on the camera changed. Glint gives things up in order (see `SystemPressure`): peaking analyses
     /// every other frame, then peaking and zebras go off, then PHOTO's preview drops to 15 fps. Each comes back as
-    /// the pressure eases, unless Low Power Mode has come on meanwhile, which then keeps them off until it ends.
+    /// the pressure eases.
     private func systemPressureChanged(_ level: SystemPressure) {
         let old = systemPressure
         guard level != old else { return }
@@ -803,31 +605,8 @@ final class CameraController {
             let reduced = level.reducesFrameRate
             capture.enqueue { $0.setFrameRateReduced(reduced) }
         }
-        if level.pausesViewfinderAids, !old.pausesViewfinderAids {
-            let paused = aidPauses.pressureBegan(enabled: enabledAids)
-            guard paused.any else { return }
-            switchAids(paused, on: false)
-            post("iPhone is hot: peaking and zebras off for now")
-        } else if !level.pausesViewfinderAids, old.pausesViewfinderAids {
-            // While Low Power Mode is on it takes them over, and nothing comes back yet.
-            let back = aidPauses.pressureEased(lowPowerModeIsOn: ProcessInfo.processInfo.isLowPowerModeEnabled)
-            guard back.any else { return }
-            switchAids(back, on: true)
-            post("Cooler again: peaking and zebras back on")
-        }
-    }
-
-    func setZebraEnabled(_ on: Bool) {
-        guard on != isZebraEnabled, !on || viewfinderRenderer != nil else { return }
-        isZebraEnabled = on
-        aidPauses.userChose(.zebras)
-        sendAnalysis()
-    }
-
-    func setZebraLevel(_ level: ZebraLevel) {
-        guard level != zebraLevel else { return }
-        zebraLevel = level
-        sendAnalysis()
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        if let message = aids.pressureChanged(from: old, to: level, lowPowerModeIsOn: lowPower) { post(message) }
     }
 
     /// The review covers the camera, so the camera stops while it's open (unless recording) and restarts after.
@@ -855,15 +634,8 @@ final class CameraController {
 
     /// The preview analysis runs only for what's on screen: the histogram, and peaking while it's shown.
     private func sendAnalysis() {
-        let histogram = isHistogramEnabled, rgb = histogramStyle == .rgb
-        let viewfinder: ViewfinderSettings? =
-            isViewfinderDrawn
-            ? ViewfinderSettings(
-                outlines: isPeakingShown, sensitivity: peakingSensitivity,
-                appearance: peakingAppearance, mode: peakingMode,
-                magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil,
-                zebras: isZebraShown ? zebraLevel : nil)
-            : nil
+        let histogram = aids.isHistogramEnabled, rgb = aids.histogramStyle == .rgb
+        let viewfinder = aids.viewfinderSettings(isAutofocus: isAutofocus)
         capture.enqueue { $0.setAnalysis(histogram: histogram, rgb: rgb, viewfinder: viewfinder) }
     }
 
