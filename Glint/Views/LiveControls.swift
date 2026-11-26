@@ -21,7 +21,7 @@ struct LiveFocusRail: View {
     var body: some View {
         FocusRail(
             position: cam.lensPosition, isAutofocus: cam.isAutofocus,
-            onChange: { cam.setLensPosition($0) }, onTouch: { cam.focusRailTouched($0) })
+            onChange: { cam.setLensPosition($0) }, onTouch: { cam.aids.focusRailTouched($0) })
     }
 }
 

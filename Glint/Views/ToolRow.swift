@@ -9,9 +9,9 @@ struct ToolRow: View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
                 Chip(
-                    "HIST", label: "Histogram", value: SettingsText.onOff(cam.isHistogramEnabled),
-                    isOn: cam.isHistogramEnabled
-                ) { cam.setHistogramEnabled(!cam.isHistogramEnabled) }
+                    "HIST", label: "Histogram", value: SettingsText.onOff(cam.aids.isHistogramEnabled),
+                    isOn: cam.aids.isHistogramEnabled
+                ) { cam.aids.setHistogramEnabled(!cam.aids.isHistogramEnabled) }
                 if cam.viewfinderRenderer != nil { zebraChip }
             }
             Spacer(minLength: 6)
@@ -19,11 +19,11 @@ struct ToolRow: View {
             Spacer(minLength: 6)
             HStack(spacing: 6) {
                 if cam.viewfinderRenderer != nil { peakingChip }
-                if cam.isMagnifierAvailable {
+                if cam.aids.isMagnifierAvailable {
                     Chip(
-                        "MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.isMagnifierEnabled),
-                        isOn: cam.isMagnifierEnabled
-                    ) { cam.setMagnifierEnabled(!cam.isMagnifierEnabled) }
+                        "MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.aids.isMagnifierEnabled),
+                        isOn: cam.aids.isMagnifierEnabled
+                    ) { cam.aids.setMagnifierEnabled(!cam.aids.isMagnifierEnabled) }
                     .accessibilityHint(
                         "When on, focusing with the focus rail magnifies the focus point so you can check focus.")
                 }
@@ -38,18 +38,19 @@ struct ToolRow: View {
     private var zebraChip: some View {
         Chip(
             "ZEB", label: "Zebras",
-            value: cam.isZebraEnabled
-                ? "\(SettingsText.onOff(true)), from \(cam.zebraLevel.percent) percent" : SettingsText.onOff(false),
-            isOn: cam.isZebraEnabled
-        ) { cam.setZebraEnabled(!cam.isZebraEnabled) }
+            value: cam.aids.isZebraEnabled
+                ? "\(SettingsText.onOff(true)), from \(cam.aids.zebraLevel.percent) percent"
+                : SettingsText.onOff(false),
+            isOn: cam.aids.isZebraEnabled
+        ) { cam.aids.setZebraEnabled(!cam.aids.isZebraEnabled) }
         .accessibilityHint(
             "Stripes over parts of the picture at or above a brightness level. Swipe up or down to change the level."
         )
         .accessibilityAdjustableAction { direction in
-            let all = ZebraLevel.allCases, i = cam.zebraLevel.rawValue
+            let all = ZebraLevel.allCases, i = cam.aids.zebraLevel.rawValue
             switch direction {
-            case .increment: if i + 1 < all.count { cam.setZebraLevel(all[i + 1]) }
-            case .decrement: if i > 0 { cam.setZebraLevel(all[i - 1]) }
+            case .increment: if i + 1 < all.count { cam.aids.setZebraLevel(all[i + 1]) }
+            case .decrement: if i > 0 { cam.aids.setZebraLevel(all[i - 1]) }
             @unknown default: break
             }
         }
@@ -57,20 +58,20 @@ struct ToolRow: View {
 
     /// PK: peaking on and off. Mode, sensitivity, colour and lines are in SET.
     private var peakingChip: some View {
-        let look = cam.peakingAppearance
+        let look = cam.aids.peakingAppearance
         let value =
-            cam.isPeakingEnabled
-            ? "\(SettingsText.onOff(true)), \(cam.peakingMode.title), \(cam.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
+            cam.aids.isPeakingEnabled
+            ? "\(SettingsText.onOff(true)), \(cam.aids.peakingMode.title), \(cam.aids.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
             : SettingsText.onOff(false)
-        return Chip("PK", label: "Focus peaking", value: value, isOn: cam.isPeakingEnabled) {
-            cam.setPeakingEnabled(!cam.isPeakingEnabled)
+        return Chip("PK", label: "Focus peaking", value: value, isOn: cam.aids.isPeakingEnabled) {
+            cam.aids.setPeakingEnabled(!cam.aids.isPeakingEnabled)
         }
         .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; more in Settings.")
         .accessibilityAdjustableAction { direction in
-            let all = PeakingSensitivity.allCases, i = cam.peakingSensitivity.rawValue
+            let all = PeakingSensitivity.allCases, i = cam.aids.peakingSensitivity.rawValue
             switch direction {
-            case .increment: if i + 1 < all.count { cam.setPeakingSensitivity(all[i + 1]) }
-            case .decrement: if i > 0 { cam.setPeakingSensitivity(all[i - 1]) }
+            case .increment: if i + 1 < all.count { cam.aids.setPeakingSensitivity(all[i + 1]) }
+            case .decrement: if i > 0 { cam.aids.setPeakingSensitivity(all[i - 1]) }
             @unknown default: break
             }
         }

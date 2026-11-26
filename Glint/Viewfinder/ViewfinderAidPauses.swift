@@ -17,7 +17,7 @@ struct ViewfinderAids: Equatable, Sendable {
 /// theirs from then on: it's forgotten here and stays how they left it. If pressure eases while Low Power Mode is
 /// still on, what pressure paused is handed to Low Power Mode, to come back when that ends.
 ///
-/// Only the bookkeeping: each call returns the aids to switch, and `CameraController` switches them.
+/// Only the bookkeeping: each call returns the aids to switch, and `ViewfinderAidsModel` switches them.
 struct ViewfinderAidPauses: Equatable, Sendable {
     private(set) var forLowPower = ViewfinderAids()
     private(set) var forPressure = ViewfinderAids()

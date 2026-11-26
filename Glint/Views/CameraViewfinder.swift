@@ -35,7 +35,7 @@ struct CameraViewfinder: View {
                 FocusBox().id(focusTapCount).position(p).accessibilityHidden(true)
             }
             // AE/AF lock: the box stays where the long press was, and a label says what's held, until a tap.
-            if let lock = cam.viewfinderLock, !cam.isMagnifying {
+            if let lock = cam.viewfinderLock, !cam.aids.isMagnifying {
                 if let p = lockPoint, focusPoint == nil {
                     FocusBox().id(lockCount).position(p).accessibilityHidden(true)
                 }
@@ -48,16 +48,17 @@ struct CameraViewfinder: View {
                     .accessibilityHint("Touch the viewfinder to release it")
             }
             // In manual focus, where the magnifier will punch in.
-            if !cam.isAutofocus, !cam.isMagnifying, cam.isMagnifierAvailable, cam.isMagnifierEnabled {
+            if !cam.isAutofocus, !cam.aids.isMagnifying, cam.aids.isMagnifierAvailable, cam.aids.isMagnifierEnabled {
                 GeometryReader { geo in
                     MagnifyFrame()
-                        .position(x: cam.magnifyPoint.x * geo.size.width, y: cam.magnifyPoint.y * geo.size.height)
+                        .position(
+                            x: cam.aids.magnifyPoint.x * geo.size.width, y: cam.aids.magnifyPoint.y * geo.size.height)
                 }
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
-            if cam.isMagnifying {
-                OverlayLabel("\(cam.magnification.title)  MAGNIFIED")
+            if cam.aids.isMagnifying {
+                OverlayLabel("\(cam.aids.magnification.title)  MAGNIFIED")
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 10)
                     .allowsHitTesting(false)
@@ -70,7 +71,7 @@ struct CameraViewfinder: View {
         .overlay {
             // The crop for 3:2, 1:1 and 16:9, dimmed outside, so what's just out of frame stays visible.
             // Not while magnified, where it would mark the wrong part of the picture.
-            if cam.isMagnifying {
+            if cam.aids.isMagnifying {
                 EmptyView()
             } else if cam.captureMode == .video {
                 CropMask(aspect: .sixteenNine)  // video is 16:9 from the 4:3 sensor
@@ -80,17 +81,17 @@ struct CameraViewfinder: View {
         }
         .overlay {
             // Composition aids, inside the frame that will be kept. Not while magnified, like the crop.
-            if !cam.isMagnifying {
+            if !cam.aids.isMagnifying {
                 if cam.isGridEnabled { GridOverlay(aspect: frameAspect) }
                 if cam.isLevelEnabled { LevelIndicator(model: cam.levelModel) }
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: lockCount)
         .overlay(alignment: .topLeading) {
-            if cam.isHistogramEnabled {
+            if cam.aids.isHistogramEnabled {
                 // Reserve the rotated footprint so it stays inside the corner.
                 let size = HistogramView.size
-                HistogramContainer(model: cam.histogramModel)
+                HistogramContainer(model: cam.aids.histogramModel)
                     .frame(width: size.width, height: size.height)
                     .padding(8)
                     .allowsHitTesting(false)
@@ -142,13 +143,13 @@ struct CameraViewfinder: View {
     /// Magnified, a tap steps 1:1 ↔ 2:1. Otherwise it sets where the magnifier punches in; in autofocus it's also
     /// the focus point, while in manual focus it leaves the lens alone, as on a camera in MF (AF hands focus back).
     private func tapped(_ devicePoint: CGPoint, _ layerPoint: CGPoint, _ size: CGSize) {
-        if cam.isMagnifying {
-            cam.stepMagnification()
-            AccessibilityNotification.Announcement("Magnified, \(cam.magnification.spoken)").post()
+        if cam.aids.isMagnifying {
+            cam.aids.stepMagnification()
+            AccessibilityNotification.Announcement("Magnified, \(cam.aids.magnification.spoken)").post()
             return
         }
         if size.width > 0, size.height > 0 {
-            cam.setMagnifyPoint(CGPoint(x: layerPoint.x / size.width, y: layerPoint.y / size.height))
+            cam.aids.setMagnifyPoint(CGPoint(x: layerPoint.x / size.width, y: layerPoint.y / size.height))
         }
         guard cam.isAutofocus else { return }
         cam.focus(at: devicePoint)
@@ -163,7 +164,7 @@ struct CameraViewfinder: View {
     /// A long press holds focus and exposure at that point (AE/AF lock). Not while magnified, where a touch
     /// is about the magnifier.
     private func longPressed(_ devicePoint: CGPoint, _ layerPoint: CGPoint) {
-        guard !cam.isMagnifying, cam.lockFocusAndExposure(at: devicePoint) else { return }
+        guard !cam.aids.isMagnifying, cam.lockFocusAndExposure(at: devicePoint) else { return }
         focusPoint = nil
         lockPoint = layerPoint
         lockCount += 1
@@ -175,7 +176,7 @@ struct CameraViewfinder: View {
     }
 
     private var viewfinderHint: String {
-        if cam.isMagnifying { return "Touch to switch between actual pixels and double magnification" }
+        if cam.aids.isMagnifying { return "Touch to switch between actual pixels and double magnification" }
         let hold = "Touch and hold to lock \(cam.isAutofocus ? "focus and exposure" : "exposure") there."
         return cam.isAutofocus
             ? "Touch the viewfinder to set the focus point. \(hold)"

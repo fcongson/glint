@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// What VoiceOver says about the picture, as the system Camera does: how many faces and where, and whether the
-/// horizon is level. Pure wording and geometry; `CameraController` decides when to say it.
+/// horizon is level. Pure wording and geometry; `SceneNarrator` decides when to say it.
 enum SceneDescription {
     static let noFaces = "No faces"
 
