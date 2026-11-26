@@ -60,8 +60,7 @@ final class CameraController {
     let viewfinderRenderer: ViewfinderRenderer?
     /// The histogram, peaking, zebras and magnifier.
     let aids: ViewfinderAidsModel
-    @ObservationIgnored private var photosProcessing = 0
-    @ObservationIgnored private var processingTimeout: Task<Void, Never>?
+    @ObservationIgnored private let analysisPause: AnalysisPause
     private(set) var systemPressure = SystemPressure.nominal
     /// Whether the GPU viewfinder draws, for outlines, zebras or magnifying.
     var isViewfinderDrawn: Bool { aids.viewfinderSettings(isAutofocus: isAutofocus) != nil }
@@ -73,11 +72,11 @@ final class CameraController {
     /// Dev-only timings over the viewfinder; empty in release builds.
     let debugReadout = DebugReadout()
     /// This session's photos and the review button's thumbnail.
-    let shotLibrary = ShotLibrary()
+    let shotLibrary: ShotLibrary
 
     private let capture: CaptureSession
-    private let locationProvider = LocationProvider()
-    private let photoProcessor = PhotoProcessor()
+    private let locationProvider: LocationProvider
+    private let photoProcessor: PhotoProcessor
     @ObservationIgnored private var hasStarted = false
     // so a late microphone answer can't undo a newer PHOTO · VIDEO choice
     @ObservationIgnored private var modeGeneration = 0
@@ -90,10 +89,21 @@ final class CameraController {
         savedSettings
     }
 
-    init(defaults: UserDefaults = SharedDefaults.store) {
+    /// Nothing here touches the camera; `start` does. `viewfinderRenderer` is nil on a phone without Metal, which
+    /// leaves peaking, zebras and the magnifier off.
+    init(
+        defaults: UserDefaults = SharedDefaults.store,
+        viewfinderRenderer renderer: ViewfinderRenderer? = ViewfinderRenderer.make(),
+        locationProvider: LocationProvider = LocationProvider(),
+        photoProcessor: PhotoProcessor = PhotoProcessor(),
+        shotLibrary: ShotLibrary = ShotLibrary()
+    ) {
         self.defaults = defaults
-        let renderer = ViewfinderRenderer.make()
         viewfinderRenderer = renderer
+        self.locationProvider = locationProvider
+        self.photoProcessor = photoProcessor
+        self.shotLibrary = shotLibrary
+        analysisPause = AnalysisPause { [renderer] in renderer?.setAnalysisPaused($0) }
         capture = CaptureSession(viewfinder: renderer)
         aids = ViewfinderAidsModel(isGPUAvailable: renderer != nil)
         if let saved = settingsSync.loadAtStart() { restore(saved) }
@@ -677,7 +687,7 @@ final class CameraController {
 
     func capturePhoto() {
         shutterPresses += 1
-        photoProcessing(started: true)
+        analysisPause.photoStarted()
         let fileType = fileType, aspect = appliedAspect, flash = flash.available(hasFlash: hasFlash)
         let whiteBalance: WhiteBalanceSetting = manual && !auto.whiteBalance ? .kelvin(Int(whiteBalanceKelvin)) : .auto
         let requestedAt = CFAbsoluteTimeGetCurrent()
@@ -701,25 +711,9 @@ final class CameraController {
         }
     }
 
-    /// Peaking's analysis pauses while photos are developed and their review images drawn, so the GPU is theirs
-    /// (see `ViewfinderRenderer.setAnalysisPaused`). Counted, for shots taken in quick succession; a capture that
-    /// never arrives can't leave it paused for more than a few seconds.
-    private func photoProcessing(started: Bool) {
-        photosProcessing = max(0, photosProcessing + (started ? 1 : -1))
-        viewfinderRenderer?.setAnalysisPaused(photosProcessing > 0)
-        processingTimeout?.cancel()
-        guard photosProcessing > 0 else { return }
-        processingTimeout = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
-            guard let self, !Task.isCancelled else { return }
-            photosProcessing = 0
-            viewfinderRenderer?.setAnalysisPaused(false)
-        }
-    }
-
     private func addShot(_ result: PhotoProcessor.Result, location: CLLocation?, shotTime: Double) {
         if let image = result.review { shotLibrary.add(image, info: result.info, location: location) }
-        photoProcessing(started: false)
+        analysisPause.photoFinished()
         #if DEBUG
             debugReadout.shotFinished(
                 shotTime: shotTime, developTime: result.developTime, renderTime: result.renderTime)

@@ -65,6 +65,15 @@ struct CameraControllerSettingsTests {
         #expect(cam.isGridEnabled)
     }
 
+    @Test func withoutMetalSavedGPUAidsStayOff() throws {
+        let defaults = try emptyDefaults()
+        SavedSettings(isHistogramEnabled: true, isPeakingEnabled: true, isZebraEnabled: true).save(to: defaults)
+        let cam = CameraController(defaults: defaults, viewfinderRenderer: nil)
+        #expect(cam.aids.isHistogramEnabled)
+        #expect(!cam.aids.isPeakingEnabled && !cam.aids.isZebraEnabled)
+        #expect(!cam.isViewfinderDrawn)
+    }
+
     @Test func leavingTheScreenWithoutChangingAnythingLeavesTheOtherCopysSettingsAlone() throws {
         // This copy has been waiting in memory with its defaults while the other one saved HEIC. Coming back passes
         // through "inactive", which used to save this copy's stale values over those.
