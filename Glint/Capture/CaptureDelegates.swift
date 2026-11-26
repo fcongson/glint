@@ -28,17 +28,20 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error { emit.yield(.status("Capture error: \(error.localizedDescription)")); return }
-        if let preview = Self.previewImage(of: photo) { emit.yield(.photoPreview(preview, requestedAt: requestedAt)) }
+        if let preview = Self.previewImage(of: photo) {
+            emit.yield(.photo(.preview(preview, requestedAt: requestedAt)))
+        }
         guard let data = photo.fileDataRepresentation() else { return }
         let info = PhotoInfo(
             metadata: photo.metadata, format: plan.savedFormat(isRawPhoto: photo.isRawPhoto),
             whiteBalance: whiteBalance, fileBytes: data.count)
         emit.yield(
-            .photoCaptured(
-                CapturedPhoto(
-                    data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
-                    needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto),
-                    keepsDNG: plan.keepsDNG(isRawPhoto: photo.isRawPhoto), aspect: aspect)))
+            .photo(
+                .captured(
+                    CapturedPhoto(
+                        data: data, captureID: photo.resolvedSettings.uniqueID, info: info, requestedAt: requestedAt,
+                        needsDevelopment: plan.needsDevelopment(isRawPhoto: photo.isRawPhoto),
+                        keepsDNG: plan.keepsDNG(isRawPhoto: photo.isRawPhoto), aspect: aspect))))
     }
 
     /// The capture's preview image, upright. Its pixels are as the sensor saw them; the photo's orientation tag
@@ -72,14 +75,14 @@ final class RecordingDelegate: NSObject, AVCaptureFileOutputRecordingDelegate {
     func fileOutput(
         _ output: AVCaptureFileOutput, didStartRecordingTo url: URL, from connections: [AVCaptureConnection]
     ) {
-        emit.yield(.recordingStarted)
+        emit.yield(.recording(.started))
     }
 
     func fileOutput(
         _ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection],
         error: Error?
     ) {
-        emit.yield(.recordingFinished(url, RecordingOutcome(error: error)))
+        emit.yield(.recording(.finished(url, RecordingOutcome(error: error))))
         finished()
     }
 }
@@ -96,7 +99,7 @@ final class DeferredStartObserver: NSObject, AVCaptureSessionDeferredStartDelega
     func sessionWillRunDeferredStart(_ session: AVCaptureSession) {}
 
     func sessionDidRunDeferredStart(_ session: AVCaptureSession) {
-        emit.yield(.deferredStartFinished)
+        emit.yield(.session(.deferredStartFinished))
     }
 }
 

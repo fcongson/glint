@@ -14,11 +14,11 @@ extension CaptureSession {
                 let reason = raw.flatMap { AVCaptureSession.InterruptionReason(rawValue: $0) }
                 Log.camera.notice(
                     "[\(Log.copy, privacy: .public)] session interrupted by the system, reason \(raw ?? -1)")
-                emit.yield(.interrupted(CameraInterruption(reason)))
+                emit.yield(.session(.interrupted(CameraInterruption(reason))))
             },
             center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) {
                 [emit, weak self] _ in
-                emit.yield(.interruptionEnded)
+                emit.yield(.session(.interruptionEnded))
                 self?.enqueue { $0.applyVideoLight() }  // an interruption puts the light out
             },
             center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) {

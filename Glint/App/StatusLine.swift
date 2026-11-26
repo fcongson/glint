@@ -25,6 +25,11 @@ final class StatusLine {
         }
     }
 
+    /// A developer message: shown only while DEBUG INFO is on in SET.
+    func debug(_ message: String) {
+        if DebugInfo.isOn { post(message) }
+    }
+
     /// For work running off the main actor (e.g. `MediaLibrary`) to post through.
     nonisolated var reporter: @Sendable (String) -> Void {
         { [weak self] message in Task { @MainActor in self?.post(message) } }

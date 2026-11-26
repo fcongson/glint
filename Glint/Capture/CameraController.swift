@@ -243,6 +243,20 @@ final class CameraController {
 
     private func handle(_ event: CaptureEvent) {
         switch event {
+        case .device(let event): handle(event)
+        case .session(let event): handle(event)
+        case .exposure(let event): handle(event)
+        case .focus(let event): handle(event)
+        case .recording(let event): handle(event)
+        case .photo(let event): handle(event)
+        case .analysis(let event): handle(event)
+        case .status(let message): statusLine.post(message)
+        case .debug(let message): statusLine.debug(message)
+        }
+    }
+
+    private func handle(_ event: CaptureEvent.Device) {
+        switch event {
         case .ready(let lenses, let device):
             debugReadout.stop("launch", appending: true)  // the deferred outputs can finish first
             let firstStart = !isCameraReady
@@ -261,19 +275,36 @@ final class CameraController {
             videoCapabilities = caps
         case .videoFormatResolved(let format):
             videoFormat = format
-        case .audioLevel(let level):
-            audioLevel = level
-        case .exposureOffset(let offset):
+        }
+    }
+
+    private func handle(_ event: CaptureEvent.Session) {
+        switch event {
+        case .previewRotation(let angle):
+            if let conn = previewLayer?.connection, conn.isVideoRotationAngleSupported(angle) {
+                conn.videoRotationAngle = angle
+            }
+        case .deferredStartFinished:
+            debugReadout.stop("outputs", appending: true)  // under launch's line: preview first, then everything else
+        case .resumed:
+            debugReadout.stop("resume")
+        case .systemPressure(let level):
+            systemPressureChanged(level)
+        case .interrupted(let reason):
+            Log.camera.notice(
+                "[\(Log.copy, privacy: .public)] interrupted: \(String(describing: reason), privacy: .public)")
+            interruption = reason
+            if let message = reason.message { AccessibilityNotification.Announcement(message).post() }
+        case .interruptionEnded:
+            Log.camera.notice("[\(Log.copy, privacy: .public)] interruption ended")
+            interruption = nil
+        }
+    }
+
+    private func handle(_ event: CaptureEvent.Exposure) {
+        switch event {
+        case .offset(let offset):
             exposureOffset = offset
-        case .lensPosition(let position):
-            // Only autofocus moves the rail. While focusing by hand (or keeping a manual position for when auto mode
-            // ends) the rail is the source of truth, and reports would fight it.
-            if isAutofocus { lensPosition = position }
-        case .manualFocusSeeded(let position):
-            lensPosition = position
-        case .manualFocusUnavailable:
-            isAutofocus = true
-            sendAnalysis()
         case .autoValues(let autoISO, let shutterSeconds):
             // Shown as the nearest ruler stop, which is also where manual picks up if the A is turned off.
             if let autoISO, auto.iso {
@@ -289,49 +320,56 @@ final class CameraController {
         case .whiteBalanceSeeded(let kelvin):
             hasManualWhiteBalance = true
             whiteBalanceKelvin = kelvin  // display only; the device already has auto's exact gains locked
-        case .previewRotation(let angle):
-            if let conn = previewLayer?.connection, conn.isVideoRotationAngleSupported(angle) {
-                conn.videoRotationAngle = angle
-            }
-        case .histogram(let histogram):
-            aids.show(histogram)
-        case .faces(let faces):
-            narrator.facesFound(faces, in: previewLayer)
-        case .photoPreview(let image, let requestedAt):
-            shotLibrary.showPreview(image)
-            #if DEBUG
-                debugReadout.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
-            #endif
-        case .photoCaptured(let photo):
-            photoCaptured(photo)
-        case .deferredStartFinished:
-            debugReadout.stop("outputs", appending: true)  // under launch's line: preview first, then everything else
-        case .debug(let message):
-            if DebugInfo.isOn { statusLine.post(message) }
-        case .systemPressure(let level):
-            systemPressureChanged(level)
-        case .resumed:
-            debugReadout.stop("resume")
-        case .recordingStarted:
+        }
+    }
+
+    private func handle(_ event: CaptureEvent.Focus) {
+        switch event {
+        case .lensPosition(let position):
+            // Only autofocus moves the rail. While focusing by hand (or keeping a manual position for when auto mode
+            // ends) the rail is the source of truth, and reports would fight it.
+            if isAutofocus { lensPosition = position }
+        case .manualFocusSeeded(let position):
+            lensPosition = position
+        case .manualFocusUnavailable:
+            isAutofocus = true
+            sendAnalysis()
+        }
+    }
+
+    private func handle(_ event: CaptureEvent.Recording) {
+        switch event {
+        case .started:
             isRecording = true
             recordingStartedAt = Date()
-        case .recordingFinished(let url, let outcome):
+        case .finished(let url, let outcome):
             isRecording = false
             recordingStartedAt = nil
             // Recording held white balance (and exposure, if asked) still; put the normal modes back.
             capture.enqueue { $0.recordingEnded() }
             sendExposureMode(keepWhiteBalance: true)
             recordingFinished(url, outcome)
-        case .interrupted(let reason):
-            Log.camera.notice(
-                "[\(Log.copy, privacy: .public)] interrupted: \(String(describing: reason), privacy: .public)")
-            interruption = reason
-            if let message = reason.message { AccessibilityNotification.Announcement(message).post() }
-        case .interruptionEnded:
-            Log.camera.notice("[\(Log.copy, privacy: .public)] interruption ended")
-            interruption = nil
-        case .status(let message):
-            statusLine.post(message)
+        case .audioLevel(let level):
+            audioLevel = level
+        }
+    }
+
+    private func handle(_ event: CaptureEvent.Analysis) {
+        switch event {
+        case .histogram(let histogram): aids.show(histogram)
+        case .faces(let faces): narrator.facesFound(faces, in: previewLayer)
+        }
+    }
+
+    private func handle(_ event: CaptureEvent.Photo) {
+        switch event {
+        case .preview(let image, let requestedAt):
+            shotLibrary.showPreview(image)
+            #if DEBUG
+                debugReadout.thumbnailShown(after: CFAbsoluteTimeGetCurrent() - requestedAt)
+            #endif
+        case .captured(let photo):
+            photoCaptured(photo)
         }
     }
 
@@ -529,7 +567,7 @@ final class CameraController {
         guard level != old else { return }
         systemPressure = level
         #if DEBUG
-            if DebugInfo.isOn { statusLine.post("System pressure: \(level)") }  // a message below, if any, replaces it
+            statusLine.debug("System pressure: \(level)")  // a message below, if any, replaces it
         #endif
         viewfinderRenderer?.setAnalysisInterval(level.peakingInterval)
         if level.reducesFrameRate != old.reducesFrameRate {
@@ -691,7 +729,7 @@ final class CameraController {
     // MARK: Video
 
     func toggleRecording() {
-        capture.enqueue { $0.toggleRecording() }  // isRecording follows the .recordingStarted/.recordingFinished events
+        capture.enqueue { $0.toggleRecording() }  // isRecording follows the session's recording events
     }
 
     /// Saves the recording if its file is good, and says why it stopped if it wasn't the user who stopped it. The
