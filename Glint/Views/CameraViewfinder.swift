@@ -118,8 +118,10 @@ struct CameraViewfinder: View {
             // there's room to read them; the top bar has no space to spare beside the Dynamic Island.
             VStack(alignment: .leading, spacing: 6) {
                 if let paused = cam.interruption?.message { OverlayLabel(paused) }  // stays until the camera is back
-                if !cam.status.isEmpty { OverlayLabel(cam.status) }
-                if DebugInfo.isAvailable, debugInfoSetting, !cam.timing.isEmpty { OverlayLabel(cam.timing) }
+                if !cam.statusLine.message.isEmpty { OverlayLabel(cam.statusLine.message) }
+                if DebugInfo.isAvailable, debugInfoSetting, !cam.debugReadout.text.isEmpty {
+                    OverlayLabel(cam.debugReadout.text)
+                }
             }
             .padding(8)
             .allowsHitTesting(false)

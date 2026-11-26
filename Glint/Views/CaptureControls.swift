@@ -153,7 +153,7 @@ struct CaptureControls: View {
         }
         showReview = !reviewEntries.isEmpty
         if reviewEntries.isEmpty {
-            cam.notify(
+            cam.statusLine.post(
                 canRead || isLockScreen
                     ? "No photos to review yet"
                     : "Photos access is off. Allow it in Settings to review your photos")
