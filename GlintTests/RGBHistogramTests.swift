@@ -78,9 +78,9 @@ struct RGBHistogramTests {
 
     @Test func convertsFullRangeYCbCr() {
         for matrix in [YCbCrMatrix.rec601, .rec709, .rec2020] {
-            #expect(matrix.rgb(y: 0, cb: 128, cr: 128) == (0, 0, 0))
-            #expect(matrix.rgb(y: 255, cb: 128, cr: 128) == (255, 255, 255))
-            #expect(matrix.rgb(y: 90, cb: 128, cr: 128) == (90, 90, 90))
+            #expect(matrix.rgb(y: 0, cb: 128, cr: 128) == RGBPixel(red: 0, green: 0, blue: 0))
+            #expect(matrix.rgb(y: 255, cb: 128, cr: 128) == RGBPixel(red: 255, green: 255, blue: 255))
+            #expect(matrix.rgb(y: 90, cb: 128, cr: 128) == RGBPixel(red: 90, green: 90, blue: 90))
         }
         // Rec. 709 primaries, full range: pure red is Y 54, Cb 99, Cr 255 (to the nearest level).
         let red = YCbCrMatrix.rec709.rgb(y: 54, cb: 99, cr: 255)

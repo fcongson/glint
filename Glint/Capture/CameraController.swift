@@ -506,13 +506,13 @@ final class CameraController {
 
     private func sendExposureMode(keepWhiteBalance: Bool) {
         if viewfinderLock != nil { viewfinderLock = nil }  // setting the modes afresh ends a long press's lock
-        let manual = manual, iso = iso, denom = shutterDenominator, kelvin = whiteBalanceKelvin
+        let manual = manual, kelvin = whiteBalanceKelvin
+        let exposure = ManualExposure(iso: iso, shutterDenominator: shutterDenominator, auto: auto, bias: exposureBias)
         let manualFocus: Float? = isAutofocus ? nil : lensPosition
-        let auto = auto, bias = exposureBias
         capture.enqueue {
             $0.setExposureMode(
-                manual: manual, iso: iso, shutterDenominator: denom, kelvin: kelvin,
-                keepWhiteBalance: keepWhiteBalance, manualFocus: manualFocus, auto: auto, bias: bias)
+                manual: manual, exposure: exposure, kelvin: kelvin, keepWhiteBalance: keepWhiteBalance,
+                manualFocus: manualFocus)
         }
     }
 

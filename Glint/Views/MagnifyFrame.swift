@@ -9,12 +9,14 @@ struct MagnifyFrame: View {
         Canvas { context, canvasSize in
             var path = Path()
             let w = canvasSize.width, h = canvasSize.height
-            let corners: [(x: CGFloat, y: CGFloat, dx: CGFloat, dy: CGFloat)] =
-                [(0, 0, 1, 1), (w, 0, -1, 1), (0, h, 1, -1), (w, h, -1, -1)]
-            for (x, y, dx, dy) in corners {
-                path.move(to: CGPoint(x: x + dx * arm, y: y))
-                path.addLine(to: CGPoint(x: x, y: y))
-                path.addLine(to: CGPoint(x: x, y: y + dy * arm))
+            let corners: [(point: CGPoint, inward: CGVector)] = [
+                (CGPoint(x: 0, y: 0), CGVector(dx: 1, dy: 1)), (CGPoint(x: w, y: 0), CGVector(dx: -1, dy: 1)),
+                (CGPoint(x: 0, y: h), CGVector(dx: 1, dy: -1)), (CGPoint(x: w, y: h), CGVector(dx: -1, dy: -1)),
+            ]
+            for (corner, inward) in corners {
+                path.move(to: CGPoint(x: corner.x + inward.dx * arm, y: corner.y))
+                path.addLine(to: corner)
+                path.addLine(to: CGPoint(x: corner.x, y: corner.y + inward.dy * arm))
             }
             context.stroke(path, with: .color(.white.opacity(0.9)), lineWidth: 1.5)
         }

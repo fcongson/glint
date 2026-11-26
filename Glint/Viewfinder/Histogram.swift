@@ -66,15 +66,21 @@ struct YCbCrMatrix: Sendable, Equatable {
     }
 
     /// Each 0 … 255, clamped: a saturated colour can fall outside what RGB holds.
-    func rgb(y: UInt8, cb: UInt8, cr: UInt8) -> (red: Int, green: Int, blue: Int) {
+    func rgb(y: UInt8, cb: UInt8, cr: UInt8) -> RGBPixel {
         let luma = Float(y), blueDifference = Float(cb) - 128, redDifference = Float(cr) - 128
         func level(_ value: Float) -> Int { Int(min(max(value, 0), 255).rounded()) }
-        return (
-            level(luma + crToRed * redDifference),
-            level(luma + cbToGreen * blueDifference + crToGreen * redDifference),
-            level(luma + cbToBlue * blueDifference)
-        )
+        return RGBPixel(
+            red: level(luma + crToRed * redDifference),
+            green: level(luma + cbToGreen * blueDifference + crToGreen * redDifference),
+            blue: level(luma + cbToBlue * blueDifference))
     }
+}
+
+/// One pixel's red, green and blue, each 0 … 255.
+struct RGBPixel: Sendable, Equatable {
+    let red: Int
+    let green: Int
+    let blue: Int
 }
 
 /// Histogram of one frame: luma, from the Y plane of a 420YpCbCr8 pixel buffer, and red, green and blue too when

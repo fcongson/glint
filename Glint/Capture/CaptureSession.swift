@@ -396,22 +396,22 @@ actor CaptureSession {
     /// there is one, otherwise continuous autofocus.
     /// `keepWhiteBalance` re-applies `kelvin` (after a lens switch) instead of locking whatever auto has currently chosen.
     ///
-    /// In manual, `auto` hands individual settings back to the camera: both exposure settings means continuous auto
-    /// exposure (program); one means shutter or ISO priority, where `followAuto` corrects the other from the meter.
-    /// `bias` is exposure compensation in stops, used only while the camera chooses some of the exposure.
+    /// In manual, `exposure.auto` hands individual settings back to the camera: both exposure settings means
+    /// continuous auto exposure (program); one means shutter or ISO priority, where `followAuto` corrects the other
+    /// from the meter. `exposure.bias` is compensation in stops, used only while the camera chooses some of it.
     func setExposureMode(
-        manual: Bool, iso: Float, shutterDenominator: Double, kelvin: Float, keepWhiteBalance: Bool,
-        manualFocus: Float?, auto: AutoSettings, bias: Float
+        manual: Bool, exposure asked: ManualExposure, kelvin: Float, keepWhiteBalance: Bool, manualFocus: Float?
     ) {
         guard let d = device else { return }
-        let (auto, shutterDenominator) = effective(auto: auto, shutterDenominator: shutterDenominator)
+        var exposure = asked
+        (exposure.auto, exposure.shutterDenominator) = effective(
+            auto: asked.auto, shutterDenominator: asked.shutterDenominator)
         isManual = manual
-        autoSettings = auto
+        autoSettings = exposure.auto
         exposureFrozen = false
         focusHeld = false  // the modes set here replace a long press's hold
         exposureHeld = false
         exposureQueue.reset()  // superseded by what's set here
-        let exposure = ManualExposure(iso: iso, shutterDenominator: shutterDenominator, auto: auto, bias: bias)
         let whiteBalance = ManualWhiteBalance(kelvin: kelvin, tint: wbTint, keep: keepWhiteBalance)
         withLockedDevice(d, failure: "Config") { d in
             if let seeded = DeviceControl.applyModes(d, manual: manual, exposure: exposure, whiteBalance: whiteBalance)

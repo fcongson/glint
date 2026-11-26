@@ -12,95 +12,6 @@ struct SetMenu: View {
     @AppStorage(RailSide.key, store: SharedDefaults.store) private var railSide: RailSide = .right
     @AppStorage(DebugInfo.key, store: SharedDefaults.store) private var debugInfo = false
 
-    enum Tile: CaseIterable {
-        case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
-        case peakingMode, sensitivity, colour, lines, histogram, zebras, grid, level, railSide, debugInfo
-
-        /// The row's label, under its section's heading.
-        var title: String {
-            switch self {
-            case .peakingMode: "MODE"
-            case .sensitivity: "SENSITIVITY"
-            case .colour: "COLOUR"
-            case .lines: "LINES"
-            case .zebras: "ZEBRAS"
-            case .railSide: "FOCUS RAIL"
-            case .fileType: "FILE"
-            case .aspect: "ASPECT"
-            case .resolution: "RESOLUTION"
-            case .frameRate: "FRAME RATE"
-            case .codec: "FORMAT"
-            case .encoding: "ENCODING"
-            case .recordingExposure: "REC EXPOSURE"  // exposure while recording; the full name doesn't fit the column
-            case .debugInfo: "DEBUG INFO"
-            case .flash: "FLASH"
-            case .light: "LIGHT"
-            case .histogram: "HISTOGRAM"
-            case .grid: "GRID"
-            case .level: "LEVEL"
-            }
-        }
-
-        var section: Section {
-            switch self {
-            case .peakingMode, .sensitivity, .colour, .lines: .peaking
-            case .histogram, .zebras, .grid, .level, .railSide: .viewfinder
-            case .fileType, .aspect, .flash: .photo
-            case .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light: .video
-            case .debugInfo: .developer
-            }
-        }
-
-        /// Spoken name, for VoiceOver.
-        var name: String {
-            switch self {
-            case .peakingMode: "Peaking mode"
-            case .sensitivity: "Peaking sensitivity"
-            case .colour: "Peaking colour"
-            case .lines: "Peaking lines"
-            case .zebras: "Zebra level"
-            case .railSide: "Focus rail side"
-            case .fileType: "File type"
-            case .aspect: "Aspect ratio"
-            case .resolution: "Video resolution"
-            case .frameRate: "Frame rate"
-            case .codec: "Video codec"
-            case .encoding: "Encoding"
-            case .recordingExposure: "Exposure while recording"
-            case .debugInfo: "Debug info"
-            case .flash: "Flash"
-            case .light: "Video light"
-            case .histogram: "Histogram"
-            case .grid: "Grid"
-            case .level: "Level"
-            }
-        }
-
-        /// Shown only in its capture mode: the photo format in PHOTO, the video format in VIDEO.
-        func isShown(in mode: CaptureMode) -> Bool {
-            switch section {
-            case .photo: mode == .photo
-            case .video: mode == .video
-            default: true
-            }
-        }
-    }
-
-    /// Settings grouped under a heading, so it's clear which feature each belongs to.
-    enum Section: CaseIterable {
-        case photo, video, peaking, viewfinder, developer  // the format first: the top bar's readout opens SET
-
-        var title: String {
-            switch self {
-            case .peaking: "FOCUS PEAKING"
-            case .viewfinder: "VIEWFINDER"
-            case .photo: "PHOTO"
-            case .video: "VIDEO"
-            case .developer: "DEVELOPER"
-            }
-        }
-    }
-
     private var rows: [Tile] {
         Tile.allCases.filter {
             $0.isShown(in: cam.captureMode) && ($0.section != .developer || DebugInfo.isAvailable)
@@ -173,31 +84,18 @@ struct SetMenu: View {
 
     @ViewBuilder
     private func row(_ tile: Tile) -> some View {
+        switch tile.section {
+        case .photo: photoRow(tile)
+        case .video: videoRow(tile)
+        case .peaking: peakingRow(tile)
+        case .viewfinder: viewfinderRow(tile)
+        case .developer: developerRow(tile)
+        }
+    }
+
+    @ViewBuilder
+    private func photoRow(_ tile: Tile) -> some View {
         switch tile {
-        case .peakingMode:
-            SettingRow(
-                tile: tile, options: PeakingMode.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.aids.peakingMode, onSelect: { cam.aids.setPeakingMode($0) })
-        case .sensitivity:
-            SettingRow(
-                tile: tile, options: PeakingSensitivity.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.aids.peakingSensitivity, onSelect: { cam.aids.setPeakingSensitivity($0) })
-        case .colour:
-            SettingRow(
-                tile: tile, options: PeakingColor.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.aids.peakingAppearance.color, onSelect: { cam.aids.setPeakingColor($0) })
-        case .lines:
-            SettingRow(
-                tile: tile, options: PeakingLines.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.aids.peakingAppearance.lines, onSelect: { cam.aids.setPeakingLines($0) })
-        case .zebras:
-            SettingRow(
-                tile: tile, options: ZebraLevel.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.aids.zebraLevel, onSelect: { cam.aids.setZebraLevel($0) })
-        case .railSide:
-            SettingRow(
-                tile: tile, options: RailSide.allCases.map { (title: $0.title, value: $0) },
-                selection: railSide, onSelect: { railSide = $0 })
         case .fileType:
             SettingRow(
                 tile: tile, options: PhotoFileType.allCases.map { (title: SettingsText.fileType($0), value: $0) },
@@ -208,6 +106,20 @@ struct SetMenu: View {
                 selection: cam.appliedAspect, onSelect: { cam.setAspect($0) },
                 spoken: { SettingsText.aspectSpoken($0) },
                 isAvailable: { _ in cam.canChooseAspect })  // RAW keeps the full sensor, so there's no crop to choose
+        case .flash:
+            // Greyed out on a lens with no flash, where Off is all there is.
+            SettingRow(
+                tile: tile, options: FlashSetting.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.flash.available(hasFlash: cam.hasFlash), onSelect: { cam.setFlash($0) },
+                spoken: { "Flash \($0.title.lowercased())" },
+                isAvailable: { $0 == .off || cam.hasFlash })
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func videoRow(_ tile: Tile) -> some View {
+        switch tile {
         case .resolution:
             SettingRow(
                 tile: tile, options: VideoResolution.allCases.map { (title: SettingsText.resolution($0), value: $0) },
@@ -235,28 +147,51 @@ struct SetMenu: View {
                 selection: format.locksExposureWhileRecording,
                 onSelect: { locked in updateVideo { $0.locksExposureWhileRecording = locked } },
                 isAvailable: { _ in canChangeVideo })
-        case .debugInfo:
-            SettingRow(
-                tile: tile, options: [(title: "On", value: true), (title: "Off", value: false)],
-                selection: debugInfo, onSelect: { debugInfo = $0 })
-        case .flash:
-            // Greyed out on a lens with no flash, where Off is all there is.
-            SettingRow(
-                tile: tile, options: FlashSetting.allCases.map { (title: $0.title, value: $0) },
-                selection: cam.flash.available(hasFlash: cam.hasFlash), onSelect: { cam.setFlash($0) },
-                spoken: { "Flash \($0.title.lowercased())" },
-                isAvailable: { $0 == .off || cam.hasFlash })
         case .light:
             // Not part of the format, so it stays live while recording.
             SettingRow(
                 tile: tile, options: Self.offOn, selection: cam.isVideoLightOn && cam.hasVideoLight,
                 onSelect: { cam.setVideoLight($0) },
                 isAvailable: { !$0 || cam.hasVideoLight })
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func peakingRow(_ tile: Tile) -> some View {
+        switch tile {
+        case .peakingMode:
+            SettingRow(
+                tile: tile, options: PeakingMode.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.aids.peakingMode, onSelect: { cam.aids.setPeakingMode($0) })
+        case .sensitivity:
+            SettingRow(
+                tile: tile, options: PeakingSensitivity.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.aids.peakingSensitivity, onSelect: { cam.aids.setPeakingSensitivity($0) })
+        case .colour:
+            SettingRow(
+                tile: tile, options: PeakingColor.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.aids.peakingAppearance.color, onSelect: { cam.aids.setPeakingColor($0) })
+        case .lines:
+            SettingRow(
+                tile: tile, options: PeakingLines.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.aids.peakingAppearance.lines, onSelect: { cam.aids.setPeakingLines($0) })
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func viewfinderRow(_ tile: Tile) -> some View {
+        switch tile {
         case .histogram:
             SettingRow(
                 tile: tile, options: HistogramStyle.allCases.map { (title: $0.title, value: $0) },
                 selection: cam.aids.histogramStyle, onSelect: { cam.aids.setHistogramStyle($0) },
                 spoken: { $0 == .rgb ? "Red, green and blue" : "Brightness" })
+        case .zebras:
+            SettingRow(
+                tile: tile, options: ZebraLevel.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.aids.zebraLevel, onSelect: { cam.aids.setZebraLevel($0) })
         case .grid:
             SettingRow(
                 tile: tile, options: [(title: "Off", value: false), (title: "Thirds", value: true)],
@@ -265,6 +200,22 @@ struct SetMenu: View {
             SettingRow(
                 tile: tile, options: Self.offOn, selection: cam.isLevelEnabled,
                 onSelect: { cam.setLevelEnabled($0) })
+        case .railSide:
+            SettingRow(
+                tile: tile, options: RailSide.allCases.map { (title: $0.title, value: $0) },
+                selection: railSide, onSelect: { railSide = $0 })
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func developerRow(_ tile: Tile) -> some View {
+        switch tile {
+        case .debugInfo:
+            SettingRow(
+                tile: tile, options: [(title: "On", value: true), (title: "Off", value: false)],
+                selection: debugInfo, onSelect: { debugInfo = $0 })
+        default: EmptyView()
         }
     }
 }

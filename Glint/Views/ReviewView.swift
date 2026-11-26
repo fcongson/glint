@@ -157,29 +157,34 @@ struct ReviewView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            HStack(spacing: 14) {
-                ForEach(rows(for: info), id: \.label) { row in
-                    VStack(spacing: 2) {
-                        Text(row.label)
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.6))
-                        Text(row.value)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Color.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
-                    .rotationEffect(angle)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 4)
+            settingsStrip(for: info)
         }
         .font(.system(size: 11, design: .monospaced))
         .foregroundStyle(Color.white.opacity(0.7))
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// The settings the photo was taken with, side by side, each turned with the phone.
+    private func settingsStrip(for info: PhotoInfo) -> some View {
+        HStack(spacing: 14) {
+            ForEach(rows(for: info), id: \.label) { row in
+                VStack(spacing: 2) {
+                    Text(row.label)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                    Text(row.value)
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                .rotationEffect(angle)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
     }
 
     /// The recording's date and details, above the player's own controls.
