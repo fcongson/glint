@@ -51,6 +51,10 @@ enum ExposureScale {
         return best
     }
 
+    static func nearestISO(_ iso: Float) -> Float { nearest(iso, in: allISOStops) }
+
+    static func nearestShutter(_ denominator: Double) -> Double { nearest(denominator, in: shutterDenominators) }
+
     static func nearest<T: BinaryFloatingPoint>(_ value: T, in stops: [T]) -> T {
         stops.isEmpty ? value : stops[nearestIndex(of: value, in: stops)]
     }

@@ -62,3 +62,17 @@ struct ExposureScaleTests {
         #expect(ExposureScale.nearest(Float(42), in: []) == 42)
     }
 }
+
+struct ExposureScaleSnappingTests {
+    @Test func isoSnapsToTheNearestStop() {
+        #expect(ExposureScale.nearestISO(32) == 50)
+        #expect(ExposureScale.nearestISO(9009) == 10000)
+        #expect(ExposureScale.nearestISO(400) == 400)
+    }
+
+    @Test func shutterSnapsToTheNearestStop() {
+        #expect(ExposureScale.nearestShutter(47) == 50)
+        #expect(ExposureScale.nearestShutter(9009) == 8000)
+        #expect(ExposureScale.nearestShutter(125) == 125)
+    }
+}

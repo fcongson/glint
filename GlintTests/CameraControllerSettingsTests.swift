@@ -131,3 +131,35 @@ struct CameraControllerSettingsTests {
         #expect(cam.aspect == .fourThree)
     }
 }
+
+// MARK: ISO and shutter stay on the ruler's stops
+
+extension CameraControllerSettingsTests {
+    private func device(minISO: Float, maxISO: Float) -> DeviceInfo {
+        DeviceInfo(
+            lensID: "wide", minISO: minISO, maxISO: maxISO, aperture: 1.6, hasFlash: true, hasTorch: true)
+    }
+
+    @Test func aLensRangeThatEndsBetweenStopsLeavesISOOnAStop() throws {
+        let cam = CameraController(defaults: try emptyDefaults())
+        cam.apply(device(minISO: 32, maxISO: 9009))
+        #expect(ExposureScale.allISOStops.contains(cam.iso))
+
+        cam.setManual(true)
+        cam.setAuto(.iso, false)
+        cam.setISO(32_000)
+        cam.apply(device(minISO: 32, maxISO: 9009))
+        #expect(cam.iso == 8000)
+    }
+
+    @Test func savedISOAndShutterOffTheScaleComeBackOnAStop() throws {
+        let defaults = try emptyDefaults()
+        var saved = SavedSettings()
+        saved.iso = 9009
+        saved.shutterDenominator = 47
+        defaults.set(try JSONEncoder().encode(saved), forKey: SavedSettings.key)
+        let cam = CameraController(defaults: defaults)
+        #expect(cam.iso == 10000)
+        #expect(cam.shutterDenominator == 50)
+    }
+}
