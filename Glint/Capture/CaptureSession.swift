@@ -21,16 +21,16 @@ actor CaptureSession {
     nonisolated(unsafe) let session = AVCaptureSession()
 
     nonisolated let events: AsyncStream<CaptureEvent>
-    private let emit: AsyncStream<CaptureEvent>.Continuation
+    let emit: AsyncStream<CaptureEvent>.Continuation
 
     typealias Command = @Sendable (isolated CaptureSession) -> Void
     private let commands: AsyncStream<Command>.Continuation
 
     private let photoOutput = AVCapturePhotoOutput()
-    private let movieOutput = AVCaptureMovieFileOutput()
+    let movieOutput = AVCaptureMovieFileOutput()
     private let analyzer: FrameAnalyzer  // histogram and the GPU viewfinder, from one video data output
     private let faceDetector: FaceDetector  // for VoiceOver; its output is attached only while that's running
-    private var device: AVCaptureDevice?
+    var device: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
     private var lensDevices: [String: AVCaptureDevice] = [:]
     private var wbTint: Float = 0
@@ -41,20 +41,20 @@ actor CaptureSession {
     private var manualFocusPosition: Float?  // nil while autofocus is in charge
     private var isManual = false  // the AUTO | MANUAL switch, as last applied
     private var autoSettings = AutoSettings()  // which manual settings the camera chooses (as applied, see `effective`)
-    private var isVideo = false  // PHOTO · VIDEO: video uses a video device format
-    private var videoFormat = VideoFormat()
-    private var exposureFrozen = false  // video's "exposure while recording: locked"
+    var isVideo = false  // PHOTO · VIDEO: video uses a video device format
+    var videoFormat = VideoFormat()
+    var exposureFrozen = false  // video's "exposure while recording: locked"
     private var exposureQueue = ExposureQueue()  // custom exposure changes go one at a time; see `requestExposure`
-    private var audioMeterTask: Task<Void, Never>?
-    private var micInput: AVCaptureDeviceInput?  // attached only in VIDEO, see `setMicrophone`
-    private var frameRateReduced = false  // critical system pressure, PHOTO only; see `setFrameRateReduced`
-    private var raisedMaxFrameDuration = false  // whether reducing the frame rate also lengthened the longest frame
+    var audioMeterTask: Task<Void, Never>?
+    var micInput: AVCaptureDeviceInput?  // attached only in VIDEO, see `setMicrophone`
+    var frameRateReduced = false  // critical system pressure, PHOTO only; see `setFrameRateReduced`
+    var raisedMaxFrameDuration = false  // whether reducing the frame rate also lengthened the longest frame
     private var preparePending = false  // a photo preparation is queued; see `schedulePhotoPreparation`
     private var deferredStartObserver: NSObject?  // the session's deferred start delegate (iOS 26+), kept alive here
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]  // kept alive until each capture finishes
-    private var recordingDelegate: RecordingDelegate?
-    private var wantsRunning = false  // whether the camera should be running; see `setRunning`
-    private var sessionObservers: [any NSObjectProtocol] = []  // interruptions and runtime errors
+    var recordingDelegate: RecordingDelegate?
+    var wantsRunning = false  // whether the camera should be running; see `setRunning`
+    var sessionObservers: [any NSObjectProtocol] = []  // interruptions and runtime errors
     private var videoLight = false  // VIDEO's LIGHT; see `applyVideoLight`
     private var focusHeld = false  // a long press is holding focus; see `holdFocusAndExposure`
     private var exposureHeld = false  // …and exposure
@@ -164,50 +164,7 @@ actor CaptureSession {
         emit.yield(.videoCapabilities(videoCapabilities(wide)))
     }
 
-    // MARK: Interruptions and errors
-
-    /// The system can take the camera away (another app, a call, heat) and hand it back; the session stops and
-    /// resumes by itself, and the viewfinder says why meanwhile. A runtime error stops the session for good unless
-    /// it's restarted, see `recoverFromRuntimeError`. Notifications arrive on any thread, so they only emit or enqueue.
-    private func observeSession() {
-        let center = NotificationCenter.default
-        sessionObservers = [
-            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) {
-                [emit] note in
-                let raw = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
-                let reason = raw.flatMap { AVCaptureSession.InterruptionReason(rawValue: $0) }
-                Log.camera.notice(
-                    "[\(Log.copy, privacy: .public)] session interrupted by the system, reason \(raw ?? -1)")
-                emit.yield(.interrupted(CameraInterruption(reason)))
-            },
-            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) {
-                [emit, weak self] _ in
-                emit.yield(.interruptionEnded)
-                self?.enqueue { $0.applyVideoLight() }  // an interruption puts the light out
-            },
-            center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) {
-                [weak self] note in
-                let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
-                let wasReset =
-                    error?.domain == AVFoundationErrorDomain
-                    && error?.code == AVError.Code.mediaServicesWereReset.rawValue
-                let description = error?.localizedDescription ?? "unknown"
-                self?.enqueue { $0.recoverFromRuntimeError(mediaServicesWereReset: wasReset, description: description) }
-            },
-        ]
-    }
-
-    /// When the system's media services restart, the session has stopped through no fault of its own: start it again,
-    /// as Apple's sample camera does. Any other error is reported and left, rather than restarted into the same failure.
-    private func recoverFromRuntimeError(mediaServicesWereReset: Bool, description: String) {
-        guard mediaServicesWereReset else {
-            emit.yield(.status("Camera error: \(description)"))
-            return
-        }
-        guard wantsRunning, !session.isRunning else { return }
-        session.startRunning()
-        schedulePhotoPreparation()
-    }
+    // MARK: Configuration
 
     /// Launch brings up the preview first and starts everything else a moment later (WWDC26 "Build a responsive
     /// camera app that launches quickly": in Apple's test, launch about halved). The system preview layer isn't
@@ -232,7 +189,7 @@ actor CaptureSession {
     /// The movie output is deferred in PHOTO, so it doesn't slow launch, and started with the session in VIDEO:
     /// deferred, its encoder can be unprepared for the first take (notably ProRes RAW, where Apple's advice is to
     /// turn deferral off). Call inside a session configuration.
-    private func setMovieOutputDeferred(_ deferred: Bool) {
+    func setMovieOutputDeferred(_ deferred: Bool) {
         guard #available(iOS 26.0, *), movieOutput.isDeferredStartSupported,
             movieOutput.isDeferredStartEnabled != deferred
         else { return }
@@ -243,7 +200,7 @@ actor CaptureSession {
     /// buffers one taken before it has started. Whether a lens and format support it can change, so this runs in
     /// each configuration that changes the lens or the mode (changing it outside one would rebuild the session).
     /// Fast capture prioritisation isn't used: Glint already shoots at `.speed`.
-    private func updateResponsiveCapture() {
+    func updateResponsiveCapture() {
         let wanted = !isVideo && photoOutput.isResponsiveCaptureSupported
         if photoOutput.isResponsiveCaptureEnabled != wanted { photoOutput.isResponsiveCaptureEnabled = wanted }
     }
@@ -251,7 +208,7 @@ actor CaptureSession {
     /// Rebuilt connections come back enabled and stabilised: the analysis output's frames go off unless something
     /// wants them, and the movie's stabilisation stays off. Only changes what differs, since a change after a commit
     /// waits for the pipeline; inside a configuration it lands with the rebuild.
-    private func setConnections() {
+    func setConnections() {
         if let c = analyzer.output.connection(with: .video), c.isEnabled != analyzer.isWanted {
             c.isEnabled = analyzer.isWanted
         }
@@ -264,7 +221,7 @@ actor CaptureSession {
     /// puts the audio session in record mode, which silences the Taptic Engine by default; rebuilt connections
     /// come back enabled, so preview frames would flow to the analysis output when nothing wants them; and the
     /// photo output's prepared settings may need preparing again.
-    private func restoreAfterReconfiguration() {
+    func restoreAfterReconfiguration() {
         // Only the microphone silences haptics, and it's attached only in VIDEO (#8). Without it, this call is
         // pointless and can be slow, since it sets up the app's audio session.
         if micInput != nil { try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true) }
@@ -299,7 +256,7 @@ actor CaptureSession {
     }
 
     /// Per-lens setup: distortion correction off, stabilization off. Returns the lens's ranges and aperture.
-    private func applyDeviceSettings(_ d: AVCaptureDevice) -> DeviceInfo {
+    func applyDeviceSettings(_ d: AVCaptureDevice) -> DeviceInfo {
         withLockedDevice(d, failure: "Config") { d in
             if d.isGeometricDistortionCorrectionSupported {
                 d.isGeometricDistortionCorrectionEnabled = false
@@ -359,7 +316,7 @@ actor CaptureSession {
     /// Caps the frame rate by setting the shortest frame (`activeVideoMinFrameDuration`). The longest frame is only
     /// lengthened if it has to be, so a manual exposure longer than the reduced frame isn't cut short; restoring
     /// puts back only what was changed.
-    private func applyFrameRateLimit(_ d: AVCaptureDevice) {
+    func applyFrameRateLimit(_ d: AVCaptureDevice) {
         guard !isVideo else { return }
         let rate = SystemPressure.reducedFrameRate
         withLockedDevice(d, failure: "Frame rate") { d in
@@ -396,7 +353,7 @@ actor CaptureSession {
         }
     }
 
-    private func applyCaptureRotation(to output: AVCaptureOutput) {
+    func applyCaptureRotation(to output: AVCaptureOutput) {
         guard let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture,
             let conn = output.connection(with: .video), conn.isVideoRotationAngleSupported(angle)
         else { return }
@@ -596,7 +553,7 @@ actor CaptureSession {
 
     /// Runs `changes` with the device locked for configuration and always unlocks afterwards.
     /// If the lock can't be taken, `changes` is skipped and "<failure> error: …" is reported.
-    private func withLockedDevice(_ d: AVCaptureDevice, failure: String, _ changes: (AVCaptureDevice) -> Void) {
+    func withLockedDevice(_ d: AVCaptureDevice, failure: String, _ changes: (AVCaptureDevice) -> Void) {
         do {
             try d.lockForConfiguration()
         } catch {
@@ -657,7 +614,7 @@ actor CaptureSession {
     /// Stops the session once nothing needs it: stopping with a photo still being captured would lose the photo
     /// (opening review straight after the shutter), and stopping mid-recording would end the recording. Called
     /// again as each capture and recording finishes, so the stop that was held back happens then.
-    private func stopIfIdle() {
+    func stopIfIdle() {
         guard !wantsRunning, session.isRunning, !movieOutput.isRecording, photoDelegates.isEmpty else {
             Log.camera.notice(
                 "[\(Log.copy, privacy: .public)] stop held back (wants running \(self.wantsRunning), running \(self.session.isRunning), recording \(self.movieOutput.isRecording), shots in flight \(self.photoDelegates.count))"
@@ -907,7 +864,7 @@ actor CaptureSession {
     }
 
     /// Queues `preparePhotoSettings` to run after the current command, once however many reconfigurations ask.
-    private func schedulePhotoPreparation() {
+    func schedulePhotoPreparation() {
         guard !preparePending else { return }
         preparePending = true
         enqueue { $0.preparePhotoSettings() }
@@ -926,7 +883,7 @@ actor CaptureSession {
 
     /// Lit only in VIDEO with the camera running, so framing and exposure can be set with it before recording.
     /// A new lens or format, stopping the camera and an interruption all put it out, so this runs after each.
-    private func applyVideoLight() {
+    func applyVideoLight() {
         guard let d = device, d.hasTorch else { return }
         let mode: AVCaptureDevice.TorchMode =
             videoLight && isVideo && session.isRunning && d.isTorchAvailable ? .on : .off
@@ -949,193 +906,5 @@ actor CaptureSession {
         session.commitConfiguration()
         restoreAfterReconfiguration()
         if on { faceDetector.selectFaces() }
-    }
-
-    // MARK: Video formats
-
-    /// PHOTO · VIDEO. Video switches the device to a video format for `format`; photo returns to the photo preset
-    /// (Bayer RAW stills). Either way the controller re-applies manual settings on `.formatChanged`.
-    /// `withAudio` attaches the microphone for video (false if access was refused); photo always detaches it.
-    func setCaptureMode(video: Bool, format: VideoFormat, withAudio: Bool) {
-        guard let d = device, !movieOutput.isRecording else { return }
-        isVideo = video
-        videoFormat = format
-        // One configuration for the microphone and the format, so the session is rebuilt once.
-        session.beginConfiguration()
-        setMicrophone(video && withAudio)
-        setMovieOutputDeferred(!video)
-        if video {
-            configureVideoFormat(d)
-        } else {
-            session.automaticallyConfiguresCaptureDeviceForWideColor = true
-            session.sessionPreset = .photo
-        }
-        updateResponsiveCapture()
-        setConnections()
-        session.commitConfiguration()
-        if !video {
-            raisedMaxFrameDuration = false  // the preset put the format's defaults back
-            if frameRateReduced { applyFrameRateLimit(d) }
-        }
-        if video { checkHardwareCost() }
-        restoreAfterReconfiguration()
-        let info = applyDeviceSettings(d)
-        emit.yield(.videoCapabilities(videoCapabilities(d)))
-        emit.yield(.formatChanged(info))
-    }
-
-    /// The microphone is attached only in VIDEO. While attached it keeps the audio system recording, which costs
-    /// battery, shows the orange indicator and silences haptics unless they're re-allowed; stills never need it.
-    /// Call inside a session configuration.
-    private func setMicrophone(_ on: Bool) {
-        if on {
-            guard micInput == nil, let mic = AVCaptureDevice.default(for: .audio),
-                let input = try? AVCaptureDeviceInput(device: mic), session.canAddInput(input)
-            else { return }
-            session.addInput(input)
-            micInput = input
-        } else if let input = micInput {
-            session.removeInput(input)
-            micInput = nil
-        }
-    }
-
-    /// A new choice from SET's VIDEO rows.
-    func setVideoFormat(_ format: VideoFormat) {
-        guard let d = device, !movieOutput.isRecording else { return }
-        // The exposure lock only matters when recording starts; no need to touch the device for it.
-        var sameDeviceFormat = format
-        sameDeviceFormat.locksExposureWhileRecording = videoFormat.locksExposureWhileRecording
-        let needsDeviceFormat = sameDeviceFormat != videoFormat
-        videoFormat = format
-        guard isVideo, needsDeviceFormat else { return }
-        configureVideoFormat(d)
-        checkHardwareCost()
-        let info = applyDeviceSettings(d)
-        emit.yield(.videoCapabilities(videoCapabilities(d)))
-        emit.yield(.formatChanged(info))
-    }
-
-    /// Apple: after committing a configuration, check `hardwareCost` is at or below 1; above it, the camera hardware
-    /// can't run it. Glint's formats come from what the lens reports, so this shouldn't fire; if it does, say so.
-    private func checkHardwareCost() {
-        if session.hardwareCost > 1 {
-            emit.yield(.status("This video format is more than this iPhone can sustain"))
-        }
-    }
-
-    /// Picks and activates the device format for `videoFormat`, settling on the nearest one the lens has.
-    private func configureVideoFormat(_ d: AVCaptureDevice) {
-        let caps = videoCapabilities(d)
-        let wanted = videoFormat.normalized(for: caps)
-        guard let format = DeviceVideoFormats.format(for: wanted, on: d) else {
-            emit.yield(.status("This lens can't record that format"))
-            return
-        }
-        // Apple Log needs the session to leave the colour space alone.
-        session.automaticallyConfiguresCaptureDeviceForWideColor = wanted.encoding != .log
-        withLockedDevice(d, failure: "Video format") { d in
-            d.activeFormat = format
-            applyFormatDefaults(d)
-            let frame = CMTime(value: 1, timescale: CMTimeScale(wanted.frameRate))
-            d.activeVideoMinFrameDuration = frame
-            d.activeVideoMaxFrameDuration = frame
-            let space: AVCaptureColorSpace = wanted.encoding == .log ? .appleLog : .sRGB
-            if format.supportedColorSpaces.contains(space) { d.activeColorSpace = space }
-        }
-        if wanted != videoFormat {
-            videoFormat = wanted
-            emit.yield(.videoFormatResolved(wanted))
-        }
-    }
-
-    /// What this lens can record; ProRes from the movie output as currently configured.
-    private func videoCapabilities(_ d: AVCaptureDevice) -> VideoCapabilities {
-        DeviceVideoFormats.capabilities(of: d, codecs: movieOutput.availableVideoCodecTypes)
-    }
-
-    /// Sets the movie output's codec for the chosen format, falling back to HEVC if it isn't offered.
-    private func applyCodec() {
-        guard let connection = movieOutput.connection(with: .video) else { return }
-        let available = movieOutput.availableVideoCodecTypes
-        var wanted: [AVVideoCodecType] = []
-        switch videoFormat.codec {
-        case .hevc: break
-        case .proRes: wanted = [.proRes422HQ, .proRes422]
-        case .proResRAW:
-            if #available(iOS 26.0, *) { wanted = [.proResRAW] }
-        }
-        let codec = wanted.first(where: { available.contains($0) }) ?? .hevc
-        if !wanted.isEmpty && codec == .hevc { emit.yield(.status("That format isn't available here, recording HEVC")) }
-        if available.contains(codec) { movieOutput.setOutputSettings([AVVideoCodecKey: codec], for: connection) }
-    }
-
-    /// White balance always holds still while recording, so colour doesn't drift mid-clip; exposure too when
-    /// the video format says so. The controller re-applies the normal modes when recording finishes.
-    private func lockForRecording() {
-        guard let d = device else { return }
-        let lockExposure = isVideo && videoFormat.locksExposureWhileRecording
-        exposureFrozen = lockExposure
-        withLockedDevice(d, failure: "Config") { d in
-            if d.whiteBalanceMode == .continuousAutoWhiteBalance, d.isWhiteBalanceModeSupported(.locked) {
-                d.whiteBalanceMode = .locked
-            }
-            if lockExposure, d.exposureMode == .continuousAutoExposure, d.isExposureModeSupported(.locked) {
-                d.exposureMode = .locked
-            }
-        }
-    }
-
-    /// Polls the microphone's level about ten times a second while recording.
-    private func startAudioMeter() {
-        audioMeterTask?.cancel()
-        audioMeterTask = Task { [self] in
-            while !Task.isCancelled {
-                reportAudioLevel()
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-        }
-    }
-
-    private func reportAudioLevel() {
-        guard let channel = movieOutput.connection(with: .audio)?.audioChannels.first else { return }
-        // -50 dB (a quiet room) … 0 dB (full scale), as 0 … 1.
-        emit.yield(.audioLevel(min(max((channel.averagePowerLevel + 50) / 50, 0), 1)))
-    }
-
-    private func stopAudioMeter() {
-        audioMeterTask?.cancel()
-        audioMeterTask = nil
-        emit.yield(.audioLevel(0))
-    }
-
-    /// Called when a recording has finished, however it ended: stops the meter and lifts the exposure lock.
-    /// The controller then re-applies its exposure and white balance modes.
-    func recordingEnded() {
-        stopAudioMeter()
-        exposureFrozen = false
-        stopIfIdle()  // review may have opened mid-recording
-    }
-
-    // MARK: Video
-
-    /// Starts recording, or stops it if already recording. Emits `.recordingStarted` and `.recordingFinished`.
-    func toggleRecording() {
-        if movieOutput.isRecording {
-            movieOutput.stopRecording()
-            stopAudioMeter()
-            return
-        }
-        guard movieOutput.connection(with: .video) != nil else { return }  // no camera: nothing to record
-        applyCaptureRotation(to: movieOutput)
-        if isVideo { applyCodec() }
-        lockForRecording()
-        startAudioMeter()
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "clip-\(Int(Date().timeIntervalSince1970)).mov")
-        let delegate = RecordingDelegate(
-            emit: emit, finished: { [weak self] in self?.enqueue { $0.recordingDelegate = nil } })
-        recordingDelegate = delegate
-        movieOutput.startRecording(to: url, recordingDelegate: delegate)
     }
 }
