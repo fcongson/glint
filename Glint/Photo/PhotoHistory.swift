@@ -44,7 +44,10 @@
         @MainActor
         static func entries() -> [ReviewEntry] {
             assets().map { asset in
-                ReviewEntry(id: asset.localIdentifier, canDelete: true, needsPlace: true) { await shot(for: asset) }
+                ReviewEntry(
+                    id: asset.localIdentifier, canDelete: true, needsPlace: true,
+                    load: { await shot(for: asset) },
+                    loadFullResolution: { await image(for: asset, targetSize: PHImageManagerMaximumSize) })
             }
         }
 
@@ -82,14 +85,17 @@
         /// Photos' own rendering of the photo at a size for the screen, which also copes with RAW-only photos and ones
         /// that need fetching from iCloud.
         private static func image(for asset: PHAsset, longestSide: CGFloat) async -> UIImage? {
+            await image(for: asset, targetSize: CGSize(width: longestSide, height: longestSide))
+        }
+
+        private static func image(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
             options.isNetworkAccessAllowed = true
             options.version = .current
             return await withCheckedContinuation { continuation in
                 PHImageManager.default().requestImage(
-                    for: asset, targetSize: CGSize(width: longestSide, height: longestSide),
-                    contentMode: .aspectFit, options: options
+                    for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options
                 ) { image, info in
                     if info?[PHImageResultIsDegradedKey] as? Bool == true { return }  // the real one follows
                     continuation.resume(returning: image)

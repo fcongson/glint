@@ -11,6 +11,8 @@ struct ReviewView: View {
     /// The photos on pages that are on or near the screen, for the details card (see `ReviewPage`).
     @State private var loaded: [String: Shot] = [:]
     @State private var isDeleting = false
+    /// Whether the photo on screen is zoomed in, which clears the details card off the pixels.
+    @State private var isZoomed = false
     @Environment(\.dismiss) private var dismiss
 
     init(entries: [ReviewEntry], angle: Angle, onDelete: ((ReviewEntry) async -> Bool)? = nil) {
@@ -33,6 +35,7 @@ struct ReviewView: View {
                 ForEach(entries) { entry in
                     ReviewPage(
                         entry: entry, angle: angle, onTap: { dismiss() },
+                        onZoomChange: { if selection == entry.id { isZoomed = $0 } },
                         onLoaded: { loaded[entry.id] = $0 }, onUnloaded: { loaded[entry.id] = nil }
                     )
                     .tag(Optional(entry.id))
@@ -40,7 +43,7 @@ struct ReviewView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
-            if let shot = current {
+            if let shot = current, !isZoomed {
                 // The card stays put at the bottom, like the camera buttons; only the settings row's items turn.
                 VStack {
                     Spacer()
@@ -69,6 +72,7 @@ struct ReviewView: View {
             .padding(.top, 8)
         }
         .accessibilityAction(.escape) { dismiss() }  // two-finger scrub closes the review
+        .onChange(of: selection) { isZoomed = false }
     }
 
     private func roundButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
@@ -188,18 +192,28 @@ private struct ReviewPage: View {
     let entry: ReviewEntry
     let angle: Angle
     let onTap: () -> Void
+    let onZoomChange: (Bool) -> Void
     let onLoaded: (Shot) -> Void
     let onUnloaded: () -> Void
     @State private var shot: Shot?
     @State private var image: UIImage?
+    @State private var fullResolution: UIImage?
+    @State private var isLoadingFullResolution = false
+    @State private var isZoomed = false
 
     var body: some View {
         GeometryReader { geo in
             // At a quarter turn the image's width runs along the screen's height, so swap the box before rotating.
             let box = angle.isQuarterTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
             Group {
-                if let shown = image ?? shot?.thumbnail {
-                    Image(uiImage: shown).resizable().scaledToFit()
+                if let shown = fullResolution ?? image ?? shot?.thumbnail {
+                    ZoomableImage(
+                        image: shown, fullLongSide: fullLongSide, onTap: onTap,
+                        onZoomChange: { zoomed in
+                            isZoomed = zoomed
+                            onZoomChange(zoomed)
+                            if zoomed { Task { await loadFullResolution() } }
+                        })
                 } else {
                     ProgressView().tint(.white)
                 }
@@ -208,16 +222,33 @@ private struct ReviewPage: View {
             .rotationEffect(angle)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
             .accessibilityLabel("Photo")
+            .accessibilityValue(isZoomed ? "Zoomed in" : "Fits the screen")
         }
         .animation(.easeInOut(duration: 0.3), value: angle)
-        .contentShape(Rectangle())
-        .onTapGesture { onTap() }
         .task { await load() }
         .onDisappear {
             image = nil
+            fullResolution = nil
             shot = nil
             onUnloaded()
         }
+    }
+
+    /// The photo's longest side in pixels, when `entry` can supply it at that size.
+    private var fullLongSide: CGFloat? {
+        guard entry.loadFullResolution != nil, let w = shot?.info.pixelWidth, let h = shot?.info.pixelHeight else {
+            return nil
+        }
+        return CGFloat(max(w, h))
+    }
+
+    /// Zooming in is when a photo's pixels matter, so the full-resolution image is fetched then, and let go with the
+    /// page.
+    private func loadFullResolution() async {
+        guard fullResolution == nil, !isLoadingFullResolution, let load = entry.loadFullResolution else { return }
+        isLoadingFullResolution = true
+        defer { isLoadingFullResolution = false }
+        fullResolution = await load()
     }
 
     private func load() async {

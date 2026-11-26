@@ -33,6 +33,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 
 **Review**
 - **Photo review:** swipe through every photo Glint has saved, with an info card (date, camera and lens, format, resolution, file size, exposure settings, place) and delete from review, which deletes from Photos.
+- **Zoom in review:** pinch, or double-tap for pixel-for-pixel, to check what the shot focused on. Zooming in fetches the photo at full resolution from Photos (photos only in the Lock Screen camera's session zoom into the review image), and the info card steps aside while zoomed.
 - **Location tagging:** photos are tagged with the latest fix only if it is under 5 minutes old and accurate to 300 m; otherwise they're saved untagged. Place names need a network connection. Location access is optional.
 - **Files:** captures are saved to Photos and to the app's Documents folder (Files > On My iPhone > Glint). Only the Photos copy carries the location tag, and the Documents copies are left out of iCloud and computer backups.
 
