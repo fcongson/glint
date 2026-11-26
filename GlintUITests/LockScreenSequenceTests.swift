@@ -41,9 +41,12 @@ final class LockScreenSequenceTests: XCTestCase {
         _ = device.perform(selector)
     }
 
-    /// The app on its camera screen, as launched fresh.
+    /// The app on its camera screen, as launched fresh, in PHOTO: these tests are about stills, and the phone may
+    /// have been left in VIDEO, which the app remembers.
     private func launchApp() {
         app.launch()
+        XCTAssertTrue(app.buttons["PHOTO"].waitForExistence(timeout: 10), "the capture mode switch")
+        app.buttons["PHOTO"].tap()
         XCTAssertTrue(app.buttons["Photo format"].waitForExistence(timeout: 10), "the app's camera screen")
     }
 
