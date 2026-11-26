@@ -9,6 +9,8 @@ final class ManualDialTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app.launch()
+        XCTAssertTrue(app.buttons["PHOTO"].waitForExistence(timeout: 10), "the capture mode switch")
+        app.buttons["PHOTO"].tap()  // settings are remembered, so start from a known mode
         let manual = app.buttons["MANUAL"]
         XCTAssertTrue(manual.waitForExistence(timeout: 10), "the exposure mode switch")
         manual.tap()
@@ -32,6 +34,7 @@ final class ManualDialTests: XCTestCase {
         let ruler = app.otherElements["ruler"]
         let start = readout(name)
         ruler.swipeLeft()
+        if readout(name) == start { ruler.swipeRight() }  // already at the end of the range, left from earlier runs
         let moved = readout(name)
         XCTAssertNotEqual(moved, start, "\(name): swiping the ruler changes the setting")
 

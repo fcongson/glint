@@ -288,7 +288,7 @@ actor CaptureSession {
     /// zebras kept brightening long after the exposure itself had landed (measured: 1/8 applied in 0.3 s,
     /// clipping shown seconds later). This also suits a minimal-processing camera. Bayer RAW stills aren't
     /// tone mapped, so photos are unaffected; video gets a flatter, more literal look. The device must be locked.
-    private func applyToneMapping(_ d: AVCaptureDevice) {
+    func applyToneMapping(_ d: AVCaptureDevice) {
         if d.activeFormat.isVideoHDRSupported {
             if d.automaticallyAdjustsVideoHDREnabled { d.automaticallyAdjustsVideoHDREnabled = false }
             if d.isVideoHDREnabled { d.isVideoHDREnabled = false }
@@ -1036,7 +1036,7 @@ actor CaptureSession {
         session.automaticallyConfiguresCaptureDeviceForWideColor = wanted.encoding != .log
         withLockedDevice(d, failure: "Video format") { d in
             d.activeFormat = format
-            applyToneMapping(d)  // a new format starts with its own defaults
+            applyFormatDefaults(d)
             let frame = CMTime(value: 1, timescale: CMTimeScale(wanted.frameRate))
             d.activeVideoMinFrameDuration = frame
             d.activeVideoMaxFrameDuration = frame
