@@ -167,7 +167,7 @@ enum DeviceControl {
 }
 
 /// The manual exposure settings, as `CaptureSession` applies them.
-struct ManualExposure {
+struct ManualExposure: Sendable {
     var iso: Float
     var shutterDenominator: Double
     var auto: AutoSettings
