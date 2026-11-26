@@ -547,12 +547,10 @@ final class ViewfinderRenderer: @unchecked Sendable {
         return picture > view ? SIMD2(1, view / picture) : SIMD2(picture / view, 1)
     }
 
-    /// Full-range YCbCr to RGB coefficients for the frame's matrix (BT.709 unless it says otherwise).
+    /// The frame's YCbCr matrix as Viewfinder.metal takes it, which subtracts green's two terms.
     static func matrix(for pixelBuffer: CVPixelBuffer) -> SIMD4<Float> {
-        let name = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
-        if name == (kCVImageBufferYCbCrMatrix_ITU_R_601_4 as String) { return SIMD4(1.402, 0.344136, 0.714136, 1.772) }
-        if name == (kCVImageBufferYCbCrMatrix_ITU_R_2020 as String) { return SIMD4(1.4746, 0.16455, 0.57135, 1.8814) }
-        return SIMD4(1.5748, 0.1873, 0.4681, 1.8556)
+        let m = YCbCrMatrix.of(pixelBuffer)
+        return SIMD4(m.crToRed, -m.cbToGreen, -m.crToGreen, m.cbToBlue)
     }
 
     /// Wide-colour frames are Display P3; show them as such, as the system preview does.
