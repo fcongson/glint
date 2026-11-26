@@ -138,54 +138,64 @@ final class LockScreenSequenceTests: XCTestCase {
         return ids
     }
 
-    /// Takes one photo with FILE and ASPECT chosen, and gives back its size in pixels, then deletes that photo (and
-    /// only that one: it's found by comparing what Photos held before). Deleting asks the system for a confirmation,
-    /// which this taps. The size is read first and the photo deleted before anything is judged, so a failure doesn't
-    /// leave test photos behind.
-    private func capture(file: String, aspect: String) async throws -> (width: Int, height: Int) {
-        let allow = addUIInterruptionMonitor(withDescription: "Photos access") { alert in
-            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"]
-            where alert.buttons[label].firstMatch.exists {
-                alert.buttons[label].firstMatch.tap()
-                return true
-            }
-            return false
-        }
-        defer { removeUIInterruptionMonitor(allow) }
+    /// What Photos' permission prompt calls its yes, across iOS versions.
+    private static let allowLabels = ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"]
 
+    /// Taps the first of `labels` that `alert` has. Returns whether there was one.
+    @discardableResult
+    private static func tap(_ labels: [String], in alert: XCUIElement) -> Bool {
+        for label in labels where alert.buttons[label].firstMatch.exists {
+            alert.buttons[label].firstMatch.tap()
+            return true
+        }
+        return false
+    }
+
+    /// Answers Photos' permission prompt if it comes up; remove the monitor this returns when done.
+    private func allowPhotosAccessWhenAsked() -> any NSObjectProtocol {
+        addUIInterruptionMonitor(withDescription: "Photos access") { Self.tap(Self.allowLabels, in: $0) }
+    }
+
+    /// Deleting from Photos asks the system for a confirmation; this taps Delete if it comes up within 10 seconds.
+    private func confirmDeletion() {
+        let confirm = springboard.alerts.firstMatch
+        if confirm.waitForExistence(timeout: 10) { Self.tap(["Delete", "Delete Photo"], in: confirm) }
+    }
+
+    /// Takes one photo with FILE, and ASPECT where it can be chosen, and gives back its Photos identifier: the one
+    /// photo that wasn't there before.
+    private func takePhoto(file: String, aspect: String? = nil) async throws -> String {
         launchApp()
         app.tap()  // lets the interruption monitor see any permission prompt that's up
         openSettings()
         choose(file)
-        if app.buttons[aspect].firstMatch.isEnabled { choose(aspect) }
+        if let aspect, app.buttons[aspect].firstMatch.isEnabled { choose(aspect) }
         app.buttons["Done"].tap()  // close SET
 
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        try XCTSkipUnless(status == .authorized, "The tests need access to Photos to read the new photo's size")
+        try XCTSkipUnless(status == .authorized, "The tests need access to Photos to find the new photo")
         let before = photoIDs()
-
         app.buttons["Take photo"].tap()
-
-        var new: PHAsset?
         for _ in 0..<40 {
-            if let id = photoIDs().subtracting(before).first {
-                new = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject
-                break
-            }
+            if let id = photoIDs().subtracting(before).first { return id }
             try await Task.sleep(for: .milliseconds(500))
         }
-        let photo = try XCTUnwrap(new, "no new photo reached Photos within 20 seconds")
+        return try XCTUnwrap(photoIDs().subtracting(before).first, "no new photo reached Photos within 20 seconds")
+    }
+
+    /// Takes one photo and gives back its size in pixels, then deletes it. The size is read first and the photo
+    /// deleted before anything is judged, so a failure doesn't leave test photos behind.
+    private func capture(file: String, aspect: String) async throws -> (width: Int, height: Int) {
+        let allow = allowPhotosAccessWhenAsked()
+        defer { removeUIInterruptionMonitor(allow) }
+
+        let id = try await takePhoto(file: file, aspect: aspect)
+        let photo = try XCTUnwrap(
+            PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject, "the new photo can't be read")
         let size = (width: photo.pixelWidth, height: photo.pixelHeight)
 
-        let id = photo.localIdentifier
         let deletion = Task.detached { try await Self.deletePhoto(id: id) }
-        let confirm = springboard.alerts.firstMatch
-        if confirm.waitForExistence(timeout: 10) {
-            for label in ["Delete", "Delete Photo"] where confirm.buttons[label].exists {
-                confirm.buttons[label].tap()
-                break
-            }
-        }
+        confirmDeletion()
         try await deletion.value
         XCTAssertFalse(photoIDs().contains(id), "the test photo is still in the library")
         return size
@@ -219,32 +229,10 @@ final class LockScreenSequenceTests: XCTestCase {
     /// the app quit and opened again, and the photo deleted from review, so it's found there only by being on the
     /// list of what Glint saved. Whatever happens it's deleted at the end.
     func testReviewShowsEarlierPhotosAndDeletingThereDeletesFromPhotos() async throws {
-        let allow = addUIInterruptionMonitor(withDescription: "Photos access") { alert in
-            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"]
-            where alert.buttons[label].firstMatch.exists {
-                alert.buttons[label].firstMatch.tap()
-                return true
-            }
-            return false
-        }
+        let allow = allowPhotosAccessWhenAsked()
         defer { removeUIInterruptionMonitor(allow) }
 
-        launchApp()
-        app.tap()
-        openSettings()
-        choose("HEIC")
-        app.buttons["Done"].tap()
-        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        try XCTSkipUnless(status == .authorized, "The tests need access to Photos")
-        let before = photoIDs()
-        app.buttons["Take photo"].tap()
-        var taken: String?
-        for _ in 0..<40 {
-            taken = photoIDs().subtracting(before).first
-            if taken != nil { break }
-            try await Task.sleep(for: .milliseconds(500))
-        }
-        let id = try XCTUnwrap(taken, "no new photo reached Photos within 20 seconds")
+        let id = try await takePhoto(file: "HEIC")
         sleep(1)  // the log is written once the save has finished
         defer { if photoIDs().contains(id) { Task.detached { try? await Self.deletePhoto(id: id) } } }
 
@@ -253,13 +241,7 @@ final class LockScreenSequenceTests: XCTestCase {
         app.buttons["Review photos"].tap()
         // The first time, Photos asks to let Glint read it; tapping the screen would close review, so answer it directly.
         let prompt = springboard.alerts.firstMatch
-        if prompt.waitForExistence(timeout: 3) {
-            for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"]
-            where prompt.buttons[label].firstMatch.exists {
-                prompt.buttons[label].firstMatch.tap()
-                break
-            }
-        }
+        if prompt.waitForExistence(timeout: 3) { Self.tap(Self.allowLabels, in: prompt) }
         let trash = app.buttons["Delete photo"]
         if !trash.waitForExistence(timeout: 15) {
             XCTFail(
@@ -267,13 +249,7 @@ final class LockScreenSequenceTests: XCTestCase {
             )
         }
         trash.tap()
-        let confirm = springboard.alerts.firstMatch
-        if confirm.waitForExistence(timeout: 10) {
-            for label in ["Delete", "Delete Photo"] where confirm.buttons[label].exists {
-                confirm.buttons[label].tap()
-                break
-            }
-        }
+        confirmDeletion()
         var gone = false
         for _ in 0..<20 {
             if !photoIDs().contains(id) { gone = true; break }

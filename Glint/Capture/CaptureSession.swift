@@ -124,22 +124,7 @@ actor CaptureSession {
             }
             .sorted { $0.zoom < $1.zoom }
 
-        if session.canAddOutput(photoOutput) {
-            session.addOutput(photoOutput)
-            photoOutput.maxPhotoQualityPrioritization = .speed  // no Deep Fusion / multi-frame fusion
-        }
-        if session.canAddOutput(movieOutput) {
-            session.addOutput(movieOutput)
-            movieOutput.minFreeDiskSpaceLimit = Self.minimumFreeBytes
-        }
-        // The preview-frame output (histogram, GPU viewfinder) is attached once, with its frames switched off
-        // until something wants them: adding or removing it later reconfigures the session, which stalls the
-        // preview for a moment every time HIST or ZEB is switched.
-        let analysisOutput = analyzer.output
-        if session.canAddOutput(analysisOutput) {
-            session.addOutput(analysisOutput)
-            analysisOutput.connection(with: .video)?.isEnabled = false
-        }
+        addOutputs()
         updateResponsiveCapture()
         if #available(iOS 26.0, *) { configureDeferredStart() }
         session.commitConfiguration()
@@ -162,6 +147,26 @@ actor CaptureSession {
         #endif
         emit.yield(.device(.ready(lenses: lenses, device: info)))
         emit.yield(.device(.videoCapabilities(videoCapabilities(wide))))
+    }
+
+    /// Stills, movies and the preview frames, all added once at launch.
+    private func addOutputs() {
+        if session.canAddOutput(photoOutput) {
+            session.addOutput(photoOutput)
+            photoOutput.maxPhotoQualityPrioritization = .speed  // no Deep Fusion / multi-frame fusion
+        }
+        if session.canAddOutput(movieOutput) {
+            session.addOutput(movieOutput)
+            movieOutput.minFreeDiskSpaceLimit = Self.minimumFreeBytes
+        }
+        // The preview-frame output (histogram, GPU viewfinder) is attached once, with its frames switched off
+        // until something wants them: adding or removing it later reconfigures the session, which stalls the
+        // preview for a moment every time HIST or ZEB is switched.
+        let analysisOutput = analyzer.output
+        if session.canAddOutput(analysisOutput) {
+            session.addOutput(analysisOutput)
+            analysisOutput.connection(with: .video)?.isEnabled = false
+        }
     }
 
     // MARK: Configuration
