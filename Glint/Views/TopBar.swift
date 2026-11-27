@@ -48,7 +48,7 @@ struct TopBar: View {
             : (cam.isVideoLightOn && cam.hasVideoLight ? FlashSetting.on : .off)
         let title = format + flash.mark
         return Button {
-            toggleSet()
+            toggleSet(opening: .capture)
         } label: {
             Text(title)
                 .glintFont(size: 13, weight: .semibold)
@@ -69,7 +69,9 @@ struct TopBar: View {
                 : "Opens Settings, where resolution, frame rate, codec, exposure lock and the light are")
     }
 
-    private func toggleSet() {
+    /// The SET button opens SET on the page it was left on; the format readout opens it on PHOTO or VIDEO.
+    private func toggleSet(opening page: SetPage? = nil) {
+        if !showingSet { page?.remember() }
         withAnimation(.easeOut(duration: 0.15)) { showingSet.toggle() }
     }
 }

@@ -38,6 +38,7 @@ final class TextSizeLayoutTests: XCTestCase {
         let menu = app.alerts["Settings"]  // SET is modal, so it reads as an alert
         XCTAssertTrue(menu.waitForExistence(timeout: 5), "SET")
         XCTAssertTrue(menu.buttons["Done"].isHittable, "SET's Done stays on screen")
+        menu.buttons["Focus settings"].tap()  // AF SQUARES is on the FOCUS page
 
         let row = menu.otherElements["Squares on what's in focus in autofocus"].firstMatch
         let off = row.buttons["Off"], on = row.buttons["On"]

@@ -110,4 +110,13 @@ struct ToolRowLayoutTests {
             #expect(layout.slots(for: .photo) == ToolRowLayout.photoDefault)
         }
     }
+
+    @Test func theSummaryAndTheSpokenSlotsNameEachSlot() {
+        var layout = ToolRowLayout()
+        #expect(layout.summary(for: .photo) == "HIST ZEB · ASP FLASH")
+        #expect(layout.summary(for: .video) == "HIST ZEB · AE·L LIGHT")
+        layout.clear(slot: 2, for: .photo)
+        #expect(layout.summary(for: .photo) == "HIST ZEB · – FLASH")
+        #expect(layout.spoken(for: .photo) == "Slot 1: Histogram, Slot 2: Zebras, Slot 3: empty, Slot 4: Flash")
+    }
 }

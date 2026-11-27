@@ -94,6 +94,18 @@ struct ToolRowLayout: Equatable, Sendable {
     private(set) var photo = photoDefault
     private(set) var video = videoDefault
 
+    /// The slots as small text for SET's TOOL ROW rows, empty ones as a dash: "HIST ZEB · ASP FLASH".
+    func summary(for mode: CaptureMode) -> String {
+        let text = slots(for: mode).map { $0?.title ?? "–" }
+        return text.prefix(2).joined(separator: " ") + " · " + text.suffix(2).joined(separator: " ")
+    }
+
+    /// The same for VoiceOver, with the full names.
+    func spoken(for mode: CaptureMode) -> String {
+        slots(for: mode).enumerated().map { "Slot \($0.offset + 1): \($0.element?.name ?? "empty")" }
+            .joined(separator: ", ")
+    }
+
     static func defaults(for mode: CaptureMode) -> Slots { mode == .photo ? photoDefault : videoDefault }
 
     func slots(for mode: CaptureMode) -> Slots { mode == .photo ? photo : video }
