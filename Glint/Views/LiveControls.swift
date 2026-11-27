@@ -17,11 +17,40 @@ struct LiveExposureMeter: View {
 /// The focus rail, which follows the lens while autofocus moves it.
 struct LiveFocusRail: View {
     let cam: CameraController
+    var edge: Alignment = .trailing
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPresent = false  // in the view tree: from just before it slides in to just after it's gone
+    @State private var isSlid = true  // off its edge and faded
 
+    /// Autofocus has no use for the rail, so it slides off its edge and fades; only the AF | MF switch changes
+    /// focus mode. Reduce Motion fades only. Once it has gone it's taken out of the view tree, so VoiceOver can't
+    /// land on it.
     var body: some View {
-        FocusRail(
-            position: cam.lensPosition, isAutofocus: cam.isAutofocus,
-            onChange: { cam.setLensPosition($0) }, onTouch: { cam.aids.focusRailTouched($0) })
+        let slide = (edge == .trailing ? 1.0 : -1.0) * FocusRail.touchWidth
+        ZStack {
+            if isPresent {
+                FocusRail(
+                    position: cam.lensPosition, isAutofocus: cam.isAutofocus, onChange: { cam.setLensPosition($0) },
+                    edge: edge, isHidden: isSlid, onTouch: { cam.aids.focusRailTouched($0) }
+                )
+                .opacity(isSlid ? 0 : 1)
+                .offset(x: isSlid && !reduceMotion ? slide : 0)
+                .allowsHitTesting(!isSlid)
+                .accessibilityHidden(isSlid)
+            }
+        }
+        .frame(width: FocusRail.touchWidth, height: FocusRail.height)
+        .task(id: cam.isAutofocus) {
+            if cam.isAutofocus {
+                withAnimation(.easeInOut(duration: 0.26)) { isSlid = true }
+                try? await Task.sleep(for: .milliseconds(300))
+                if !Task.isCancelled { isPresent = false }
+            } else {
+                isPresent = true
+                try? await Task.sleep(for: .milliseconds(20))  // let it draw off its edge first
+                if !Task.isCancelled { withAnimation(.easeInOut(duration: 0.26)) { isSlid = false } }
+            }
+        }
     }
 }
 

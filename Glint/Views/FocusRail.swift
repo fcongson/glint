@@ -10,6 +10,10 @@ struct FocusRail: View {
     let position: Float  // 0 nearest … 1 farthest
     let isAutofocus: Bool
     let onChange: (Float) -> Void
+    /// The side against the picture's edge, which the drawn rail hugs inside its wider touch area.
+    var edge: Alignment = .trailing
+    /// Slid away: out of VoiceOver's reach as well as the touch's.
+    var isHidden = false
     var onTouch: (Bool) -> Void = { _ in }  // touched (true) and let go (false), for the focus magnifier
 
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
@@ -17,8 +21,14 @@ struct FocusRail: View {
     @State private var awake = false
     @State private var sleepTask: Task<Void, Never>?
 
-    static let trackHeight: CGFloat = 240
-    private let width: CGFloat = 44
+    static let trackHeight: CGFloat = 200
+    static let presetHeight: CGFloat = 30
+    /// The whole rail's height: the track and the two end labels.
+    static let height = trackHeight + presetHeight * 2
+    /// Drawn narrow, so it covers little of the picture, with a touch area wide enough for a thumb.
+    static let drawnWidth: CGFloat = 30
+    static let touchWidth: CGFloat = 44
+    private var width: CGFloat { Self.touchWidth }
     private let inset: CGFloat = 16  // keeps the thumb inside the rounded ends
     private var travel: CGFloat { Self.trackHeight - inset * 2 }
 
@@ -32,6 +42,9 @@ struct FocusRail: View {
             presetButton(.infinity, size: 17)
             track
             presetButton(.nearest, size: 10)
+        }
+        .background(alignment: edge) {
+            Capsule().fill(Color.black.opacity(0.45)).frame(width: Self.drawnWidth).opacity(fade)
         }
         .foregroundStyle(Color.white)
         .shadow(color: .black.opacity(0.6), radius: 2)
@@ -52,12 +65,14 @@ struct FocusRail: View {
                 .glintFont(size: size, weight: .semibold)
                 .fixedSize()
                 .opacity(fade)
-                .frame(width: width, height: 30)
+                .frame(width: Self.drawnWidth, height: Self.presetHeight)
+                .frame(width: width, alignment: edge)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(preset.name)
         .accessibilityHint("Turns autofocus off.")
+        .accessibilityHidden(isHidden)
     }
 
     private var track: some View {
@@ -86,6 +101,7 @@ struct FocusRail: View {
         )
         .accessibilityElement()
         .accessibilityLabel("Focus")
+        .accessibilityIdentifier("focusRail")
         .accessibilityValue(
             isAutofocus
                 ? "Autofocus, \(SettingsText.focusPosition(position))"
@@ -101,11 +117,11 @@ struct FocusRail: View {
             }
             onTouch(false)
         }
+        .accessibilityHidden(isHidden)
     }
 
     private var trackDrawing: some View {
         ZStack(alignment: .top) {
-            Capsule().fill(Color.black.opacity(0.45))
             Rectangle()
                 .fill(Color.white.opacity(0.35))
                 .frame(width: 2)
@@ -118,11 +134,12 @@ struct FocusRail: View {
             }
             Capsule()
                 .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
-                .frame(width: 32, height: 20)
+                .frame(width: 24, height: 20)
                 .offset(y: y(for: position) - 10)
                 .animation(dragStart == nil ? .easeOut(duration: 0.2) : nil, value: position)
         }
-        .frame(width: width, height: Self.trackHeight)
+        .frame(width: Self.drawnWidth, height: Self.trackHeight)
+        .frame(width: width, alignment: edge)
     }
 
     /// Distance from the top of the track to a position's centre line.

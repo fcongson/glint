@@ -187,23 +187,24 @@ struct CameraViewfinder: View {
 
     // MARK: Focus rail
 
-    /// AF over the focus rail, laid out upright, before it's turned for landscape.
-    private static let railColumn = CGSize(width: 64, height: FocusRail.trackHeight + 116)
+    /// The focus rail over the AF | MF switch, laid out upright, before it's turned for landscape. The rail is
+    /// gone in autofocus but keeps its room, so the switch stays where the thumb found it.
+    private static let railColumn = CGSize(
+        width: FocusRail.touchWidth, height: FocusRail.height + 8 + FocusModeSwitch.size.height)
 
     /// Which edge of the picture is on the chosen side, the way the phone is held.
     private var railAlignment: Alignment {
         railSide.alignment(quarterTurns: DeviceAngle.quarterTurns(deviceAngle))
     }
 
-    /// AF on top of the focus rail. Turning AF off, or touching the rail, locks the lens where autofocus left it.
+    /// The focus rail with the AF | MF switch below it, against the picture's edge. Touching the rail takes over
+    /// from where autofocus left the lens.
     private var focusControls: some View {
-        VStack(spacing: 10) {
-            Chip(
-                "AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
-                isOn: cam.isAutofocus
-            ) { cam.setAutofocus(!cam.isAutofocus) }
-            LiveFocusRail(cam: cam)
+        let edge: Alignment = railSide == .right ? .trailing : .leading
+        return VStack(alignment: railSide == .right ? .trailing : .leading, spacing: 8) {
+            LiveFocusRail(cam: cam, edge: edge)
+            FocusModeSwitch(isAutofocus: cam.isAutofocus, onChange: { cam.setAutofocus($0) }, edge: edge)
         }
-        .padding(.trailing, 8)
+        .accessibilityElement(children: .contain)
     }
 }

@@ -12,7 +12,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **RAW (DNG) stills:** Bayer RAW, not Apple ProRAW, with no multi-frame fusion. FILE in SET chooses RAW (the default), HEIC or RAW+HEIC; ASPECT chooses 4:3, 3:2, 1:1 or 16:9. A DNG always keeps the full sensor; the crop is applied to the HEIC.
 - **Neutral HEIC:** developed from the RAW with noise reduction, sharpening, contrast, detail, moire and boost off, so it matches the DNG. If developing fails the DNG is kept; if Bayer RAW isn't available the camera's own HEIC is saved (fusion off).
 - **AUTO | MANUAL:** in MANUAL, ISO, shutter and white balance are set on a camera-style ruler in 1/3-stop steps. The A at the end of the ruler hands one setting back to the camera, giving shutter priority, ISO priority or program; the ruler then sets exposure compensation.
-- **Manual focus:** a rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail takes over from where autofocus left the lens.
+- **Manual focus:** a rail down the side of the viewfinder runs from NEAR to ∞, with an AF | MF switch below it. The rail only shows in MF (it slides away in autofocus), and touching it takes over from where autofocus left the lens.
 - **AE/AF lock:** touch and hold the viewfinder to focus and meter once and hold both; a tap releases it.
 - **Lenses:** all rear lenses, labelled by zoom factor, with a read-only aperture readout.
 - **Flash and light:** FLASH in SET is Off (default), Auto or On for stills; LIGHT in VIDEO turns the same LED on as a steady light.
@@ -43,7 +43,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **Remembered settings:** PHOTO or VIDEO, the formats, AUTO or MANUAL and its values, the viewfinder aids and everything in SET (except VIDEO's light) come back at launch. It starts on the main lens with autofocus.
 - **Heat and load:** Glint watches the camera's system pressure and gives things up in order: at *fair*, peaking analyses every other frame; at *serious*, peaking, AF squares and zebras switch off; at *critical*, PHOTO's preview drops to 15 fps. Low Power Mode switches off the histogram, peaking, AF squares and zebras.
 - **Interruptions:** when the system takes the camera away, the viewfinder says why until it's back. A recording that stops by itself still saves what it has.
-- **VoiceOver:** Glint describes faces and the horizon, and the focus rail, PK and ZEB are adjustable by swiping.
+- **VoiceOver:** Glint describes faces and the horizon, the AF | MF switch reads as a switch, and the focus rail, PK and ZEB are adjustable by swiping.
 - **Text size:** Glint's text grows with the system text size, up to the largest size before the accessibility sizes so the controls still fit around the picture. SET's notes, which wrap, grow all the way.
 - **Battery and memory:** the camera, location and motion updates stop behind the review screen; the microphone is attached only in VIDEO; review images are kept compressed.
 
