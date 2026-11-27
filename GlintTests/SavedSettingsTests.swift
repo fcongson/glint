@@ -11,6 +11,9 @@ struct SavedSettingsTests {
         var format = VideoFormat()
         format.codec = .proRes
         format.frameRate = 30
+        var layout = ToolRowLayout()
+        layout.clear(slot: 1, for: .video)
+        layout.place(.grid, inSlot: 0, for: .photo)
         let settings = SavedSettings(
             captureMode: .video, fileType: .rawAndHEIC, aspect: .threeTwo, manual: true,
             iso: 400, shutterDenominator: 60, whiteBalanceKelvin: 3200,
@@ -19,7 +22,7 @@ struct SavedSettingsTests {
             peakingSensitivity: .high, peakingAppearance: PeakingAppearance(color: .blue, lines: .fine),
             peakingMode: .sweep, isFocusAreasEnabled: true, isZebraEnabled: true, zebraLevel: .ninety,
             isMagnifierEnabled: false, flash: .auto, histogramStyle: .rgb,
-            isGridEnabled: true, isLevelEnabled: true)
+            isGridEnabled: true, isLevelEnabled: true, toolRow: layout)
         settings.save(to: defaults)
         #expect(SavedSettings.load(from: defaults) == settings)
     }
@@ -33,7 +36,7 @@ struct SavedSettingsTests {
         #expect(loaded.manual == nil)
         #expect(
             loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil
-                && loaded.isLevelEnabled == nil)
+                && loaded.isLevelEnabled == nil && loaded.toolRow == nil)
     }
 
     @Test func anOlderSavesPeakingSwitchBecomesTheShowChoice() throws {

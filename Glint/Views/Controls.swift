@@ -17,10 +17,12 @@ struct ChipStyle: ButtonStyle {
     var outlined = false
     /// No pill when off, for a segment inside a control that has its own background (the lens picker).
     var plain = false
+    /// A chip that can't change right now keeps its pill, so it still shows against black, and dims only its text.
+    var dimmed = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(isOn ? Color.black : (outlined ? Color.amber : Color.white))
+            .foregroundStyle((isOn ? Color.black : (outlined ? Color.amber : Color.white)).opacity(dimmed ? 0.4 : 1))
             // Off is a dark pill, not a light tint, so it reads over a bright scene as well as on black.
             .background(isOn ? Color.amber : (plain ? Color.clear : Color(white: 0.16).opacity(0.9)), in: Capsule())
             .overlay(Capsule().strokeBorder(outlined && !isOn ? Color.amber : Color.clear, lineWidth: 1))
@@ -31,15 +33,20 @@ struct ChipStyle: ButtonStyle {
 /// A chip's text: short, monospaced, shrinking rather than wrapping beside the Dynamic Island.
 struct ChipLabel: View {
     let title: String
+    /// Smaller, for the tool row, where four of them share the width with the lenses.
+    var compact = false
 
-    init(_ title: String) { self.title = title }
+    init(_ title: String, compact: Bool = false) {
+        self.title = title
+        self.compact = compact
+    }
 
     var body: some View {
         Text(title)
-            .glintFont(size: 13, weight: .semibold)
+            .glintFont(size: compact ? 12 : 13, weight: .semibold)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, compact ? 8 : 10)
             .padding(.vertical, 5)
     }
 }
@@ -51,19 +58,27 @@ struct Chip: View {
     let label: String
     let value: String
     let isOn: Bool
+    var isDimmed = false  // can't change now; `value` says why
+    var compact = false
     let action: () -> Void
 
-    init(_ title: String, label: String, value: String, isOn: Bool, action: @escaping () -> Void) {
+    init(
+        _ title: String, label: String, value: String, isOn: Bool, isDimmed: Bool = false, compact: Bool = false,
+        action: @escaping () -> Void
+    ) {
         self.title = title
         self.label = label
         self.value = value
         self.isOn = isOn
+        self.isDimmed = isDimmed
+        self.compact = compact
         self.action = action
     }
 
     var body: some View {
-        Button(action: action) { ChipLabel(title) }
-            .buttonStyle(ChipStyle(isOn: isOn))
+        Button(action: action) { ChipLabel(title, compact: compact) }
+            .buttonStyle(ChipStyle(isOn: isOn, dimmed: isDimmed))
+            .disabled(isDimmed)
             .accessibilityLabel(label)
             .accessibilityValue(value)
     }

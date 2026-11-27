@@ -64,6 +64,9 @@ final class CameraController {
     let viewfinderRenderer: ViewfinderRenderer?
     /// The histogram, peaking, zebras and magnifier.
     let aids: ViewfinderAidsModel
+    /// What's in the tool row's four slots, in PHOTO and in VIDEO. Changed in SET, and saved with the other
+    /// settings.
+    let toolRow = ToolRowModel()
     @ObservationIgnored private let analysisPause: AnalysisPause
     private(set) var systemPressure = SystemPressure.nominal
     /// Whether the GPU viewfinder draws, for outlines, zebras or magnifying.
@@ -127,7 +130,8 @@ final class CameraController {
             peakingAppearance: aids.peakingAppearance, peakingMode: aids.peakingMode,
             isFocusAreasEnabled: aids.isFocusAreasEnabled, isZebraEnabled: aids.isZebraEnabled,
             zebraLevel: aids.zebraLevel, isMagnifierEnabled: aids.isMagnifierEnabled, flash: flash,
-            histogramStyle: aids.histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
+            histogramStyle: aids.histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled,
+            toolRow: toolRow.layout)
     }
 
     /// The other copy of Glint (the app, or the Lock Screen camera) may have changed settings while this one was
@@ -178,6 +182,7 @@ final class CameraController {
         exposureBias = saved.exposureBias ?? exposureBias
         videoFormat = saved.videoFormat ?? videoFormat
         aids.restore(saved)
+        toolRow.restore(saved)
         flash = saved.flash ?? flash
         isGridEnabled = saved.isGridEnabled ?? isGridEnabled
         isLevelEnabled = saved.isLevelEnabled ?? isLevelEnabled
@@ -435,11 +440,6 @@ final class CameraController {
         guard format != videoFormat else { return }
         videoFormat = format
         capture.enqueue { $0.setVideoFormat(format) }
-    }
-
-    /// While recording with "exposure while recording: locked", the exposure controls don't respond.
-    var isExposureLocked: Bool {
-        isRecording && captureMode == .video && videoFormat.locksExposureWhileRecording
     }
 
     /// The shutter actually in use: in video, A means the 180° rule and nothing is slower than a frame.

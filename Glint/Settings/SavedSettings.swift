@@ -33,6 +33,7 @@ struct SavedSettings: Codable, Equatable {
     var histogramStyle: HistogramStyle?
     var isGridEnabled: Bool?
     var isLevelEnabled: Bool?
+    var toolRow: ToolRowLayout?
 
     /// When peaking is shown: the saved choice, or what an older save's on or off meant (on was In MF).
     var chosenPeakingShow: PeakingShow? { peakingShow ?? isPeakingEnabled.map { $0 ? .inMF : .off } }
