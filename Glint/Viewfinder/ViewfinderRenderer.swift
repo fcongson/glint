@@ -4,8 +4,8 @@ import Foundation
 import Metal
 import QuartzCore
 
-/// Draws the viewfinder while focus peaking or the focus magnifier is on, each camera frame with its own outlines
-/// and magnified from the full-resolution frame, on the GPU.
+/// Draws the viewfinder while focus peaking, AF squares or the focus magnifier is on, each camera frame with its own
+/// outlines and magnified from the full-resolution frame, on the GPU.
 ///
 /// Peaking drawn over the system preview from separately analysed frames always trails the picture, so outlines
 /// ghost when the phone moves. Cameras draw peaking into the viewfinder image itself; this does the same. The
@@ -29,6 +29,9 @@ import QuartzCore
 /// 5. Shrink the mask to about screen resolution, keeping every mark, and draw the frame upright and fitted like
 ///    the preview, with the outlines in the chosen colour and weight.
 ///
+/// AF squares, in autofocus, run steps 1–4 as standard peaking without drawing the outlines, count each tile's marks
+/// (`focusAreaCount`), and draw a square on each cell `FocusAreas` finds in focus, a frame or so behind.
+///
 /// `render` is called on the analysis queue, one frame at a time. The target layer is set from the main thread
 /// and the threshold from Metal's completion handlers, so both sit behind `lock`.
 final class ViewfinderRenderer: @unchecked Sendable {
@@ -38,11 +41,6 @@ final class ViewfinderRenderer: @unchecked Sendable {
     /// Frames are shrunk until their long side is at most this.
     static let targetSize = 4096
     private static let framesInFlight = 3
-
-    /// The whole factor a frame is shrunk by.
-    static func scale(width: Int, height: Int) -> Int {
-        max(1, (max(width, height) + targetSize - 1) / targetSize)
-    }
 
     private let device: any MTLDevice
     private let commandQueue: any MTLCommandQueue
@@ -54,6 +52,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
     private let poolPipeline: any MTLComputePipelineState
     private let edgesPipeline: any MTLComputePipelineState
     private let maskPipeline: any MTLComputePipelineState
+    private let focusCountPipeline: any MTLComputePipelineState
     private let drawPipeline: any MTLRenderPipelineState
     private let inFlight = DispatchSemaphore(value: framesInFlight)
 
@@ -64,6 +63,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
     private var latestVerdicts: (any MTLBuffer)?  // behind `lock`: the last tile verdicts worked out
     private var analysisPaused = false  // behind `lock`
     private var analysisInterval = 1  // behind `lock`: analyse every nth frame
+    private var focusAreas = FocusAreas()  // behind `lock`
 
     // Only touched by whoever is rendering (the analysis queue, or a test).
     private var sensitivity = PeakingSensitivity.medium
@@ -85,22 +85,9 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let blurred: any MTLTexture, response: any MTLTexture, edges: any MTLTexture, sharp: any MTLTexture
         let mask: any MTLTexture
         let groups: MTLSize
+        /// Per tile: sweep peaking's statistics, or in autofocus (where there's no sweep) AF squares' counts.
         let partials: [any MTLBuffer]
         let verdicts: [any MTLBuffer]  // per tile, for sweep peaking; one per frame in flight, like `partials`
-    }
-
-    /// Keeps a frame's resources alive until the GPU is done with it, across the completion handler.
-    private final class InFlight: @unchecked Sendable {
-        let textures: [CVMetalTexture]
-        let partials: any MTLBuffer
-        let groupCount: Int
-        let pixelCount: Int
-        init(textures: [CVMetalTexture], partials: any MTLBuffer, groupCount: Int, pixelCount: Int) {
-            self.textures = textures
-            self.partials = partials
-            self.groupCount = groupCount
-            self.pixelCount = pixelCount
-        }
     }
 
     enum SetupError: Error { case unavailable }
@@ -137,6 +124,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         poolPipeline = try device.makeComputePipelineState(function: try function("peakingPool"))
         edgesPipeline = try device.makeComputePipelineState(function: try function("peakingEdges"))
         maskPipeline = try device.makeComputePipelineState(function: try function("peakingMask"))
+        focusCountPipeline = try device.makeComputePipelineState(function: try function("focusAreaCount"))
         drawPipeline = try device.makeRenderPipelineState(descriptor: draw)
     }
 
@@ -201,13 +189,16 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let mask = encodeOutlines(commandBuffer, frame: frame, settings: settings, outlines: outlines)
         updateColorSpace(of: target.layer, for: pixelBuffer)
         encodeDraw(commandBuffer, frame: frame, mask: mask, settings: settings, outlines: outlines.shown)
-        commit(commandBuffer, frame: frame, sweepAnalysed: outlines.analysed && settings.mode == .sweep)
+        commit(
+            commandBuffer, frame: frame, sweepAnalysed: outlines.analysed && outlines.shown && settings.mode == .sweep,
+            areasCounted: outlines.countsAreas)
     }
 
-    /// Whether a frame shows outlines, and whether it analyses for them or reuses the last ones.
+    /// Whether a frame shows outlines, and whether it analyses for them (or for AF squares) or reuses the last ones.
     private struct Outlines {
         let shown: Bool
         let analysed: Bool
+        let countsAreas: Bool
     }
 
     /// One camera frame's textures and where it's going, for the passes that draw it.
@@ -227,10 +218,14 @@ final class ViewfinderRenderer: @unchecked Sendable {
     /// Outlines pause while photos develop, and under pressure are analysed every `analysisInterval`th frame;
     /// the frames between reuse the last ones.
     private func outlines(for settings: ViewfinderSettings) -> Outlines {
-        let shown = settings.outlines && !lock.withLock({ analysisPaused })
-        let interval = lock.withLock { analysisInterval }
+        let (paused, interval) = lock.withLock {
+            if !settings.focusAreas { focusAreas.reset() }  // so old squares don't flash up when they're next on
+            return (analysisPaused, analysisInterval)
+        }
+        let shown = settings.outlines && !paused, areas = settings.focusAreas && !paused
         frameIndex &+= 1
-        return Outlines(shown: shown, analysed: shown && (interval == 1 || frameIndex.isMultiple(of: interval)))
+        let due = interval == 1 || frameIndex.isMultiple(of: interval)
+        return Outlines(shown: shown, analysed: (shown || areas) && due, countsAreas: areas && due)
     }
 
     /// The frame's planes as textures, the workspace for its size, and this frame's slot in the buffer ring.
@@ -259,16 +254,16 @@ final class ViewfinderRenderer: @unchecked Sendable {
         if outlines.shown && !outlines.analysed, settings.magnifier == nil, let last = pooled?.texture { return last }
         guard outlines.analysed else { return work.mask }
         // Sweep: the latest tile verdicts there are (from a frame or so ago); none yet means standard peaking.
-        let sweeping = settings.mode == .sweep
+        let sweeping = outlines.shown && settings.mode == .sweep
         let verdicts = sweeping ? lock.withLock({ latestVerdicts }) : nil
         encodeAnalysis(
             commandBuffer,
             AnalysisInput(
                 luma: frame.luma, work: work, partials: frame.partials, cutoff: settings.sensitivity.sharpness,
                 verdicts: verdicts ?? frame.verdicts,
-                sweep: sweeping ? (verdicts == nil ? .collecting : .applying) : .off
+                sweep: sweeping ? (verdicts == nil ? .collecting : .applying) : .off, countsAreas: outlines.countsAreas
             ))
-        guard settings.magnifier == nil else { return work.mask }
+        guard outlines.shown, settings.magnifier == nil else { return work.mask }
         return encodePool(commandBuffer, work: work, pictureWidthOnScreen: frame.pictureWidthOnScreen)
     }
 
@@ -284,12 +279,15 @@ final class ViewfinderRenderer: @unchecked Sendable {
         pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         pass.colorAttachments[0].storeAction = .store
         if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) {
-            var uniforms = Self.uniforms(frame: frame, mask: mask, settings: settings, outlines: outlines)
+            let areas = settings.focusAreas ? lock.withLock { focusAreas.grid } : nil
+            var uniforms = Self.uniforms(frame: frame, mask: mask, settings: settings, outlines: outlines, areas: areas)
+            let inFocus: [Float] = areas?.inFocus.map { $0 ? 1 : 0 } ?? [0]
             encoder.setRenderPipelineState(drawPipeline)
             encoder.setFragmentTexture(frame.luma, index: 0)
             encoder.setFragmentTexture(frame.chroma, index: 1)
             encoder.setFragmentTexture(mask, index: 2)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
+            encoder.setFragmentBytes(inFocus, length: inFocus.count * MemoryLayout<Float>.stride, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
         }
@@ -297,7 +295,8 @@ final class ViewfinderRenderer: @unchecked Sendable {
     }
 
     private static func uniforms(
-        frame: CurrentFrame, mask: any MTLTexture, settings: ViewfinderSettings, outlines: Bool
+        frame: CurrentFrame, mask: any MTLTexture, settings: ViewfinderSettings, outlines: Bool,
+        areas: FocusAreas.Grid?
     ) -> Uniforms {
         var magnify = SIMD4<Float>(0.5, 0.5, 1, 0)
         if let magnifier = settings.magnifier {
@@ -310,6 +309,9 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let appearance = settings.appearance
         // Magnified, the mask's texels are already a few screen pixels across: draw them as they are.
         let reach = magnify.z > 1 ? 0 : appearance.lines.reach
+        let squares = areas?.shaderUniforms(
+            width: frame.work.width, height: frame.work.height,
+            screenPixelsPerFramePixel: frame.pictureWidthOnScreen / Float(frame.work.height) * magnify.z)
         return Uniforms(
             scale: frame.scale,
             matrix: frame.matrix,
@@ -318,19 +320,28 @@ final class ViewfinderRenderer: @unchecked Sendable {
             magnify: magnify,
             // Stripes about 7 points wide at the screen's scale (drawable pixels per point ≈ 3).
             zebra: SIMD4(
-                settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1, 0))
+                settings.zebras?.threshold(white: settings.zebraWhite) ?? 2, 21, settings.zebras == nil ? 0 : 1, 0),
+            areas: squares?.areas ?? .zero, areaColor: squares?.color ?? .zero)
     }
 
     /// Sends the frame to the GPU. When sweep peaking analysed it, its tile statistics come back in the completion
-    /// handler and become the tracker's next verdicts.
-    private func commit(_ commandBuffer: any MTLCommandBuffer, frame: CurrentFrame, sweepAnalysed: Bool) {
+    /// handler and become the tracker's next verdicts; when AF squares did, their counts update `focusAreas`.
+    private func commit(
+        _ commandBuffer: any MTLCommandBuffer, frame: CurrentFrame, sweepAnalysed: Bool, areasCounted: Bool
+    ) {
         let retained = InFlight(
-            textures: frame.textures, partials: frame.partials,
-            groupCount: frame.work.groups.width * frame.work.groups.height,
+            textures: frame.textures, partials: frame.partials, groups: frame.work.groups,
             pixelCount: frame.work.width * frame.work.height)
         let startGeneration = lock.withLock { generation }
         let verdictsOut = UncheckedBuffer(frame.verdicts)
         commandBuffer.addCompletedHandler { [self] _ in
+            if areasCounted {
+                let counts = Self.focusCounts(retained)
+                lock.withLock {
+                    _ = focusAreas.update(
+                        counts: counts, tilesAcross: retained.groups.width, tilesDown: retained.groups.height)
+                }
+            }
             guard sweepAnalysed else {
                 inFlight.signal()
                 return
@@ -380,6 +391,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
         let cutoff: Float
         let verdicts: any MTLBuffer
         let sweep: SweepUse
+        var countsAreas = false  // AF squares: count each tile's marks into `partials`
     }
 
     /// Steps 1–4: shrink, blur, measure how crisp the edges are, and mark those crisper than the cutoff; with sweep
@@ -418,6 +430,10 @@ final class ViewfinderRenderer: @unchecked Sendable {
         encoder.setBytes(&params, length: MemoryLayout<MaskParams>.stride, index: 0)
         encoder.setBuffer(input.verdicts, offset: 0, index: 1)
         encoder.run(maskPipeline, [work.edges, work.mask, work.sharp], over: size)
+        if input.countsAreas {
+            encoder.setBuffer(input.partials, offset: 0, index: 0)
+            encoder.run(focusCountPipeline, [work.mask], groups: work.groups)
+        }
         encoder.endEncoding()
     }
 
@@ -504,18 +520,6 @@ final class ViewfinderRenderer: @unchecked Sendable {
         return texture
     }
 
-    /// Each tile's average high-pass response and brightness, for sweep peaking.
-    private static func tiles(_ frame: InFlight) -> (sharpness: [Float], luma: [Float]) {
-        let values = frame.partials.contents().bindMemory(to: SIMD4<Float>.self, capacity: frame.groupCount)
-        var sharpness = [Float](repeating: 0, count: frame.groupCount)
-        var luma = [Float](repeating: 0, count: frame.groupCount)
-        for i in 0..<frame.groupCount {
-            sharpness[i] = values[i].x / 256
-            luma[i] = values[i].z / 256
-        }
-        return (sharpness, luma)
-    }
-
     // MARK: Drawing details
 
     /// Matches `MaskParams` in Viewfinder.metal.
@@ -525,12 +529,6 @@ final class ViewfinderRenderer: @unchecked Sendable {
         var sweep: UInt32
     }
 
-    /// A Metal buffer handed to a completion handler.
-    private struct UncheckedBuffer: @unchecked Sendable {
-        let buffer: any MTLBuffer
-        init(_ buffer: any MTLBuffer) { self.buffer = buffer }
-    }
-
     private struct Uniforms {
         var scale: SIMD2<Float>
         var matrix: SIMD4<Float>
@@ -538,19 +536,8 @@ final class ViewfinderRenderer: @unchecked Sendable {
         var lines: SIMD4<Float>
         var magnify: SIMD4<Float>
         var zebra: SIMD4<Float>
-    }
-
-    /// The upright picture's size as a fraction of the view when fitted inside it (like `.resizeAspect`).
-    static func fitScale(frameWidth: Int, frameHeight: Int, viewSize: CGSize) -> SIMD2<Float> {
-        let picture = Float(frameHeight) / Float(frameWidth)  // upright: the landscape frame turned
-        let view = Float(viewSize.width / viewSize.height)
-        return picture > view ? SIMD2(1, view / picture) : SIMD2(picture / view, 1)
-    }
-
-    /// The frame's YCbCr matrix as Viewfinder.metal takes it, which subtracts green's two terms.
-    static func matrix(for pixelBuffer: CVPixelBuffer) -> SIMD4<Float> {
-        let m = YCbCrMatrix.of(pixelBuffer)
-        return SIMD4(m.crToRed, -m.cbToGreen, -m.crToGreen, m.cbToBlue)
+        var areas: SIMD4<Float>
+        var areaColor: SIMD4<Float>
     }
 
     /// Wide-colour frames are Display P3; show them as such, as the system preview does.
@@ -566,6 +553,9 @@ final class ViewfinderRenderer: @unchecked Sendable {
     }
 
     // MARK: Testing
+
+    /// The AF squares the last counted frame found.
+    var focusAreaGrid: FocusAreas.Grid? { lock.withLock { focusAreas.grid } }
 
     /// What one frame's analysis produced, read back from the GPU.
     struct Analysis {
@@ -602,28 +592,5 @@ final class ViewfinderRenderer: @unchecked Sendable {
 
         let bytes = readback.contents().bindMemory(to: UInt8.self, capacity: w * h)
         return Analysis(width: w, height: h, mask: Array(UnsafeBufferPointer(start: bytes, count: w * h)))
-    }
-}
-
-extension MTLComputeCommandEncoder {
-    /// One compute pass: `pipeline` with `textures` bound from index 0 in order, a thread per texel of `size`.
-    /// Bytes and buffers are bound beforehand; Metal keeps them across pipeline changes.
-    fileprivate func run(_ pipeline: any MTLComputePipelineState, _ textures: [any MTLTexture], over size: MTLSize) {
-        bind(pipeline, textures)
-        dispatchThreads(size, threadsPerThreadgroup: threadgroup)
-    }
-
-    /// The same, in whole threadgroups, for kernels that sum over each one.
-    fileprivate func run(_ pipeline: any MTLComputePipelineState, _ textures: [any MTLTexture], groups: MTLSize) {
-        bind(pipeline, textures)
-        dispatchThreadgroups(groups, threadsPerThreadgroup: threadgroup)
-    }
-
-    /// The tiles Viewfinder.metal's edge kernel sums over are this size too.
-    private var threadgroup: MTLSize { MTLSize(width: 16, height: 16, depth: 1) }
-
-    private func bind(_ pipeline: any MTLComputePipelineState, _ textures: [any MTLTexture]) {
-        setComputePipelineState(pipeline)
-        for (index, texture) in textures.enumerated() { setTexture(texture, index: index) }
     }
 }

@@ -125,9 +125,9 @@ final class CameraController {
             videoFormat: videoFormat, isHistogramEnabled: aids.isHistogramEnabled,
             isPeakingEnabled: aids.isPeakingEnabled, peakingSensitivity: aids.peakingSensitivity,
             peakingAppearance: aids.peakingAppearance, peakingMode: aids.peakingMode,
-            isZebraEnabled: aids.isZebraEnabled, zebraLevel: aids.zebraLevel,
-            isMagnifierEnabled: aids.isMagnifierEnabled, flash: flash, histogramStyle: aids.histogramStyle,
-            isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
+            isFocusAreasEnabled: aids.isFocusAreasEnabled, isZebraEnabled: aids.isZebraEnabled,
+            zebraLevel: aids.zebraLevel, isMagnifierEnabled: aids.isMagnifierEnabled, flash: flash,
+            histogramStyle: aids.histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
     }
 
     /// The other copy of Glint (the app, or the Lock Screen camera) may have changed settings while this one was
@@ -630,7 +630,7 @@ final class CameraController {
         if viewfinderLock != nil { viewfinderLock = nil }
         if !isAutofocus {
             isAutofocus = true
-            sendAnalysis()  // peaking is for manual focus
+            sendAnalysis()  // peaking is for manual focus, AF squares for autofocus
         }
         capture.enqueue { $0.focus(at: point) }
     }

@@ -13,7 +13,7 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     struct Wants: Sendable, Equatable {
         var histogram = false
         var histogramRGB = false  // the histogram also wants red, green and blue (HISTOGRAM in SET)
-        var viewfinder: ViewfinderSettings?  // non-nil while the GPU viewfinder draws (peaking or magnifier)
+        var viewfinder: ViewfinderSettings?  // non-nil while the GPU viewfinder draws
         var any: Bool { histogram || viewfinder != nil }
     }
 

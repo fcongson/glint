@@ -192,6 +192,11 @@ struct SetMenu: View {
             SettingRow(
                 tile: tile, options: ZebraLevel.allCases.map { (title: $0.title, value: $0) },
                 selection: cam.aids.zebraLevel, onSelect: { cam.aids.setZebraLevel($0) })
+        case .focusAreas:
+            // Drawn by the GPU viewfinder, like peaking.
+            SettingRow(
+                tile: tile, options: Self.offOn, selection: cam.aids.isFocusAreasEnabled,
+                onSelect: { cam.aids.setFocusAreasEnabled($0) }, isAvailable: { !$0 || cam.aids.isGPUAvailable })
         case .grid:
             SettingRow(
                 tile: tile, options: [(title: "Off", value: false), (title: "Thirds", value: true)],

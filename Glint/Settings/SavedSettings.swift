@@ -24,6 +24,7 @@ struct SavedSettings: Codable, Equatable {
     var peakingSensitivity: PeakingSensitivity?
     var peakingAppearance: PeakingAppearance?
     var peakingMode: PeakingMode?
+    var isFocusAreasEnabled: Bool?
     var isZebraEnabled: Bool?
     var zebraLevel: ZebraLevel?
     var isMagnifierEnabled: Bool?
