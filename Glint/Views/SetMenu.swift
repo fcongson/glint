@@ -44,7 +44,7 @@ struct SetMenu: View {
                     .frame(minWidth: 44, minHeight: 36)
             }
             if let mode = editing {
-                ToolRowEditor(cam: cam, mode: mode, onBack: { editing = nil })
+                ToolRowEditor(cam: cam, mode: mode, onBack: { editing = nil }).id(mode)
             } else {
                 SetTabBar(pages: pages, selection: page, mode: cam.captureMode) { storedPage = $0 }
                 ScrollView {
