@@ -138,7 +138,8 @@ struct FocusPeakingTests {
     }
 
     /// Every way a frame is drawn finishes on the GPU and hands its slot back. More frames than can be in flight at
-    /// once would otherwise wait forever: outlines analysed and reused (every other frame), magnified, with zebras.
+    /// once would otherwise wait forever: outlines analysed and reused (every other frame), magnified, with zebras,
+    /// and AF squares.
     @MainActor
     @Test(.timeLimit(.minutes(1)), arguments: [PeakingMode.standard, .sweep])
     func renderingKeepsGoing(mode: PeakingMode) async throws {
@@ -153,6 +154,7 @@ struct FocusPeakingTests {
         let settings = [
             ViewfinderSettings(outlines: true, mode: mode),
             ViewfinderSettings(outlines: true, mode: mode, magnifier: magnified, zebras: .hundred),
+            ViewfinderSettings(focusAreas: true, mode: mode),
         ]
         let drawn = await Task.detached {
             var drawn = 0
@@ -164,7 +166,37 @@ struct FocusPeakingTests {
             }
             return drawn
         }.value
-        #expect(drawn == 8)
+        #expect(drawn == 12)
+    }
+
+    /// A crisp edge down the frame lights up the cells it runs through, and only those.
+    @MainActor
+    @Test(.timeLimit(.minutes(1)))
+    func afSquaresMarkTheCellsACrispEdgeRunsThrough() async throws {
+        let renderer = try #require(ViewfinderRenderer.make())
+        let layer = CAMetalLayer()
+        renderer.configure(layer)
+        layer.drawableSize = CGSize(width: 64, height: 48)
+        renderer.attach(layer, drawableSize: layer.drawableSize)
+        nonisolated(unsafe) let buffer = try frame { x, _ in x < 32 ? 0 : 255 }
+        let grid = await Task.detached { () -> FocusAreas.Grid? in
+            for _ in 0..<200 {
+                renderer.render(buffer, settings: ViewfinderSettings(focusAreas: true))
+                if let grid = renderer.focusAreaGrid { return grid }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return nil
+        }.value
+        let found = try #require(grid)
+        // 64 × 48 is 4 × 3 tiles, a cell each. The edge is marked where it's steepest, at x = 31: column 1.
+        #expect(found.across == 4 && found.down == 3)
+        for (i, inFocus) in found.inFocus.enumerated() {
+            #expect(inFocus == (i % 4 == 1), "cell \(i)")
+        }
+
+        // Switched off, the old squares are dropped, so they can't flash up when the squares are next on.
+        await Task.detached { renderer.render(buffer, settings: ViewfinderSettings()) }.value
+        #expect(renderer.focusAreaGrid == nil)
     }
 
     /// Analysed at full resolution: only frames past 4096 on the long side (48 MP) are shrunk.

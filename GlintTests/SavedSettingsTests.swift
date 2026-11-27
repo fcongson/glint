@@ -17,7 +17,7 @@ struct SavedSettingsTests {
             hasManualWhiteBalance: true, auto: AutoSettings(iso: true), exposureBias: -0.7,
             videoFormat: format, isHistogramEnabled: true, isPeakingEnabled: false,
             peakingSensitivity: .high, peakingAppearance: PeakingAppearance(color: .blue, lines: .fine),
-            peakingMode: .sweep, isZebraEnabled: true, zebraLevel: .ninety,
+            peakingMode: .sweep, isFocusAreasEnabled: true, isZebraEnabled: true, zebraLevel: .ninety,
             isMagnifierEnabled: false, flash: .auto, histogramStyle: .rgb,
             isGridEnabled: true, isLevelEnabled: true)
         settings.save(to: defaults)

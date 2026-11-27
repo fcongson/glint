@@ -197,7 +197,25 @@ kernel void peakingPool(texture2d<float, access::read> mask [[texture(0)]],
     pooled.write(float4(marked), gid);
 }
 
-// 5. Draw the frame upright and fitted, with the outlines over it.
+// 4c. AF squares: each 16×16 tile's count of marked pixels, for FocusAreas to find the parts of the frame in focus.
+kernel void focusAreaCount(texture2d<float, access::read> mask [[texture(0)]],
+                           device float *counts [[buffer(0)]],
+                           uint2 gid [[thread_position_in_grid]],
+                           uint2 lid [[thread_position_in_threadgroup]],
+                           uint2 group [[threadgroup_position_in_grid]],
+                           uint2 groups [[threadgroups_per_grid]]) {
+    threadgroup float shared[256];
+    uint i = lid.y * 16 + lid.x;
+    shared[i] = gid.x < mask.get_width() && gid.y < mask.get_height() ? mask.read(gid).r : 0;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint stride = 128; stride > 0; stride >>= 1) {
+        if (i < stride) shared[i] += shared[i + stride];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (i == 0) counts[group.y * groups.x + group.x] = shared[0];
+}
+
+// 5. Draw the frame upright and fitted, with the outlines and AF squares over it.
 
 struct ViewfinderUniforms {
     float2 scale;    // the picture's size as a fraction of the view, for fitting
@@ -207,7 +225,19 @@ struct ViewfinderUniforms {
                      // w: 1 to draw outlines, 0 for none
     float4 magnify;  // xy: centre of the magnified region in picture coordinates; z: zoom (1 = not magnified)
     float4 zebra;    // x: luma threshold (0…1); y: stripe period in drawable pixels; z: 1 to draw zebras
+    float4 areas;    // AF squares. xy: one cell's size in frame coordinates; z, w: cells across and down (0: none)
+    float4 areaColor;  // rgb; w: half the squares' line width, as a fraction of a cell
 };
+
+// A square outline inside each AF cell that's in focus.
+static bool onFocusSquare(float2 uv, float4 areas, float halfLine, constant float *inFocus) {
+    float2 cell = uv / areas.xy;
+    uint2 c = uint2(cell);
+    if (c.x >= uint(areas.z) || c.y >= uint(areas.w) || inFocus[c.y * uint(areas.z) + c.x] == 0) return false;
+    float2 d = abs(fract(cell) - 0.5);
+    constexpr float size = 0.33;            // half the square's side, as a fraction of the cell
+    return all(d <= size + halfLine) && any(d >= size - halfLine);
+}
 
 struct ViewfinderVertex {
     float4 position [[position]];
@@ -226,7 +256,8 @@ fragment float4 viewfinderFragment(ViewfinderVertex in [[stage_in]],
                                    texture2d<float> luma [[texture(0)]],
                                    texture2d<float> chroma [[texture(1)]],
                                    texture2d<float> mask [[texture(2)]],
-                                   constant ViewfinderUniforms &u [[buffer(0)]]) {
+                                   constant ViewfinderUniforms &u [[buffer(0)]],
+                                   constant float *inFocus [[buffer(1)]]) {
     constexpr sampler linear(filter::linear, address::clamp_to_edge);
     float2 p = (in.view - 0.5) / u.scale + 0.5;
     if (any(p < 0) || any(p > 1)) return float4(0, 0, 0, 1);
@@ -257,5 +288,7 @@ fragment float4 viewfinderFragment(ViewfinderVertex in [[stage_in]],
         float phase = fract((in.position.x + in.position.y) / u.zebra.y);
         rgb = mix(rgb, float3(phase < 0.5 ? 1.0 : 0.0), 0.6);
     }
-    return float4(mix(rgb, u.color.rgb, outline * u.lines.w), 1);
+    rgb = mix(rgb, u.color.rgb, outline * u.lines.w);
+    if (u.areas.w > 0 && onFocusSquare(uv, u.areas, u.areaColor.w, inFocus)) rgb = u.areaColor.rgb;
+    return float4(rgb, 1);
 }

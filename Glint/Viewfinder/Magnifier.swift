@@ -59,10 +59,11 @@ struct Magnifier: Equatable, Sendable {
     }
 }
 
-/// Everything the GPU viewfinder needs to draw a frame: outlines (focus peaking) or not, magnified or not, and
-/// zebras or not.
+/// Everything the GPU viewfinder needs to draw a frame: outlines (focus peaking) or not, AF squares or not,
+/// magnified or not, and zebras or not.
 struct ViewfinderSettings: Equatable, Sendable {
     var outlines = false
+    var focusAreas = false  // AF squares (see FocusAreas), judged at `sensitivity`
     var sensitivity = PeakingSensitivity.medium
     var appearance = PeakingAppearance()
     var mode = PeakingMode.standard
@@ -70,6 +71,6 @@ struct ViewfinderSettings: Equatable, Sendable {
     var zebras: ZebraLevel?
     var zebraWhite = 255  // where clipped white sits in the frames (from the histogram), for zebra levels
 
-    /// Peaking and magnifying need full-resolution frames; zebras alone are happy with screen-sized ones.
-    var needsFullResolution: Bool { outlines || magnifier != nil }
+    /// Peaking, AF squares and magnifying need full-resolution frames; zebras alone are happy with screen-sized ones.
+    var needsFullResolution: Bool { outlines || focusAreas || magnifier != nil }
 }

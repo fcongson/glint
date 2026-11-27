@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import Observation
 
-/// The viewfinder aids' settings: the histogram, focus peaking, zebras and the focus magnifier, and which of them
+/// The viewfinder aids' settings: the histogram, focus peaking, AF squares, zebras and the focus magnifier, and which of them
 /// Low Power Mode and heat have switched off for now. Each change that alters the preview analysis calls
 /// `analysisChanged`; `CameraController` sends the analysis to the camera, since peaking also depends on focus.
 @MainActor
@@ -16,6 +16,9 @@ final class ViewfinderAidsModel {
     private(set) var peakingSensitivity = PeakingSensitivity.medium
     private(set) var peakingAppearance = PeakingAppearance()
     private(set) var peakingMode = PeakingMode.standard
+    /// AF squares (see FocusAreas): squares on what's in focus, shown in autofocus. Off by default, since they
+    /// keep the GPU viewfinder analysing every frame.
+    private(set) var isFocusAreasEnabled = false
     private(set) var isZebraEnabled = false
     private(set) var zebraLevel = ZebraLevel.hundred
 
@@ -44,13 +47,16 @@ final class ViewfinderAidsModel {
     var isZebraShown: Bool { isZebraEnabled && isGPUAvailable }
 
     func isPeakingShown(isAutofocus: Bool) -> Bool { isPeakingEnabled && !isAutofocus }
+    func areFocusAreasShown(isAutofocus: Bool) -> Bool { isFocusAreasEnabled && isAutofocus }
 
     /// What the GPU viewfinder draws, or nil when it draws nothing and the plain preview shows.
     func viewfinderSettings(isAutofocus: Bool) -> ViewfinderSettings? {
         let outlines = isPeakingShown(isAutofocus: isAutofocus)
-        guard outlines || isMagnifying || isZebraShown else { return nil }
+        let focusAreas = areFocusAreasShown(isAutofocus: isAutofocus)
+        guard outlines || focusAreas || isMagnifying || isZebraShown else { return nil }
         return ViewfinderSettings(
-            outlines: outlines, sensitivity: peakingSensitivity, appearance: peakingAppearance, mode: peakingMode,
+            outlines: outlines, focusAreas: focusAreas, sensitivity: peakingSensitivity, appearance: peakingAppearance,
+            mode: peakingMode,
             magnifier: isMagnifying ? Magnifier(center: magnifyPoint, magnification: magnification) : nil,
             zebras: isZebraShown ? zebraLevel : nil)
     }
@@ -63,6 +69,7 @@ final class ViewfinderAidsModel {
         peakingSensitivity = saved.peakingSensitivity ?? peakingSensitivity
         peakingAppearance = saved.peakingAppearance ?? peakingAppearance
         peakingMode = saved.peakingMode ?? peakingMode
+        isFocusAreasEnabled = isGPUAvailable && (saved.isFocusAreasEnabled ?? isFocusAreasEnabled)
         isZebraEnabled = isGPUAvailable && (saved.isZebraEnabled ?? isZebraEnabled)
         zebraLevel = saved.zebraLevel ?? zebraLevel
         isMagnifierEnabled = saved.isMagnifierEnabled ?? isMagnifierEnabled
@@ -120,6 +127,15 @@ final class ViewfinderAidsModel {
     func setPeakingSensitivity(_ sensitivity: PeakingSensitivity) {
         guard sensitivity != peakingSensitivity else { return }
         peakingSensitivity = sensitivity
+        analysisChanged()
+    }
+
+    // MARK: AF squares
+
+    func setFocusAreasEnabled(_ on: Bool) {
+        guard on != isFocusAreasEnabled, !on || isGPUAvailable else { return }
+        isFocusAreasEnabled = on
+        pauses.userChose(.focusAreas)
         analysisChanged()
     }
 
@@ -215,7 +231,9 @@ final class ViewfinderAidsModel {
     }
 
     private var enabled: ViewfinderAids {
-        ViewfinderAids(histogram: isHistogramEnabled, peaking: isPeakingEnabled, zebras: isZebraEnabled)
+        ViewfinderAids(
+            histogram: isHistogramEnabled, peaking: isPeakingEnabled, focusAreas: isFocusAreasEnabled,
+            zebras: isZebraEnabled)
     }
 
     /// Switches these aids on or off on Glint's own account (the user's switches are the `set…Enabled` methods).
@@ -225,6 +243,7 @@ final class ViewfinderAidsModel {
             if !on { histogramModel.clear() }
         }
         if aids.peaking { isPeakingEnabled = on }
+        if aids.focusAreas { isFocusAreasEnabled = on }
         if aids.zebras { isZebraEnabled = on }
         analysisChanged()
     }

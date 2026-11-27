@@ -1,20 +1,21 @@
 /// The per-frame viewfinder aids: the only extra work Glint does on every preview frame.
-enum ViewfinderAid: Sendable { case histogram, peaking, zebras }
+enum ViewfinderAid: Sendable { case histogram, peaking, focusAreas, zebras }
 
 /// A set of the aids: which are on, which to switch off, which to bring back.
 struct ViewfinderAids: Equatable, Sendable {
     var histogram = false
     var peaking = false
+    var focusAreas = false  // AF squares: the same analysis as peaking, so they pause with it
     var zebras = false
 
-    var any: Bool { histogram || peaking || zebras }
+    var any: Bool { histogram || peaking || focusAreas || zebras }
 }
 
 /// Remembers which aids Glint switched off by itself, and why, so each comes back when its reason ends.
 ///
-/// Low Power Mode turns off the histogram, peaking and zebras; heat or load (system pressure at serious and up)
-/// turns off peaking and zebras, and leaves the histogram, which is cheap. An aid the user switches themselves is
-/// theirs from then on: it's forgotten here and stays how they left it. If pressure eases while Low Power Mode is
+/// Low Power Mode turns off the histogram, peaking, AF squares and zebras; heat or load (system pressure at serious
+/// and up) turns off peaking, AF squares and zebras, and leaves the histogram, which is cheap. An aid the user
+/// switches themselves is theirs from then on: it's forgotten here and stays how they left it. If pressure eases while Low Power Mode is
 /// still on, what pressure paused is handed to Low Power Mode, to come back when that ends.
 ///
 /// Only the bookkeeping: each call returns the aids to switch, and `ViewfinderAidsModel` switches them.
@@ -35,9 +36,9 @@ struct ViewfinderAidPauses: Equatable, Sendable {
         return forLowPower
     }
 
-    /// Pressure reached the level that pauses aids. Returns the aids to switch off: peaking and zebras, if on.
+    /// Pressure reached the level that pauses aids. Returns the aids to switch off: peaking, AF squares and zebras, if on.
     mutating func pressureBegan(enabled: ViewfinderAids) -> ViewfinderAids {
-        let heavy = ViewfinderAids(peaking: enabled.peaking, zebras: enabled.zebras)
+        let heavy = ViewfinderAids(peaking: enabled.peaking, focusAreas: enabled.focusAreas, zebras: enabled.zebras)
         guard heavy.any else { return ViewfinderAids() }
         forPressure = heavy
         return heavy
@@ -49,6 +50,7 @@ struct ViewfinderAidPauses: Equatable, Sendable {
         forPressure = ViewfinderAids()
         guard lowPowerModeIsOn else { return paused }
         forLowPower.peaking = forLowPower.peaking || paused.peaking
+        forLowPower.focusAreas = forLowPower.focusAreas || paused.focusAreas
         forLowPower.zebras = forLowPower.zebras || paused.zebras
         return ViewfinderAids()
     }
@@ -61,6 +63,9 @@ struct ViewfinderAidPauses: Equatable, Sendable {
         case .peaking:
             forLowPower.peaking = false
             forPressure.peaking = false
+        case .focusAreas:
+            forLowPower.focusAreas = false
+            forPressure.focusAreas = false
         case .zebras:
             forLowPower.zebras = false
             forPressure.zebras = false

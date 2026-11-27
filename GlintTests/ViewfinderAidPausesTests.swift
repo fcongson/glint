@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Viewfinder aid pauses")
 struct ViewfinderAidPausesTests {
-    private let all = ViewfinderAids(histogram: true, peaking: true, zebras: true)
+    private let all = ViewfinderAids(histogram: true, peaking: true, focusAreas: true, zebras: true)
     private let none = ViewfinderAids()
 
     @Test func lowPowerSwitchesOffWhatIsOnAndBringsItBack() {
@@ -25,12 +25,12 @@ struct ViewfinderAidPausesTests {
         var pauses = ViewfinderAidPauses()
         _ = pauses.lowPowerBegan(enabled: all)
         pauses.userChose(.peaking)  // turned back on by hand during Low Power Mode
-        #expect(pauses.lowPowerEnded() == ViewfinderAids(histogram: true, zebras: true))
+        #expect(pauses.lowPowerEnded() == ViewfinderAids(histogram: true, focusAreas: true, zebras: true))
     }
 
     @Test func pressureLeavesTheHistogramAlone() {
         var pauses = ViewfinderAidPauses()
-        let heavy = ViewfinderAids(peaking: true, zebras: true)
+        let heavy = ViewfinderAids(peaking: true, focusAreas: true, zebras: true)
         #expect(pauses.pressureBegan(enabled: all) == heavy)
         #expect(pauses.pressureEased(lowPowerModeIsOn: false) == heavy)
         #expect(pauses.pressureEased(lowPowerModeIsOn: false) == none)
@@ -46,7 +46,7 @@ struct ViewfinderAidPausesTests {
     /// aids off, and they come back when it ends.
     @Test func pressureEasingDuringLowPowerHandsItsAidsOver() {
         var pauses = ViewfinderAidPauses()
-        let heavy = ViewfinderAids(peaking: true, zebras: true)
+        let heavy = ViewfinderAids(peaking: true, focusAreas: true, zebras: true)
         _ = pauses.pressureBegan(enabled: heavy)
         #expect(pauses.lowPowerBegan(enabled: none) == none)
         #expect(pauses.pressureEased(lowPowerModeIsOn: true) == none)
@@ -58,5 +58,16 @@ struct ViewfinderAidPausesTests {
         _ = pauses.pressureBegan(enabled: ViewfinderAids(peaking: true, zebras: true))
         pauses.userChose(.zebras)
         #expect(pauses.pressureEased(lowPowerModeIsOn: false) == ViewfinderAids(peaking: true))
+    }
+
+    /// AF squares switched by hand are the user's, whichever reason had them off.
+    @Test func theUsersChoiceOfAFSquaresClearsBothPauses() {
+        var pauses = ViewfinderAidPauses()
+        let squares = ViewfinderAids(focusAreas: true)
+        _ = pauses.pressureBegan(enabled: squares)
+        _ = pauses.lowPowerBegan(enabled: squares)
+        pauses.userChose(.focusAreas)
+        #expect(pauses.pressureEased(lowPowerModeIsOn: true) == none)
+        #expect(pauses.lowPowerEnded() == none)
     }
 }

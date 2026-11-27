@@ -26,7 +26,10 @@ struct SetMenuTests {
         for mode in [CaptureMode.photo, .video] {
             let shown = rows(in: mode)
             #expect(shown.contains(.peakingMode) && shown.contains(.zebras) && shown.contains(.railSide))
-            #expect(shown.filter { $0.section == .viewfinder } == [.histogram, .zebras, .grid, .level, .railSide])
+            #expect(
+                shown.filter { $0.section == .viewfinder } == [
+                    .histogram, .zebras, .focusAreas, .grid, .level, .railSide,
+                ])
         }
     }
 

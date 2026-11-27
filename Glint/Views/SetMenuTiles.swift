@@ -5,7 +5,7 @@ import Foundation
 extension SetMenu {
     enum Tile: CaseIterable {
         case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
-        case peakingMode, sensitivity, colour, lines, histogram, zebras, grid, level, railSide, debugInfo
+        case peakingMode, sensitivity, colour, lines, histogram, zebras, focusAreas, grid, level, railSide, debugInfo
 
         /// The row's label, under its section's heading.
         var title: String {
@@ -15,6 +15,7 @@ extension SetMenu {
             case .colour: "COLOUR"
             case .lines: "LINES"
             case .zebras: "ZEBRAS"
+            case .focusAreas: "AF SQUARES"
             case .railSide: "FOCUS RAIL"
             case .fileType: "FILE"
             case .aspect: "ASPECT"
@@ -35,7 +36,7 @@ extension SetMenu {
         var section: Section {
             switch self {
             case .peakingMode, .sensitivity, .colour, .lines: .peaking
-            case .histogram, .zebras, .grid, .level, .railSide: .viewfinder
+            case .histogram, .zebras, .focusAreas, .grid, .level, .railSide: .viewfinder
             case .fileType, .aspect, .flash: .photo
             case .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light: .video
             case .debugInfo: .developer
@@ -50,6 +51,7 @@ extension SetMenu {
             case .colour: "Peaking colour"
             case .lines: "Peaking lines"
             case .zebras: "Zebra level"
+            case .focusAreas: "Squares on what's in focus in autofocus"
             case .railSide: "Focus rail side"
             case .fileType: "File type"
             case .aspect: "Aspect ratio"

@@ -27,6 +27,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **Histogram:** HIST, Luma or RGB, with a clipping warning.
 - **Zebras:** ZEB marks areas at or above a level (100% by default), relative to where the frames' white actually is. The level is remembered per lens and format.
 - **Focus peaking:** PK outlines edges that are crisp while focusing by hand. Standard judges each edge by itself, how fast it turns compared with its own surroundings, so outlines fade as an edge goes soft whatever its contrast and whatever else is in the frame, and are one pixel thin. Sensitivity sets how crisp an edge has to be. Mode (Standard, Sweep), sensitivity, colour and line weight are in SET.
+- **AF squares:** AF SQUARES in SET (off by default) puts green squares on the parts of the picture that are in focus while autofocus runs, like a camera's AF points lighting up. iOS doesn't say what autofocus chose, so Glint shows what came out sharp: the frame is split into a grid about 20 cells across, and a cell gets a square when enough of it passes peaking's crisp-edge test, at peaking's sensitivity, and it's close to the frame's crispest cell, so a detailed scene shows only its sharpest parts.
 - **Focus magnifier:** MAG punches in on the focus point while you touch the focus rail, and zooms back out a second after you let go.
 - **Grid and level:** GRID draws rule-of-thirds lines over the frame that will be kept; LEVEL shows a horizon line that turns amber within a degree of level.
 - **Exposure meter:** Leica-style LEDs in the top bar, with the offset in stops.
@@ -40,7 +41,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 
 **Behaviour**
 - **Remembered settings:** PHOTO or VIDEO, the formats, AUTO or MANUAL and its values, the viewfinder aids and everything in SET (except VIDEO's light) come back at launch. It starts on the main lens with autofocus.
-- **Heat and load:** Glint watches the camera's system pressure and gives things up in order: at *fair*, peaking analyses every other frame; at *serious*, peaking and zebras switch off; at *critical*, PHOTO's preview drops to 15 fps. Low Power Mode switches off the histogram, peaking and zebras.
+- **Heat and load:** Glint watches the camera's system pressure and gives things up in order: at *fair*, peaking analyses every other frame; at *serious*, peaking, AF squares and zebras switch off; at *critical*, PHOTO's preview drops to 15 fps. Low Power Mode switches off the histogram, peaking, AF squares and zebras.
 - **Interruptions:** when the system takes the camera away, the viewfinder says why until it's back. A recording that stops by itself still saves what it has.
 - **VoiceOver:** Glint describes faces and the horizon, and the focus rail, PK and ZEB are adjustable by swiping.
 - **Battery and memory:** the camera, location and motion updates stop behind the review screen; the microphone is attached only in VIDEO; review images are kept compressed.
@@ -80,6 +81,6 @@ For performance testing, run from the Home Screen or use a Release build. Debug 
 
 ## Notes
 - The camera's image signal processor still does hardware-level basics (black level, defect correction) that can't be disabled.
-- The viewfinder is processed video (drawn by the system, or by Glint while peaking, magnifying or zebras are on); only the saved DNG is true RAW. Use the histogram and review thumbnail as a guide, not as ground truth.
+- The viewfinder is processed video (drawn by the system, or by Glint while peaking, AF squares, magnifying or zebras are on); only the saved DNG is true RAW. Use the histogram and review thumbnail as a guide, not as ground truth.
 - iPhone lenses have fixed apertures, so aperture is display-only.
 - Lens distortion correction is disabled only on lenses that allow it (mainly Ultra Wide).
