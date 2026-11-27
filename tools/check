@@ -26,6 +26,9 @@ if ! command -v swiftlint >/dev/null; then
 fi
 swiftlint lint --strict --quiet
 
+step "Lint baseline"
+tools/baseline-ratchet
+
 [[ $mode == --fast ]] && { echo; echo "Fast checks passed."; exit 0; }
 
 step "Build (warnings are errors)"
