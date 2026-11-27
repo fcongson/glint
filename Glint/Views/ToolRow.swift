@@ -85,7 +85,7 @@ struct ToolRow: View {
                     cam.switchLens(to: lens)
                 } label: {
                     Text(lens.label)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .glintFont(size: 12, weight: .semibold)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .frame(minWidth: 36, minHeight: 30)

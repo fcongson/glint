@@ -51,7 +51,7 @@ struct TopBar: View {
             toggleSet()
         } label: {
             Text(title)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .glintFont(size: 13, weight: .semibold)
                 .foregroundStyle(Color.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)

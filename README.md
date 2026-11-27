@@ -44,6 +44,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **Heat and load:** Glint watches the camera's system pressure and gives things up in order: at *fair*, peaking analyses every other frame; at *serious*, peaking, AF squares and zebras switch off; at *critical*, PHOTO's preview drops to 15 fps. Low Power Mode switches off the histogram, peaking, AF squares and zebras.
 - **Interruptions:** when the system takes the camera away, the viewfinder says why until it's back. A recording that stops by itself still saves what it has.
 - **VoiceOver:** Glint describes faces and the horizon, and the focus rail, PK and ZEB are adjustable by swiping.
+- **Text size:** Glint's text grows with the system text size, up to the largest size before the accessibility sizes so the controls still fit around the picture. SET's notes, which wrap, grow all the way.
 - **Battery and memory:** the camera, location and motion updates stop behind the review screen; the microphone is attached only in VIDEO; review images are kept compressed.
 
 ## Project layout

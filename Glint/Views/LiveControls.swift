@@ -35,7 +35,7 @@ struct RecordingTimer: View {
             let elapsed = SettingsText.duration(seconds: Int(context.date.timeIntervalSince(start)))
             HStack(spacing: 6) {
                 Circle().fill(.red).frame(width: 8, height: 8)
-                Text(elapsed).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                Text(elapsed).glintFont(size: 13, weight: .semibold)
                 LiveAudioLevel(cam: cam)
             }
             .foregroundStyle(Color.red)
@@ -160,10 +160,10 @@ struct ManualControls: View {
         return HStack(spacing: 8) {
             VStack(spacing: 0) {
                 Text("EV")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .glintFont(size: 10, weight: .medium)
                     .foregroundStyle(Color.white.opacity(0.6))
                 Text(SettingsText.meterOffset(cam.exposureBias))
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .glintFont(size: 13, weight: .semibold)
                     .foregroundStyle(Color.amber)
             }
             .frame(width: 40)
@@ -185,7 +185,7 @@ struct ManualControls: View {
             cam.setAuto(setting, !on)
         } label: {
             Text("A")
-                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .glintFont(size: 15, weight: .bold)
                 .foregroundStyle(on ? Color.black : Color.autoRed)
                 .frame(width: 44, height: 44)
                 .background(on ? Color.autoRed : Color.clear, in: Circle())

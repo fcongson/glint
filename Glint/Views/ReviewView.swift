@@ -131,7 +131,7 @@ struct ReviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let date = info.capturedAt {
                 Text(date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).year().hour().minute()))
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .glintFont(size: 13, weight: .semibold)
                     .foregroundStyle(Color.white)
             }
             HStack {
@@ -144,7 +144,7 @@ struct ReviewView: View {
                     .padding(.vertical, 2)
                     .background(Color.white.opacity(0.15), in: Capsule())
             }
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .glintFont(size: 12, weight: .medium)
             .foregroundStyle(Color.white)
             if let lens = info.lensModel {
                 Text(lens).lineLimit(1).minimumScaleFactor(0.7)
@@ -159,7 +159,7 @@ struct ReviewView: View {
             }
             settingsStrip(for: info)
         }
-        .font(.system(size: 11, design: .monospaced))
+        .glintFont(size: 11)
         .foregroundStyle(Color.white.opacity(0.7))
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -172,10 +172,10 @@ struct ReviewView: View {
             ForEach(rows(for: info), id: \.label) { row in
                 VStack(spacing: 2) {
                     Text(row.label)
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .glintFont(size: 9, weight: .medium)
                         .foregroundStyle(Color.white.opacity(0.6))
                     Text(row.value)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .glintFont(size: 14, weight: .semibold)
                         .foregroundStyle(Color.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -192,7 +192,7 @@ struct ReviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let date = info.capturedAt {
                 Text(date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).year().hour().minute()))
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .glintFont(size: 13, weight: .semibold)
                     .foregroundStyle(Color.white)
             }
             HStack {
@@ -207,7 +207,7 @@ struct ReviewView: View {
                 }
             }
         }
-        .font(.system(size: 11, weight: .medium, design: .monospaced))
+        .glintFont(size: 11, weight: .medium)
         .foregroundStyle(Color.white.opacity(0.7))
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

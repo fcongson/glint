@@ -49,7 +49,7 @@ struct FocusRail: View {
             onTouch(false)
         } label: {
             Text(preset.title)
-                .font(.system(size: size, weight: .semibold, design: .monospaced))
+                .glintFont(size: size, weight: .semibold)
                 .fixedSize()
                 .opacity(fade)
                 .frame(width: width, height: 30)
