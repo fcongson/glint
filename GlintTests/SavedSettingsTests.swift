@@ -15,7 +15,7 @@ struct SavedSettingsTests {
             captureMode: .video, fileType: .rawAndHEIC, aspect: .threeTwo, manual: true,
             iso: 400, shutterDenominator: 60, whiteBalanceKelvin: 3200,
             hasManualWhiteBalance: true, auto: AutoSettings(iso: true), exposureBias: -0.7,
-            videoFormat: format, isHistogramEnabled: true, isPeakingEnabled: false,
+            videoFormat: format, isHistogramEnabled: true, peakingShow: .always,
             peakingSensitivity: .high, peakingAppearance: PeakingAppearance(color: .blue, lines: .fine),
             peakingMode: .sweep, isFocusAreasEnabled: true, isZebraEnabled: true, zebraLevel: .ninety,
             isMagnifierEnabled: false, flash: .auto, histogramStyle: .rgb,
@@ -34,6 +34,19 @@ struct SavedSettingsTests {
         #expect(
             loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil
                 && loaded.isLevelEnabled == nil)
+    }
+
+    @Test func anOlderSavesPeakingSwitchBecomesTheShowChoice() throws {
+        let defaults = try #require(UserDefaults(suiteName: "SavedSettingsTests.oldPeaking"))
+        defaults.removePersistentDomain(forName: "SavedSettingsTests.oldPeaking")
+        func chosen(_ json: String) throws -> PeakingShow? {
+            defaults.set(Data(json.utf8), forKey: SavedSettings.key)
+            return try #require(SavedSettings.load(from: defaults)).chosenPeakingShow
+        }
+        #expect(try chosen(#"{"isPeakingEnabled":true}"#) == .inMF)
+        #expect(try chosen(#"{"isPeakingEnabled":false}"#) == .off)
+        #expect(try chosen(#"{"isPeakingEnabled":false,"peakingShow":"always"}"#) == .always)
+        #expect(try chosen(#"{}"#) == nil)
     }
 
     @Test func onlyExposureSettingsChangeTheExposure() {

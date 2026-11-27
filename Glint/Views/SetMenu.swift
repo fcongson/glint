@@ -161,6 +161,12 @@ struct SetMenu: View {
     @ViewBuilder
     private func peakingRow(_ tile: Tile) -> some View {
         switch tile {
+        case .peakingShow:
+            // Drawn by the GPU viewfinder, so only Off without it.
+            SettingRow(
+                tile: tile, options: PeakingShow.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.aids.peakingShow, onSelect: { cam.aids.setPeakingShow($0) },
+                isAvailable: { $0 == .off || cam.aids.isGPUAvailable })
         case .peakingMode:
             SettingRow(
                 tile: tile, options: PeakingMode.allCases.map { (title: $0.title, value: $0) },
@@ -198,6 +204,11 @@ struct SetMenu: View {
             SettingRow(
                 tile: tile, options: Self.offOn, selection: cam.aids.isFocusAreasEnabled,
                 onSelect: { cam.aids.setFocusAreasEnabled($0) }, isAvailable: { !$0 || cam.aids.isGPUAvailable })
+        case .magnifier:
+            // Touching the focus rail magnifies the focus point, like a camera's MF assist.
+            SettingRow(
+                tile: tile, options: Self.offOn, selection: cam.aids.isMagnifierEnabled,
+                onSelect: { cam.aids.setMagnifierEnabled($0) }, isAvailable: { !$0 || cam.aids.isMagnifierAvailable })
         case .grid:
             SettingRow(
                 tile: tile, options: [(title: "Off", value: false), (title: "Thirds", value: true)],

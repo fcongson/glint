@@ -28,8 +28,9 @@ struct SetMenuTests {
             #expect(shown.contains(.peakingMode) && shown.contains(.zebras) && shown.contains(.railSide))
             #expect(
                 shown.filter { $0.section == .viewfinder } == [
-                    .histogram, .zebras, .focusAreas, .grid, .level, .railSide,
+                    .histogram, .zebras, .focusAreas, .magnifier, .grid, .level, .railSide,
                 ])
+            #expect(shown.first { $0.section == .peaking } == .peakingShow)
         }
     }
 

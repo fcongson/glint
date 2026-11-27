@@ -67,10 +67,10 @@ struct CameraControllerSettingsTests {
 
     @Test func withoutMetalSavedGPUAidsStayOff() throws {
         let defaults = try emptyDefaults()
-        SavedSettings(isHistogramEnabled: true, isPeakingEnabled: true, isZebraEnabled: true).save(to: defaults)
+        SavedSettings(isHistogramEnabled: true, peakingShow: .always, isZebraEnabled: true).save(to: defaults)
         let cam = CameraController(defaults: defaults, viewfinderRenderer: nil)
         #expect(cam.aids.isHistogramEnabled)
-        #expect(!cam.aids.isPeakingEnabled && !cam.aids.isZebraEnabled)
+        #expect(cam.aids.peakingShow == .off && !cam.aids.isZebraEnabled)
         #expect(!cam.isViewfinderDrawn)
     }
 

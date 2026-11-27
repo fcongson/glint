@@ -24,7 +24,7 @@ final class TextSizeLayoutTests: XCTestCase {
         XCTAssertTrue(app.buttons["ISO"].waitForExistence(timeout: 5), "MANUAL's readouts")
         let controls = [
             app.buttons["Settings"], app.buttons["Photo format"],
-            app.buttons["Histogram"], app.buttons["Zebras"], app.otherElements["Lens"], app.buttons["Focus peaking"],
+            app.buttons["Histogram"], app.buttons["Zebras"], app.otherElements["Lens"],
             app.buttons["ISO"], app.buttons["Shutter speed"],
             app.buttons["AUTO"], app.buttons["MANUAL"], app.buttons["PHOTO"], app.buttons["VIDEO"],
             app.buttons["Take photo"],

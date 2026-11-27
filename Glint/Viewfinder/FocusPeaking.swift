@@ -82,6 +82,28 @@ struct PeakingAppearance: Equatable, Sendable, Codable {
     var lines = PeakingLines.bold
 }
 
+/// When focus peaking is shown. In MF is a camera's way: outlines while you focus by hand, none while autofocus
+/// does it. Always also outlines in autofocus.
+enum PeakingShow: String, CaseIterable, Sendable, Codable {
+    case off, inMF, always
+
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .inMF: "In MF"
+        case .always: "Always"
+        }
+    }
+
+    func isShown(isAutofocus: Bool) -> Bool {
+        switch self {
+        case .off: false
+        case .inMF: !isAutofocus
+        case .always: true
+        }
+    }
+}
+
 /// What peaking outlines. Standard outlines edges that are crisp, at any contrast. Sweep compares each part of the
 /// picture with itself as you focus, and outlines what's at its sharpest now, so it can pick out the best of a
 /// soft scene; it needs focus moved past the subject and back, and falls back to standard until it has.

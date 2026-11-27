@@ -17,17 +17,6 @@ struct ToolRow: View {
             Spacer(minLength: 6)
             if cam.lenses.count > 1 { lensPicker }
             Spacer(minLength: 6)
-            HStack(spacing: 6) {
-                if cam.viewfinderRenderer != nil { peakingChip }
-                if cam.aids.isMagnifierAvailable {
-                    Chip(
-                        "MAG", label: "Focus magnifier", value: SettingsText.onOff(cam.aids.isMagnifierEnabled),
-                        isOn: cam.aids.isMagnifierEnabled
-                    ) { cam.aids.setMagnifierEnabled(!cam.aids.isMagnifierEnabled) }
-                    .accessibilityHint(
-                        "When on, focusing with the focus rail magnifies the focus point so you can check focus.")
-                }
-            }
         }
         .frame(height: 44)
         .padding(.horizontal, 10)
@@ -51,27 +40,6 @@ struct ToolRow: View {
             switch direction {
             case .increment: if i + 1 < all.count { cam.aids.setZebraLevel(all[i + 1]) }
             case .decrement: if i > 0 { cam.aids.setZebraLevel(all[i - 1]) }
-            @unknown default: break
-            }
-        }
-    }
-
-    /// PK: peaking on and off. Mode, sensitivity, colour and lines are in SET.
-    private var peakingChip: some View {
-        let look = cam.aids.peakingAppearance
-        let value =
-            cam.aids.isPeakingEnabled
-            ? "\(SettingsText.onOff(true)), \(cam.aids.peakingMode.title), \(cam.aids.peakingSensitivity.title) sensitivity, \(look.color.title), \(look.lines.title) lines"
-            : SettingsText.onOff(false)
-        return Chip("PK", label: "Focus peaking", value: value, isOn: cam.aids.isPeakingEnabled) {
-            cam.aids.setPeakingEnabled(!cam.aids.isPeakingEnabled)
-        }
-        .accessibilityHint("Outlines what's in focus. Swipe up or down for sensitivity; more in Settings.")
-        .accessibilityAdjustableAction { direction in
-            let all = PeakingSensitivity.allCases, i = cam.aids.peakingSensitivity.rawValue
-            switch direction {
-            case .increment: if i + 1 < all.count { cam.aids.setPeakingSensitivity(all[i + 1]) }
-            case .decrement: if i > 0 { cam.aids.setPeakingSensitivity(all[i - 1]) }
             @unknown default: break
             }
         }

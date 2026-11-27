@@ -5,11 +5,14 @@ import Foundation
 extension SetMenu {
     enum Tile: CaseIterable {
         case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
-        case peakingMode, sensitivity, colour, lines, histogram, zebras, focusAreas, grid, level, railSide, debugInfo
+        case peakingShow, peakingMode, sensitivity, colour, lines
+        case histogram, zebras, focusAreas, magnifier, grid, level, railSide, debugInfo
 
         /// The row's label, under its section's heading.
         var title: String {
             switch self {
+            case .peakingShow: "SHOW"
+            case .magnifier: "MAG ON RAIL"
             case .peakingMode: "MODE"
             case .sensitivity: "SENSITIVITY"
             case .colour: "COLOUR"
@@ -35,8 +38,8 @@ extension SetMenu {
 
         var section: Section {
             switch self {
-            case .peakingMode, .sensitivity, .colour, .lines: .peaking
-            case .histogram, .zebras, .focusAreas, .grid, .level, .railSide: .viewfinder
+            case .peakingShow, .peakingMode, .sensitivity, .colour, .lines: .peaking
+            case .histogram, .zebras, .focusAreas, .magnifier, .grid, .level, .railSide: .viewfinder
             case .fileType, .aspect, .flash: .photo
             case .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light: .video
             case .debugInfo: .developer
@@ -46,6 +49,8 @@ extension SetMenu {
         /// Spoken name, for VoiceOver.
         var name: String {
             switch self {
+            case .peakingShow: "When peaking is shown"
+            case .magnifier: "Magnifier on the focus rail"
             case .peakingMode: "Peaking mode"
             case .sensitivity: "Peaking sensitivity"
             case .colour: "Peaking colour"

@@ -123,7 +123,7 @@ final class CameraController {
             shutterDenominator: shutterDenominator, whiteBalanceKelvin: whiteBalanceKelvin,
             hasManualWhiteBalance: hasManualWhiteBalance, auto: auto, exposureBias: exposureBias,
             videoFormat: videoFormat, isHistogramEnabled: aids.isHistogramEnabled,
-            isPeakingEnabled: aids.isPeakingEnabled, peakingSensitivity: aids.peakingSensitivity,
+            peakingShow: aids.peakingShow, peakingSensitivity: aids.peakingSensitivity,
             peakingAppearance: aids.peakingAppearance, peakingMode: aids.peakingMode,
             isFocusAreasEnabled: aids.isFocusAreasEnabled, isZebraEnabled: aids.isZebraEnabled,
             zebraLevel: aids.zebraLevel, isMagnifierEnabled: aids.isMagnifierEnabled, flash: flash,
