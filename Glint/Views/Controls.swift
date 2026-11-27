@@ -36,7 +36,7 @@ struct ChipLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            .glintFont(size: 13, weight: .semibold)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
             .padding(.horizontal, 10)
@@ -92,7 +92,7 @@ struct SegmentedSwitch<Value: Hashable>: View {
                     onSelect(option.value)
                 } label: {
                     Text(option.title)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .glintFont(size: 12, weight: .semibold)
                         .foregroundStyle(selected ? Color.black : Color.white)
                         .frame(width: 62, height: height)
                         .background(selected ? Color.amber : Color.clear, in: Capsule())

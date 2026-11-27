@@ -12,7 +12,7 @@ struct OverlayLabel: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 15, weight: .medium, design: .monospaced))
+            .glintFont(size: 15, weight: .medium)
             .foregroundStyle(color)
             .multilineTextAlignment(.leading)
             .padding(8)
@@ -30,16 +30,16 @@ struct SettingReadout: View {
     var body: some View {
         VStack(spacing: 2) {
             Text(label)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .glintFont(size: 10, weight: .medium)
                 .foregroundStyle(Color.white.opacity(0.6))
             HStack(spacing: 3) {
                 if isAuto {
                     Text("A")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .glintFont(size: 13, weight: .bold)
                         .foregroundStyle(Color.autoRed)
                 }
                 Text(value)
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                    .glintFont(size: 19, weight: .semibold)
                     .foregroundStyle(highlighted ? Color.amber : Color.white)
             }
         }

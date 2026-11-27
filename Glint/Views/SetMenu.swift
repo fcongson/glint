@@ -22,12 +22,12 @@ struct SetMenu: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("SET")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .glintFont(size: 13, weight: .semibold)
                     .foregroundStyle(Color.amber)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button("Done", action: onDone)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .glintFont(size: 13, weight: .semibold)
                     .foregroundStyle(Color.white)
                     .frame(minWidth: 44, minHeight: 36)
             }
@@ -38,7 +38,7 @@ struct SetMenu: View {
                         if !sectionRows.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(section.title)
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .glintFont(size: 11, weight: .semibold)
                                     .foregroundStyle(Color.amber)
                                     .accessibilityAddTraits(.isHeader)
                                 ForEach(sectionRows, id: \.self) { row($0) }
@@ -48,7 +48,8 @@ struct SetMenu: View {
                                             cam.videoFormat, capabilities: cam.videoCapabilities,
                                             isRecording: cam.isRecording)
                                     )
-                                    .font(.system(.caption2, design: .monospaced))  // grows with the system text size
+                                    // It wraps, so it can grow all the way.
+                                    .glintFont(size: 11, relativeTo: .caption2, largest: .accessibility5)
                                     .foregroundStyle(Color.white.opacity(0.7))
                                     .fixedSize(horizontal: false, vertical: true)
                                 }
@@ -238,7 +239,7 @@ private struct SettingRow<Value: Hashable>: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(tile.title)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .glintFont(size: 10, weight: .medium)
                 .foregroundStyle(Color.white.opacity(0.75))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -252,7 +253,7 @@ private struct SettingRow<Value: Hashable>: View {
                         onSelect(option.value)
                     } label: {
                         Text(option.title)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .glintFont(size: 11, weight: .semibold)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .foregroundStyle(isSelected ? Color.black : Color.white)

@@ -10,7 +10,7 @@ struct ExposureMeterView: View {
             led("●", lit: meter.reading == .onTarget)
             led("◀", lit: meter.reading == .over)
             Text(SettingsText.meterOffset(meter.offset))
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .glintFont(size: 12, weight: .medium)
                 .foregroundStyle(Color.white)
                 .frame(width: 36, alignment: .trailing)
         }
