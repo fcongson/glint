@@ -11,6 +11,8 @@ struct FocusRail: View {
     let isAutofocus: Bool
     /// How close the current lens focuses, for the near label.
     var nearestMillimetres: Int?
+    /// The length of the scale between the two end labels.
+    let trackHeight: CGFloat
     let onChange: (Float) -> Void
     /// The side against the picture's edge, which the drawn rail hugs inside its wider touch area.
     var edge: Alignment = .trailing
@@ -23,10 +25,15 @@ struct FocusRail: View {
     @State private var awake = false
     @State private var sleepTask: Task<Void, Never>?
 
-    static let trackHeight: CGFloat = 200
     static let presetHeight: CGFloat = 30
-    /// The whole rail's height: the track and the two end labels.
-    static let height = trackHeight + presetHeight * 2
+    /// The shortest track that's still worth dragging.
+    static let minimumTrackHeight: CGFloat = 120
+
+    /// The whole rail's height for a track of this length: the track and the two end labels.
+    static func height(track: CGFloat) -> CGFloat { track + presetHeight * 2 }
+
+    /// The track that fills `height` of room.
+    static func track(fitting height: CGFloat) -> CGFloat { max(height - presetHeight * 2, minimumTrackHeight) }
     /// Drawn narrow, so it covers little of the picture, with a touch area wide enough for a thumb.
     static let drawnWidth: CGFloat = 30
     static let touchWidth: CGFloat = 44
@@ -34,7 +41,7 @@ struct FocusRail: View {
     static let thumbInset: CGFloat = 4
     private var width: CGFloat { Self.touchWidth }
     private let inset: CGFloat = 16  // keeps the thumb inside the rounded ends
-    private var travel: CGFloat { Self.trackHeight - inset * 2 }
+    private var travel: CGFloat { trackHeight - inset * 2 }
 
     /// The drawn track here and in the AF | MF switch: round on the side toward the picture, square against its edge.
     /// With `inset`, the shape of the switch's knob inside it, concentric so the gap is even all round.
@@ -98,7 +105,7 @@ struct FocusRail: View {
             // The hit area: never faded, and on top of the drawing.
             Color.clear.contentShape(Rectangle())
         }
-        .frame(width: width, height: Self.trackHeight)
+        .frame(width: width, height: trackHeight)
         // High priority so the rail wins over the viewfinder's tap-to-focus underneath it.
         .highPriorityGesture(
             DragGesture(minimumDistance: 0)
@@ -156,7 +163,7 @@ struct FocusRail: View {
                 .offset(y: y(for: position) - 1.25)
                 .animation(dragStart == nil ? .easeOut(duration: 0.2) : nil, value: position)
         }
-        .frame(width: Self.drawnWidth, height: Self.trackHeight, alignment: .top)
+        .frame(width: Self.drawnWidth, height: trackHeight, alignment: .top)
         .frame(width: width, alignment: edge)
     }
 
@@ -189,6 +196,8 @@ enum RailSide: String, CaseIterable {
         case .right: "Right"
         }
     }
+
+    var opposite: RailSide { self == .right ? .left : .right }
 
     /// Which edge of the picture is on this side, the way the phone is held (`DeviceAngle.quarterTurns`). Landscape
     /// left puts the picture's bottom edge on your right; landscape right, its top edge.

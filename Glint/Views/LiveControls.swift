@@ -17,6 +17,7 @@ struct LiveExposureMeter: View {
 /// The focus rail, which follows the lens while autofocus moves it.
 struct LiveFocusRail: View {
     let cam: CameraController
+    let trackHeight: CGFloat
     var edge: Alignment = .trailing
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPresent = false  // in the view tree: from just before it slides in to just after it's gone
@@ -32,6 +33,7 @@ struct LiveFocusRail: View {
                 FocusRail(
                     position: cam.lensPosition, isAutofocus: cam.isAutofocus,
                     nearestMillimetres: cam.lenses.first { $0.id == cam.currentLensID }?.nearestMillimetres,
+                    trackHeight: trackHeight,
                     onChange: { cam.setLensPosition($0) },
                     edge: edge, isHidden: isSlid, onTouch: { cam.aids.focusRailTouched($0) }
                 )
@@ -41,7 +43,7 @@ struct LiveFocusRail: View {
                 .accessibilityHidden(isSlid)
             }
         }
-        .frame(width: FocusRail.touchWidth, height: FocusRail.height)
+        .frame(width: FocusRail.touchWidth, height: FocusRail.height(track: trackHeight))
         .task(id: cam.isAutofocus) {
             if cam.isAutofocus {
                 withAnimation(.easeInOut(duration: 0.26)) { isSlid = true }

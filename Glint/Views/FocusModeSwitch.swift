@@ -8,7 +8,11 @@ struct FocusModeSwitch: View {
     /// The side against the picture's edge, which stays square.
     var edge: Alignment = .trailing
 
-    static let size = CGSize(width: FocusRail.drawnWidth, height: 108)
+    /// Held sideways the switch runs along the picture's width, where the rail needs the room, so it's shorter.
+    static func size(compact: Bool) -> CGSize { CGSize(width: FocusRail.drawnWidth, height: compact ? 66 : 108) }
+
+    var isCompact = false
+    private var size: CGSize { Self.size(compact: isCompact) }
     private let knobInset = FocusRail.thumbInset
 
     var body: some View {
@@ -17,14 +21,14 @@ struct FocusModeSwitch: View {
             FocusRail.trackShape(edge: edge).strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
             FocusRail.trackShape(edge: edge, inset: knobInset)
                 .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
-                .frame(width: Self.size.width - knobInset * 2, height: Self.size.height / 2 - knobInset * 2)
-                .offset(y: (isAutofocus ? -1 : 1) * Self.size.height / 4)
+                .frame(width: size.width - knobInset * 2, height: size.height / 2 - knobInset * 2)
+                .offset(y: (isAutofocus ? -1 : 1) * size.height / 4)
             VStack(spacing: 0) {
                 label("AF", highlighted: isAutofocus)
                 label("MF", highlighted: !isAutofocus)
             }
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .frame(width: size.width, height: size.height)
         .contentShape(FocusRail.trackShape(edge: edge))
         .gesture(
             DragGesture(minimumDistance: 0).onEnded { g in
@@ -50,6 +54,6 @@ struct FocusModeSwitch: View {
         Text(text)
             .glintFont(size: 11, weight: .bold)
             .foregroundStyle(highlighted ? Color.black : Color.white.opacity(0.6))
-            .frame(width: Self.size.width, height: Self.size.height / 2)
+            .frame(width: size.width, height: size.height / 2)
     }
 }
