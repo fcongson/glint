@@ -36,6 +36,8 @@ enum MinimumShutter {
     struct State {
         var setting = MinShutterSetting.auto
         var isRelaxed = false
+        /// How far the scene's movement has moved Auto from the focal-length rule, in stops (see `MotionShutter`).
+        var motionStops = 0.0
     }
 
     /// Who enforces the minimum, for the camera's current mode.
@@ -60,21 +62,30 @@ enum MinimumShutter {
         18 / tan(Double(fieldOfView) * .pi / 360)
     }
 
-    /// The slowest shutter as 1/x seconds, on one of `ExposureScale`'s standard speeds.
-    static func denominator(_ setting: MinShutterSetting, focalLength: Double) -> Double {
+    /// The slowest shutter as 1/x seconds, on one of `ExposureScale`'s standard speeds. Only Auto follows movement:
+    /// `motionStops` (see `MotionShutter`) moves it from the focal-length rule, positive being faster.
+    static func denominator(_ setting: MinShutterSetting, focalLength: Double, motionStops: Double = 0) -> Double {
         if let fixed = setting.fixedDenominator { return fixed }
         let rule = 2 * focalLength
-        return ExposureScale.nearestShutter(setting == .faster ? rule * 2 : rule)
+        if setting == .faster { return ExposureScale.nearestShutter(rule * 2) }
+        let stops = min(max(motionStops, MotionShutter.slowestStops), MotionShutter.fastestStops)
+        return ExposureScale.nearestShutter(rule * pow(2, stops))
+    }
+
+    /// What decides the limit: the lens, the format's range, and how much the scene is moving.
+    struct Conditions {
+        var focalLength: Double
+        var formatMin: Double
+        var formatMax: Double
+        var motionStops = 0.0
     }
 
     /// The longest exposure in seconds auto exposure may use: the minimum shutter's, kept within what the format
     /// can do, or the format's longest when `relaxed` (ISO has run out, see `isRelaxed`).
-    static func ceiling(
-        _ setting: MinShutterSetting, focalLength: Double, formatMin: Double, formatMax: Double, relaxed: Bool
-    ) -> Double {
-        guard !relaxed else { return formatMax }
-        let limit = 1 / denominator(setting, focalLength: focalLength)
-        return min(max(limit, formatMin), formatMax)
+    static func ceiling(_ setting: MinShutterSetting, _ c: Conditions, relaxed: Bool) -> Double {
+        guard !relaxed else { return c.formatMax }
+        let limit = 1 / denominator(setting, focalLength: c.focalLength, motionStops: c.motionStops)
+        return min(max(limit, c.formatMin), c.formatMax)
     }
 
     /// Whether the limit gives way. It does only when ISO is at the format's maximum and the picture is still

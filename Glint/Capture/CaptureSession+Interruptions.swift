@@ -21,6 +21,10 @@ extension CaptureSession {
                 emit.yield(.session(.interruptionEnded))
                 self?.enqueue { $0.applyVideoLight() }  // an interruption puts the light out
             },
+            center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: nil) {
+                // Low Power Mode pauses the motion analysis.
+                [weak self] _ in self?.enqueue { $0.updateMotionAnalysis() }
+            },
             center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) {
                 [weak self] note in
                 let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError

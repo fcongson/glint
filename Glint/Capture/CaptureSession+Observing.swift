@@ -23,8 +23,9 @@ extension CaptureSession {
             d.observe(\.deviceWhiteBalanceGains, options: [.new]) { d, _ in
                 temperature.send(d.temperatureAndTintValues(for: d.deviceWhiteBalanceGains).temperature)
             },
-            d.observe(\.systemPressureState, options: [.initial, .new]) { [emit] d, _ in
+            d.observe(\.systemPressureState, options: [.initial, .new]) { [emit, weak self] d, _ in
                 emit.yield(.session(.systemPressure(SystemPressure(d.systemPressureState.level))))
+                self?.enqueue { $0.updateMotionAnalysis() }  // heat pauses the motion analysis
             },
         ]
     }

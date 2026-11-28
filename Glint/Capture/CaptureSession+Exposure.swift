@@ -35,6 +35,7 @@ extension CaptureSession {
             applyFocus(d, lockedAt: manualFocus)
             applyMinimumShutter(d)
         }
+        updateMotionAnalysis()
     }
 
     /// Applies the manual exposure settings. A setting on auto is left where the camera has it.
@@ -114,17 +115,20 @@ extension CaptureSession {
 
     // MARK: Minimum shutter
 
-    private var shutterEnforcer: MinimumShutter.Enforcer {
+    var shutterEnforcer: MinimumShutter.Enforcer {
         MinimumShutter.enforcer(isVideo: isVideo, isManual: isManual, auto: autoSettings)
     }
 
     /// The longest exposure in seconds the minimum shutter allows on this lens and format.
     func shutterCeiling(_ d: AVCaptureDevice) -> Double {
-        MinimumShutter.ceiling(
-            minShutter.setting, focalLength: MinimumShutter.focalLength(fieldOfView: d.activeFormat.videoFieldOfView),
+        MinimumShutter.ceiling(minShutter.setting, shutterConditions(d), relaxed: minShutter.isRelaxed)
+    }
+
+    private func shutterConditions(_ d: AVCaptureDevice) -> MinimumShutter.Conditions {
+        MinimumShutter.Conditions(
+            focalLength: MinimumShutter.focalLength(fieldOfView: d.activeFormat.videoFieldOfView),
             formatMin: d.activeFormat.minExposureDuration.seconds,
-            formatMax: d.activeFormat.maxExposureDuration.seconds,
-            relaxed: minShutter.isRelaxed)
+            formatMax: d.activeFormat.maxExposureDuration.seconds, motionStops: minShutter.motionStops)
     }
 
     /// What `activeMaxExposureDuration` should be: the ceiling where the device's own auto exposure chooses the
@@ -146,7 +150,9 @@ extension CaptureSession {
     }
 
     func setMinimumShutter(_ setting: MinShutterSetting) {
-        minShutter = MinimumShutter.State(setting: setting)
+        minShutter.setting = setting
+        minShutter.isRelaxed = false
+        updateMotionAnalysis()
         guard let d = device else { return }
         reapplyMinimumShutter(d)
     }
@@ -154,10 +160,7 @@ extension CaptureSession {
     /// The minimum gives way when ISO is at its maximum and the picture is still dark, and returns when it can.
     private func relaxMinimumShutterIfNeeded(offset: Float) {
         guard let d = device, shutterEnforcer != .nobody, !exposureHeld, !exposureFrozen else { return }
-        let limit = MinimumShutter.ceiling(
-            minShutter.setting, focalLength: MinimumShutter.focalLength(fieldOfView: d.activeFormat.videoFieldOfView),
-            formatMin: d.activeFormat.minExposureDuration.seconds,
-            formatMax: d.activeFormat.maxExposureDuration.seconds, relaxed: false)
+        let limit = MinimumShutter.ceiling(minShutter.setting, shutterConditions(d), relaxed: false)
         let reading = MinimumShutter.Reading(
             iso: d.iso, maxISO: d.activeFormat.maxISO, duration: d.exposureDuration.seconds, limit: limit,
             offset: offset)

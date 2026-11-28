@@ -68,11 +68,13 @@ actor CaptureSession {
         let (events, emit) = AsyncStream.makeStream(of: CaptureEvent.self)
         self.events = events
         self.emit = emit
-        analyzer = FrameAnalyzer(histogram: { emit.yield(.analysis(.histogram($0))) }, renderer: viewfinder)
-        faceDetector = FaceDetector(report: { emit.yield(.analysis(.faces($0))) })
-
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
         self.commands = commands
+        analyzer = FrameAnalyzer(
+            histogram: { emit.yield(.analysis(.histogram($0))) },
+            motion: { stops in commands.yield { $0.setMotionStops(stops) } },  // straight to the actor, not via the UI
+            renderer: viewfinder)
+        faceDetector = FaceDetector(report: { emit.yield(.analysis(.faces($0))) })
         // Lives as long as the app; the controller that owns this session is never torn down.
         Task { await self.run(commandStream) }
     }
@@ -269,6 +271,7 @@ actor CaptureSession {
             applyToneMapping(d)
             applyMinimumShutter(d, afresh: true)  // a new lens or format forgets it
         }
+        updateMotionAnalysis()
         setConnections()  // a new lens or format rebuilds them; already done if set inside the configuration
         analyzer.setWhiteKey(whiteKey(for: d))
         exposureQueue.reset()  // what was waiting was meant for the previous lens
