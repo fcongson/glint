@@ -35,7 +35,7 @@ struct FocusRail: View {
     private var travel: CGFloat { Self.trackHeight - inset * 2 }
 
     /// The drawn track here and in the AF | MF switch: round on the side toward the picture, square against its edge.
-    /// With `inset`, the shape of a thumb or knob inside it, concentric so the gap is even all round.
+    /// With `inset`, the shape of the switch's knob inside it, concentric so the gap is even all round.
     static func trackShape(edge: Alignment, inset: CGFloat = 0) -> UnevenRoundedRectangle {
         let round = drawnWidth / 2 - inset
         let atTrailing = edge == .trailing
@@ -147,7 +147,7 @@ struct FocusRail: View {
                     .frame(width: 12, height: 1)
                     .offset(y: y(for: t))
             }
-            Self.trackShape(edge: edge, inset: Self.thumbInset)
+            RoundedRectangle(cornerRadius: 4)
                 .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
                 .frame(width: Self.drawnWidth - Self.thumbInset * 2, height: 20)
                 .offset(y: y(for: position) - 10)
