@@ -21,8 +21,14 @@ struct ExposureMeter: Equatable, Sendable {
 /// `AVCaptureDevice.lensPosition`; the rail labels the ends loosely as NEAR and ∞ rather than claiming distances,
 /// since lens positions aren't calibrated.
 enum FocusScale {
+    /// The rail's ticks: a stop every `step`, a long tick on every fifth.
+    static let stops = 20
     /// One VoiceOver swipe up or down.
-    static let step: Float = 0.05
+    static let step = 1 / Float(stops)
+
+    static func stop(at position: Float) -> Int { Int((clamp(position) * Float(stops)).rounded()) }
+
+    static func isMajor(stop: Int) -> Bool { stop.isMultiple(of: 5) }
 
     static func clamp(_ position: Float) -> Float { min(max(position, 0), 1) }
 

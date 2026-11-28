@@ -18,6 +18,14 @@ struct ExposureMeterTests {
 }
 
 struct FocusScaleTests {
+    @Test func theRailHasATickEveryStepAndALongOneEveryFifth() {
+        #expect(FocusScale.step == 0.05)
+        #expect((0...FocusScale.stops).filter { FocusScale.isMajor(stop: $0) } == [0, 5, 10, 15, 20])
+        #expect(FocusScale.stop(at: 0) == 0 && FocusScale.stop(at: 1) == 20)
+        #expect(FocusScale.stop(at: 0.52) == 10 && FocusScale.stop(at: 0.53) == 11)
+        #expect(FocusScale.stop(at: 3) == 20)
+    }
+
     @Test func draggingIsRelativeToTheStart() {
         // Up the rail (negative dy) moves toward infinity; a full rail length spans the whole range.
         #expect(FocusScale.dragged(from: 0.5, by: -100, over: 200) == 1)

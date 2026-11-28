@@ -135,27 +135,28 @@ struct FocusRail: View {
             onTouch(false)
         }
         .accessibilityHidden(isHidden)
+        .sensoryFeedback(trigger: FocusScale.stop(at: position)) { _, stop in
+            guard dragStart != nil else { return nil }
+            return .impact(flexibility: .rigid, intensity: FocusScale.isMajor(stop: stop) ? 1.0 : 0.6)
+        }
     }
 
     private var trackDrawing: some View {
         ZStack(alignment: .top) {
-            Rectangle()
-                .fill(Color.white.opacity(0.35))
-                .frame(width: 2)
-                .padding(.vertical, inset)
-            ForEach([Float(0.25), 0.5, 0.75], id: \.self) { t in
+            ForEach(0...FocusScale.stops, id: \.self) { stop in
+                let major = FocusScale.isMajor(stop: stop)
                 Rectangle()
-                    .fill(Color.white.opacity(0.45))
-                    .frame(width: 12, height: 1)
-                    .offset(y: y(for: t))
+                    .fill(Color.white.opacity(major ? 0.9 : 0.4))
+                    .frame(width: major ? 16 : 8, height: 1.5)
+                    .offset(y: y(for: Float(stop) / Float(FocusScale.stops)) - 0.75)
             }
-            RoundedRectangle(cornerRadius: 4)
+            Capsule()
                 .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
-                .frame(width: Self.drawnWidth - Self.thumbInset * 2, height: 20)
-                .offset(y: y(for: position) - 10)
+                .frame(width: Self.drawnWidth - Self.thumbInset * 2, height: 2.5)
+                .offset(y: y(for: position) - 1.25)
                 .animation(dragStart == nil ? .easeOut(duration: 0.2) : nil, value: position)
         }
-        .frame(width: Self.drawnWidth, height: Self.trackHeight)
+        .frame(width: Self.drawnWidth, height: Self.trackHeight, alignment: .top)
         .frame(width: width, alignment: edge)
     }
 
