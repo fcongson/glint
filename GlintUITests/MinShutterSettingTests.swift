@@ -80,4 +80,31 @@ final class MinShutterSettingTests: XCTestCase {
         reset.buttons["Auto"].tap()
         app.alerts["Settings"].buttons["Done"].tap()
     }
+
+    /// With Auto the minimum follows movement in the scene, so the speed in use can change from moment to moment;
+    /// the readout must keep showing a real speed through it. Without anything moving on the test phone's camera,
+    /// this checks the readout, not that the minimum rose.
+    func testTheShutterReadoutKeepsShowingTheSpeedInUseWhileAutoAdapts() {
+        launchInPhoto()
+        let row = openRow()
+        row.buttons["Auto"].tap()
+        app.alerts["Settings"].buttons["Done"].tap()
+
+        app.buttons["MANUAL"].tap()
+        let shutter = app.buttons["Shutter speed"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 5), "MANUAL's shutter readout")
+        for (readout, letter) in [("ISO", "ISO auto"), ("Shutter speed", "Shutter speed auto")] {
+            app.buttons[readout].tap()  // the A button belongs to the selected readout
+            let button = app.buttons[letter]
+            XCTAssertTrue(button.waitForExistence(timeout: 5), letter)
+            if (button.value as? String) != "On" { button.tap() }
+        }
+        for _ in 0..<6 {
+            let value = shutter.value as? String ?? ""
+            XCTAssertNotNil(
+                value.range(of: #"^Auto, 1/\d+$"#, options: .regularExpression), "a speed is shown: \(value)")
+            sleep(1)
+        }
+        app.buttons["AUTO"].tap()
+    }
 }

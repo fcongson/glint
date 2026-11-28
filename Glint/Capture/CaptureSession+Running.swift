@@ -55,16 +55,13 @@ extension CaptureSession {
             } else {
                 analyzer.set(wants)
             }
-            output.connection(with: .video)?.isEnabled = wants.any
+            output.connection(with: .video)?.isEnabled = analyzer.isWanted
             return
         }
         // Couldn't be attached at setup: attach it now that something wants frames.
-        guard wants.any else {
-            analyzer.set(wants)
-            return
-        }
-        session.beginConfiguration()
         analyzer.set(wants)
+        guard analyzer.isWanted else { return }
+        session.beginConfiguration()
         if session.canAddOutput(output) { session.addOutput(output) }
         setConnections()
         session.commitConfiguration()

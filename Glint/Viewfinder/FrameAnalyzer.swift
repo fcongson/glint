@@ -14,7 +14,8 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         var histogram = false
         var histogramRGB = false  // the histogram also wants red, green and blue (HISTOGRAM in SET)
         var viewfinder: ViewfinderSettings?  // non-nil while the GPU viewfinder draws
-        var any: Bool { histogram || viewfinder != nil }
+        var motion = false  // Auto's minimum shutter follows movement in the scene (`MotionAnalyzer`)
+        var any: Bool { histogram || viewfinder != nil || motion }
     }
 
     let output = AVCaptureVideoDataOutput()
@@ -22,6 +23,8 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private let wants = OSAllocatedUnfairLock(initialState: Wants())
     private var lastHistogram: Double = 0
     private let publishHistogram: @Sendable (Histogram) -> Void
+    let motion: MotionAnalyzer
+    private var lastMotion: Double = 0
     private let renderer: ViewfinderRenderer?
 
     /// The level clipped white was last seen at (see `Histogram.whiteLevel`), remembered per lens and format
@@ -50,8 +53,12 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         if let whiteKey { whiteLevels.save(white, for: whiteKey) }
     }
 
-    init(histogram: @escaping @Sendable (Histogram) -> Void, renderer: ViewfinderRenderer?) {
+    init(
+        histogram: @escaping @Sendable (Histogram) -> Void, motion: @escaping @Sendable (Double) -> Void,
+        renderer: ViewfinderRenderer?
+    ) {
         publishHistogram = histogram
+        self.motion = MotionAnalyzer(report: motion)
         self.renderer = renderer
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
@@ -64,8 +71,21 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         output.setSampleBufferDelegate(self, queue: queue)
     }
 
+    /// Turns the motion analysis on or off, leaving what else wants frames alone. Returns whether the output's
+    /// frames should now flow.
+    func setMotion(_ on: Bool) -> Bool {
+        let wanted = wants.withLock { current in
+            current.motion = on
+            return current.any
+        }
+        motion.setRunning(on)
+        return wanted
+    }
+
     /// Whether anything wants frames right now.
     var isWanted: Bool { wants.withLock { $0.any } }
+
+    var isMotionOn: Bool { wants.withLock { $0.motion } }
 
     /// Screen-sized frames unless the GPU viewfinder needs full resolution (peaking, magnifying).
     private static func previewSized(_ wants: Wants) -> Bool {
@@ -81,10 +101,12 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// full-size ones and shrinks them itself by a whole factor (block averaging) on the GPU, so its filter sees a
     /// known, clean scale rather than whatever the preview scaler did. If that changes the frame size
     /// (`needsReconfiguration`), the caller wraps this in a session configuration.
-    func set(_ new: Wants) {
-        let hadViewfinder = wants.withLock { current in
-            defer { current = new }
-            return current.viewfinder != nil
+    func set(_ asked: Wants) {
+        let (hadViewfinder, new) = wants.withLock { current -> (Bool, Wants) in
+            var merged = asked
+            merged.motion = current.motion  // not the aids' to say; see `setMotion`
+            defer { current = merged }
+            return (current.viewfinder != nil, merged)
         }
         if hadViewfinder, new.viewfinder == nil { releaseViewfinderResources() }
         let previewSized = Self.previewSized(new)
@@ -108,12 +130,18 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         // The histogram also finds the frame's white level, which zebras need even with HIST off.
         let doHistogram = (current.histogram || current.viewfinder?.zebras != nil) && t - lastHistogram > 0.2
         let doViewfinder = current.viewfinder != nil && renderer != nil
-        guard doHistogram || doViewfinder, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let doMotion = current.motion && t - lastMotion >= MotionAnalyzer.interval
+        guard doHistogram || doViewfinder || doMotion, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+        else { return }
         followWhiteKey()
         if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer, rgb: current.histogram && current.histogramRGB) {
             lastHistogram = t
             if let white = histogram.whiteLevel { learnWhite(white) }
             if current.histogram { publishHistogram(histogram) }
+        }
+        if doMotion {
+            lastMotion = t
+            motion.process(pixelBuffer, at: t)
         }
         if doViewfinder, var settings = current.viewfinder {
             settings.zebraWhite = whiteLevel

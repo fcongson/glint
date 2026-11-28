@@ -55,7 +55,9 @@ struct MinimumShutterTests {
     // MARK: The ceiling
 
     private func ceiling(_ s: MinShutterSetting, f: Double, relaxed: Bool = false) -> Double {
-        MinimumShutter.ceiling(s, focalLength: f, formatMin: 1.0 / 8000, formatMax: 1.0 / 3, relaxed: relaxed)
+        MinimumShutter.ceiling(
+            s, MinimumShutter.Conditions(focalLength: f, formatMin: 1.0 / 8000, formatMax: 1.0 / 3),
+            relaxed: relaxed)
     }
 
     @Test func theCeilingIsTheMinimumShutterInSeconds() {
@@ -65,10 +67,12 @@ struct MinimumShutterTests {
 
     @Test func theCeilingStaysWithinTheFormat() {
         let fastOnly = MinimumShutter.ceiling(
-            .s500, focalLength: 26, formatMin: 1.0 / 100, formatMax: 1.0 / 3, relaxed: false)
+            .s500, MinimumShutter.Conditions(focalLength: 26, formatMin: 1.0 / 100, formatMax: 1.0 / 3),
+            relaxed: false)
         #expect(fastOnly == 1.0 / 100)
         let slowOnly = MinimumShutter.ceiling(
-            .s30, focalLength: 26, formatMin: 1.0 / 8000, formatMax: 1.0 / 60, relaxed: false)
+            .s30, MinimumShutter.Conditions(focalLength: 26, formatMin: 1.0 / 8000, formatMax: 1.0 / 60),
+            relaxed: false)
         #expect(slowOnly == 1.0 / 60)
     }
 
