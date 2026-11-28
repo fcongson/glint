@@ -14,14 +14,19 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         var histogram = false
         var histogramRGB = false  // the histogram also wants red, green and blue (HISTOGRAM in SET)
         var viewfinder: ViewfinderSettings?  // non-nil while the GPU viewfinder draws
-        var any: Bool { histogram || viewfinder != nil }
+        var subjects = false  // subject autofocus looks for people a few times a second
+        var any: Bool { histogram || viewfinder != nil || subjects }
     }
 
     let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "glint.analysis")
     private let wants = OSAllocatedUnfairLock(initialState: Wants())
     private var lastHistogram: Double = 0
+    private var lastSubjects: Double = 0
     private let publishHistogram: @Sendable (Histogram) -> Void
+    private let publishBodies: @Sendable ([SubjectCandidate]) -> Void
+    private let subjectDetector = SubjectDetector()
+    private let subjectAngle = OSAllocatedUnfairLock(initialState: 90)
     private let renderer: ViewfinderRenderer?
 
     /// The level clipped white was last seen at (see `Histogram.whiteLevel`), remembered per lens and format
@@ -50,8 +55,12 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         if let whiteKey { whiteLevels.save(white, for: whiteKey) }
     }
 
-    init(histogram: @escaping @Sendable (Histogram) -> Void, renderer: ViewfinderRenderer?) {
+    init(
+        histogram: @escaping @Sendable (Histogram) -> Void, bodies: @escaping @Sendable ([SubjectCandidate]) -> Void,
+        renderer: ViewfinderRenderer?
+    ) {
         publishHistogram = histogram
+        publishBodies = bodies
         self.renderer = renderer
         super.init()
         output.alwaysDiscardsLateVideoFrames = true
@@ -62,6 +71,12 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
         output.setSampleBufferDelegate(self, queue: queue)
+    }
+
+    /// How the phone is held, as the camera's clockwise rotation from upright (`videoRotationAngle`), so people are
+    /// looked for the right way up.
+    func setSubjectAngle(_ angle: Int) {
+        subjectAngle.withLock { $0 = angle }
     }
 
     /// Whether anything wants frames right now.
@@ -108,12 +123,18 @@ final class FrameAnalyzer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         // The histogram also finds the frame's white level, which zebras need even with HIST off.
         let doHistogram = (current.histogram || current.viewfinder?.zebras != nil) && t - lastHistogram > 0.2
         let doViewfinder = current.viewfinder != nil && renderer != nil
-        guard doHistogram || doViewfinder, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let doSubjects = current.subjects && t - lastSubjects >= SubjectDetector.interval
+        guard doHistogram || doViewfinder || doSubjects, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+        else { return }
         followWhiteKey()
         if doHistogram, let histogram = Histogram(lumaOf: pixelBuffer, rgb: current.histogram && current.histogramRGB) {
             lastHistogram = t
             if let white = histogram.whiteLevel { learnWhite(white) }
             if current.histogram { publishHistogram(histogram) }
+        }
+        if doSubjects {
+            lastSubjects = t
+            publishBodies(subjectDetector.bodies(in: pixelBuffer, angle: subjectAngle.withLock { $0 }))
         }
         if doViewfinder, var settings = current.viewfinder {
             settings.zebraWhite = whiteLevel

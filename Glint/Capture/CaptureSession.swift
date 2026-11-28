@@ -35,7 +35,7 @@ actor CaptureSession {
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var rotationObservation: NSKeyValueObservation?
     private var subjectAreaObserver: (any NSObjectProtocol)?
-    private var deviceObservations: [NSKeyValueObservation] = []  // meter and lens position, for the active device
+    var deviceObservations: [NSKeyValueObservation] = []  // meter and lens position, for the active device
     var manualFocusPosition: Float?  // nil while autofocus is in charge
     var isManual = false  // the AUTO | MANUAL switch, as last applied
     var autoSettings = AutoSettings()  // which manual settings the camera chooses (as applied, see `effective`)
@@ -57,6 +57,8 @@ actor CaptureSession {
     var focusHeld = false  // a long press is holding focus; see `holdFocusAndExposure`
     var exposureHeld = false  // …and exposure
     var holdGeneration = 0  // so a hold that's been replaced can't finish late
+    var subjectPoint: CGPoint?  // who continuous autofocus follows, if anyone; see `setSubjectPoint`
+    var wantsFaces = (voiceOver: false, subjects: false)  // who wants the camera's face detection on
 
     /// Recording stops by itself, with the file intact, when free storage falls to this. The file is then copied
     /// into Photos, so there has to be room left for that.
@@ -67,7 +69,9 @@ actor CaptureSession {
         let (events, emit) = AsyncStream.makeStream(of: CaptureEvent.self)
         self.events = events
         self.emit = emit
-        analyzer = FrameAnalyzer(histogram: { emit.yield(.analysis(.histogram($0))) }, renderer: viewfinder)
+        analyzer = FrameAnalyzer(
+            histogram: { emit.yield(.analysis(.histogram($0))) }, bodies: { emit.yield(.analysis(.bodies($0))) },
+            renderer: viewfinder)
         faceDetector = FaceDetector(report: { emit.yield(.analysis(.faces($0))) })
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
@@ -265,6 +269,7 @@ actor CaptureSession {
                 d.isGeometricDistortionCorrectionEnabled = false
             }
             applyToneMapping(d)
+            applySubjectPoint(d)  // a new lens starts at the centre
         }
         setConnections()  // a new lens or format rebuilds them; already done if set inside the configuration
         analyzer.setWhiteKey(whiteKey(for: d))
@@ -278,32 +283,6 @@ actor CaptureSession {
         return DeviceInfo(
             lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
             aperture: d.lensAperture, hasFlash: d.hasFlash, hasTorch: d.hasTorch)
-    }
-
-    /// Reports the exposure offset (for the meter) and the lens position (for the focus rail) as they change,
-    /// throttled so a moving scene doesn't flood the main actor. Replaces the previous lens's observers.
-    private func observeMeterAndLens(_ d: AVCaptureDevice) {
-        // Each meter reading also drives shutter/ISO priority and refreshes the auto readouts.
-        let meter = Throttled(interval: 0.1, minChange: 0.05) { [emit, weak self] offset in
-            emit.yield(.exposure(.offset(offset)))
-            guard let self else { return }
-            Task { await self.followAuto(offset: offset) }
-        }
-        let lens = Throttled(interval: 0.1, minChange: 0.005) { [emit] in emit.yield(.focus(.lensPosition($0))) }
-        let temperature = Throttled(interval: 0.25, minChange: 50) { [weak self] kelvin in
-            guard let self else { return }
-            Task { await self.reportAutoWhiteBalance(kelvin) }
-        }
-        deviceObservations = [
-            d.observe(\.exposureTargetOffset, options: [.initial, .new]) { d, _ in meter.send(d.exposureTargetOffset) },
-            d.observe(\.lensPosition, options: [.initial, .new]) { d, _ in lens.send(d.lensPosition) },
-            d.observe(\.deviceWhiteBalanceGains, options: [.new]) { d, _ in
-                temperature.send(d.temperatureAndTintValues(for: d.deviceWhiteBalanceGains).temperature)
-            },
-            d.observe(\.systemPressureState, options: [.initial, .new]) { [emit] d, _ in
-                emit.yield(.session(.systemPressure(SystemPressure(d.systemPressureState.level))))
-            },
-        ]
     }
 
     // MARK: System pressure
@@ -350,8 +329,10 @@ actor CaptureSession {
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
         rotationCoordinator = coordinator
         emit.yield(.session(.previewRotation(angle: coordinator.videoRotationAngleForHorizonLevelPreview)))
+        analyzer.setSubjectAngle(Int(coordinator.videoRotationAngleForHorizonLevelCapture.rounded()))
         rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.new]) {
-            [emit] c, _ in
+            [emit, analyzer] c, _ in
+            analyzer.setSubjectAngle(Int(c.videoRotationAngleForHorizonLevelCapture.rounded()))
             emit.yield(.session(.previewRotation(angle: c.videoRotationAngleForHorizonLevelPreview)))
         }
     }

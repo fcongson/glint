@@ -84,6 +84,8 @@ enum CaptureEvent: Sendable {
         case manualFocusSeeded(Float)
         /// This lens can't be focused by hand, so autofocus stays on.
         case manualFocusUnavailable
+        /// A scene change after a tap handed focus back to continuous autofocus.
+        case resumedContinuous
     }
 
     enum Recording: Sendable {
@@ -105,5 +107,7 @@ enum CaptureEvent: Sendable {
         case histogram(Histogram)
         /// The faces the camera sees, in the metadata output's coordinates, while VoiceOver describes the picture.
         case faces([CGRect])
+        /// The bodies found in the preview, for subject autofocus.
+        case bodies([SubjectCandidate])
     }
 }

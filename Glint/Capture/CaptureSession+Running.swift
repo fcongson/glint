@@ -39,9 +39,14 @@ extension CaptureSession {
     }
 
     /// Chooses what the luma analysis stream is for. Its frames flow only while something wants them, so it costs
-    /// nothing while the histogram, peaking and zebras are all off.
-    func setAnalysis(histogram: Bool, rgb: Bool, viewfinder: ViewfinderSettings?) {
-        let wants = FrameAnalyzer.Wants(histogram: histogram, histogramRGB: rgb, viewfinder: viewfinder)
+    /// nothing while the histogram, peaking, zebras and subject autofocus are all off.
+    func setAnalysis(histogram: Bool, rgb: Bool, viewfinder: ViewfinderSettings?, subjects: Bool) {
+        let wants = FrameAnalyzer.Wants(
+            histogram: histogram, histogramRGB: rgb, viewfinder: viewfinder, subjects: subjects)
+        if wantsFaces.subjects != subjects {
+            wantsFaces.subjects = subjects
+            updateFaceDetection()
+        }
         let output = analyzer.output
         // Normally attached since setup; then frames are just switched on or off, which is immediate. Only a change
         // of frame size (peaking or magnifying, which need full resolution) reconfigures the session.

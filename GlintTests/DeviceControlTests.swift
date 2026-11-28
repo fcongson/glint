@@ -163,3 +163,84 @@ struct DeviceControlTests {
         #expect(tapped.focusMode == .continuousAutoFocus && tapped.exposureMode == .continuousAutoExposure)
     }
 }
+
+/// Subject autofocus on the device: it follows a person only where focus and exposure are the camera's to choose.
+@Suite("Device control: subject")
+struct DeviceControlSubjectTests {
+    private let person = CGPoint(x: 0.7, y: 0.3)
+
+    @Test func continuousFocusAndExposureFollowThePerson() {
+        let d = FakeCameraDevice()
+        DeviceControl.followSubject(d, at: person, focus: true, exposure: true)
+        #expect(d.focusPointOfInterest == person)
+        #expect(d.exposurePointOfInterest == person)
+    }
+
+    @Test func aTapsSinglePassIsNotOverriddenByThePerson() {
+        let d = FakeCameraDevice()
+        d.focusMode = .autoFocus
+        d.exposureMode = .autoExpose
+        d.focusPointOfInterest = CGPoint(x: 0.1, y: 0.1)
+        d.exposurePointOfInterest = CGPoint(x: 0.1, y: 0.1)
+        DeviceControl.followSubject(d, at: person, focus: true, exposure: true)
+        #expect(d.focusPointOfInterest == CGPoint(x: 0.1, y: 0.1))
+        #expect(d.exposurePointOfInterest == CGPoint(x: 0.1, y: 0.1))
+    }
+
+    @Test func aLongPressLockAndManualFocusAreNotOverridden() {
+        let d = FakeCameraDevice()
+        d.focusMode = .locked  // a lock, or a lens held by hand
+        d.exposureMode = .locked
+        DeviceControl.followSubject(d, at: person, focus: true, exposure: true)
+        #expect(d.focusPointOfInterest == CGPoint(x: 0.5, y: 0.5))
+        #expect(d.exposurePointOfInterest == CGPoint(x: 0.5, y: 0.5))
+    }
+
+    @Test func theSessionsOwnStateCanHoldFocusOrExposureBack() {
+        let d = FakeCameraDevice()
+        DeviceControl.followSubject(d, at: person, focus: false, exposure: true)  // held or focusing by hand
+        #expect(d.focusPointOfInterest == CGPoint(x: 0.5, y: 0.5))
+        #expect(d.exposurePointOfInterest == person)
+        let e = FakeCameraDevice()
+        DeviceControl.followSubject(e, at: person, focus: true, exposure: false)  // exposure isn't auto
+        #expect(e.focusPointOfInterest == person)
+        #expect(e.exposurePointOfInterest == CGPoint(x: 0.5, y: 0.5))
+    }
+
+    @Test func customExposureIsNeverMovedToThePerson() {
+        let d = FakeCameraDevice()
+        d.exposureMode = .custom
+        DeviceControl.followSubject(d, at: person, focus: true, exposure: true)
+        #expect(d.exposurePointOfInterest == CGPoint(x: 0.5, y: 0.5))
+    }
+
+    @Test func aDeviceWithoutPointsOfInterestIsLeftAlone() {
+        let d = FakeCameraDevice()
+        d.isFocusPointOfInterestSupported = false
+        d.isExposurePointOfInterestSupported = false
+        DeviceControl.followSubject(d, at: person, focus: true, exposure: true)
+        #expect(d.focusPointOfInterest == CGPoint(x: 0.5, y: 0.5))
+    }
+
+    @Test func afterATapTheSceneChangeGoesBackToThePersonNotTheCentre() {
+        let d = FakeCameraDevice()
+        DeviceControl.focusOnce(d, at: CGPoint(x: 0.1, y: 0.9))
+        DeviceControl.resumeContinuous(d, manualFocus: false, at: person)
+        #expect(d.focusMode == .continuousAutoFocus && d.focusPointOfInterest == person)
+        #expect(d.exposureMode == .continuousAutoExposure && d.exposurePointOfInterest == person)
+    }
+
+    @Test func withNobodyTheSceneChangeGoesBackToTheCentre() {
+        let d = FakeCameraDevice()
+        DeviceControl.focusOnce(d, at: CGPoint(x: 0.1, y: 0.9))
+        DeviceControl.resumeContinuous(d, manualFocus: false)
+        #expect(d.focusPointOfInterest == DeviceControl.center && d.exposurePointOfInterest == DeviceControl.center)
+    }
+
+    @Test func manualFocusIsNotHandedBackToThePerson() {
+        let d = FakeCameraDevice()
+        d.focusMode = .locked
+        DeviceControl.resumeContinuous(d, manualFocus: true, at: person)
+        #expect(d.focusMode == .locked && d.focusPointOfInterest == CGPoint(x: 0.5, y: 0.5))
+    }
+}

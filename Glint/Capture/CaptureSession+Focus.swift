@@ -29,6 +29,7 @@ extension CaptureSession {
     func applyFocus(_ d: AVCaptureDevice, lockedAt position: Float?) {
         focusHeld = false  // focus is being set some other way
         manualFocusPosition = DeviceControl.lockFocus(d, at: position)
+        if position == nil { emit.yield(.focus(.resumedContinuous)) }  // autofocus is in charge again
     }
 
     /// Tap to focus: one autofocus pass at the tapped point (exposure follows in auto mode). Tapping also ends
@@ -78,6 +79,40 @@ extension CaptureSession {
         guard let d = device, !focusHeld, !exposureHeld else { return }
         // A notification still in flight must not undo manual focus set since the tap.
         let manualFocus = manualFocusPosition != nil
-        withLockedDevice(d, failure: "Focus") { d in DeviceControl.resumeContinuous(d, manualFocus: manualFocus) }
+        let point = subjectPoint ?? DeviceControl.center
+        withLockedDevice(d, failure: "Focus") { d in
+            DeviceControl.resumeContinuous(d, manualFocus: manualFocus, at: point, exposure: exposureFollowsSubject)
+        }
+        emit.yield(.focus(.resumedContinuous))
+    }
+
+    // MARK: Subject
+
+    /// Hands a subject command from `SubjectFocusModel` to the session.
+    nonisolated func enqueue(subject command: SubjectCommand) {
+        enqueue {
+            switch command {
+            case .focus(let point): $0.setSubjectPoint(point)
+            case .release: $0.setSubjectPoint(nil)
+            }
+        }
+    }
+
+    /// Whether the picture's exposure follows the subject too: AUTO and program, where the camera chooses it all.
+    private var exposureFollowsSubject: Bool { !isManual || autoSettings.isProgram }
+
+    /// Who continuous autofocus follows: a point on a person, or nil for the centre. A tap, a long press's lock
+    /// and manual focus take priority, so the point is kept and used when they end.
+    func setSubjectPoint(_ point: CGPoint?) {
+        subjectPoint = point
+        guard let d = device else { return }
+        withLockedDevice(d, failure: "Focus") { applySubjectPoint($0) }
+    }
+
+    /// Points continuous autofocus (and, in AUTO and program, auto exposure) at the subject. The device must be locked.
+    func applySubjectPoint(_ d: AVCaptureDevice) {
+        DeviceControl.followSubject(
+            d, at: subjectPoint ?? DeviceControl.center,
+            focus: manualFocusPosition == nil && !focusHeld, exposure: exposureFollowsSubject && !exposureHeld)
     }
 }

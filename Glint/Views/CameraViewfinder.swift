@@ -31,6 +31,11 @@ struct CameraViewfinder: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
+            if let box = cam.aids.subjects.screenRect, !cam.aids.subjects.isSuspended, cam.viewfinderLock == nil,
+                focusPoint == nil, !cam.aids.isMagnifying
+            {
+                SubjectBox(rect: box)
+            }
             if let p = focusPoint {
                 FocusBox().id(focusTapCount).position(p).accessibilityHidden(true)
             }
@@ -83,7 +88,7 @@ struct CameraViewfinder: View {
             // Composition aids, inside the frame that will be kept. Not while magnified, like the crop.
             if !cam.aids.isMagnifying {
                 if cam.isGridEnabled { GridOverlay(aspect: frameAspect) }
-                if cam.isLevelEnabled { LevelIndicator(model: cam.levelModel) }
+                if cam.levelModel.isEnabled { LevelIndicator(model: cam.levelModel) }
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: lockCount)

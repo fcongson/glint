@@ -32,6 +32,7 @@ struct SavedSettings: Codable, Equatable {
     var histogramStyle: HistogramStyle?
     var isGridEnabled: Bool?
     var isLevelEnabled: Bool?
+    var isSubjectFocusEnabled: Bool?
 
     static let key = "settings"
 
