@@ -64,8 +64,6 @@ final class CameraController {
     let aids: ViewfinderAidsModel
     @ObservationIgnored private let analysisPause: AnalysisPause
     private(set) var systemPressure = SystemPressure.nominal
-    /// Whether the GPU viewfinder draws, for outlines, zebras or magnifying.
-    var isViewfinderDrawn: Bool { aids.viewfinderSettings(isAutofocus: isAutofocus) != nil }
     private(set) var isCameraReady = false  // the preview is running; secondary controls fade in then
     private(set) var isCameraDenied = false  // camera access refused: the viewfinder offers the way to Settings
     private(set) var interruption: CameraInterruption?  // why the preview is frozen, while the system has the camera
@@ -105,12 +103,18 @@ final class CameraController {
         self.locationProvider = locationProvider
         self.photoProcessor = photoProcessor
         self.shotLibrary = shotLibrary
-        analysisPause = AnalysisPause { [renderer] in renderer?.setAnalysisPaused($0) }
+        let aids = ViewfinderAidsModel(isGPUAvailable: renderer != nil)
+        self.aids = aids
+        analysisPause = AnalysisPause { [renderer] in
+            renderer?.setAnalysisPaused($0)
+            aids.setAnalysisPaused($0)
+        }
         capture = CaptureSession(viewfinder: renderer)
-        aids = ViewfinderAidsModel(isGPUAvailable: renderer != nil)
         if let saved = settingsSync.loadAtStart() { restore(saved) }
         aids.analysisChanged = { [weak self] in self?.sendAnalysis() }
         levelModel.onLevel = { [narrator] in narrator.levelChanged($0) }
+        aids.subjects.send = { [capture] in capture.enqueue(subject: $0) }
+        aids.subjects.toScreen = { [weak self] in self?.previewLayer?.layerRectConverted(fromMetadataOutputRect: $0) }
     }
 
     // MARK: Saved settings
@@ -126,7 +130,8 @@ final class CameraController {
             peakingAppearance: aids.peakingAppearance, peakingMode: aids.peakingMode,
             isFocusAreasEnabled: aids.isFocusAreasEnabled, isZebraEnabled: aids.isZebraEnabled,
             zebraLevel: aids.zebraLevel, isMagnifierEnabled: aids.isMagnifierEnabled, flash: flash,
-            histogramStyle: aids.histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: levelModel.isEnabled)
+            histogramStyle: aids.histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: levelModel.isEnabled,
+            isSubjectFocusEnabled: aids.isSubjectFocusEnabled)
     }
 
     /// The other copy of Glint (the app, or the Lock Screen camera) may have changed settings while this one was
@@ -347,6 +352,8 @@ final class CameraController {
         case .manualFocusUnavailable:
             isAutofocus = true
             sendAnalysis()
+        case .resumedContinuous:
+            aids.subjects.resume()
         }
     }
 
@@ -370,7 +377,10 @@ final class CameraController {
     private func handle(_ event: CaptureEvent.Analysis) {
         switch event {
         case .histogram(let histogram): aids.show(histogram)
-        case .faces(let faces): narrator.facesFound(faces, in: previewLayer)
+        case .faces(let faces):
+            narrator.facesFound(faces, in: previewLayer)
+            aids.subjects.found(faces: faces)
+        case .bodies(let bodies): aids.subjects.found(bodies: bodies)
         }
     }
 
@@ -436,30 +446,11 @@ final class CameraController {
         capture.enqueue { $0.setVideoFormat(format) }
     }
 
-    /// While recording with "exposure while recording: locked", the exposure controls don't respond.
-    var isExposureLocked: Bool {
-        isRecording && captureMode == .video && videoFormat.locksExposureWhileRecording
-    }
-
-    /// The shutter actually in use: in video, A means the 180° rule and nothing is slower than a frame.
-    var effectiveShutterDenominator: Double {
-        guard captureMode == .video else { return shutterDenominator }
-        return videoFormat.exposure(auto: manual ? auto : AutoSettings(), shutterDenominator: shutterDenominator)
-            .shutterDenominator
-    }
-
     // The photo format is read at capture time; nothing to send to the device.
 
     func setFileType(_ type: PhotoFileType) { fileType = type }
 
     func setAspect(_ aspect: AspectRatio) { self.aspect = aspect }
-
-    /// The crop that will really be applied. A RAW photo is a DNG, which always keeps the full sensor, so while FILE
-    /// is RAW the chosen aspect is kept for later but does nothing (HEIC and RAW+HEIC crop the HEIC).
-    var appliedAspect: AspectRatio { fileType == .raw ? .fourThree : aspect }
-
-    /// Whether ASPECT can be changed, for SET to grey it out otherwise.
-    var canChooseAspect: Bool { fileType != .raw }
 
     /// Switch between manual exposure + locked white balance, and continuous auto.
     /// The first time into manual, white balance starts from whatever auto has chosen; after that, returning to
@@ -583,7 +574,8 @@ final class CameraController {
     private func sendAnalysis() {
         let histogram = aids.isHistogramEnabled, rgb = aids.histogramStyle == .rgb
         let viewfinder = aids.viewfinderSettings(isAutofocus: isAutofocus)
-        capture.enqueue { $0.setAnalysis(histogram: histogram, rgb: rgb, viewfinder: viewfinder) }
+        let subjects = aids.subjectFocusWanted(isAutofocus: isAutofocus)
+        capture.enqueue { $0.setAnalysis(histogram: histogram, rgb: rgb, viewfinder: viewfinder, subjects: subjects) }
     }
 
     // MARK: VoiceOver
@@ -620,6 +612,7 @@ final class CameraController {
 
     /// Tap to focus. This also hands focus back to autofocus.
     func focus(at point: CGPoint) {
+        aids.subjects.suspend()
         if viewfinderLock != nil { viewfinderLock = nil }
         if !isAutofocus {
             isAutofocus = true

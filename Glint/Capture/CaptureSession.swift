@@ -57,6 +57,8 @@ actor CaptureSession {
     var focusHeld = false  // a long press is holding focus; see `holdFocusAndExposure`
     var exposureHeld = false  // …and exposure
     var holdGeneration = 0  // so a hold that's been replaced can't finish late
+    var subjectPoint: CGPoint?  // who continuous autofocus follows, if anyone; see `setSubjectPoint`
+    var wantsFaces = (voiceOver: false, subjects: false)  // who wants the camera's face detection on
 
     /// Recording stops by itself, with the file intact, when free storage falls to this. The file is then copied
     /// into Photos, so there has to be room left for that.
@@ -67,7 +69,9 @@ actor CaptureSession {
         let (events, emit) = AsyncStream.makeStream(of: CaptureEvent.self)
         self.events = events
         self.emit = emit
-        analyzer = FrameAnalyzer(histogram: { emit.yield(.analysis(.histogram($0))) }, renderer: viewfinder)
+        analyzer = FrameAnalyzer(
+            histogram: { emit.yield(.analysis(.histogram($0))) }, bodies: { emit.yield(.analysis(.bodies($0))) },
+            renderer: viewfinder)
         faceDetector = FaceDetector(report: { emit.yield(.analysis(.faces($0))) })
 
         let (commandStream, commands) = AsyncStream.makeStream(of: Command.self)
@@ -265,6 +269,7 @@ actor CaptureSession {
                 d.isGeometricDistortionCorrectionEnabled = false
             }
             applyToneMapping(d)
+            applySubjectPoint(d)  // a new lens starts at the centre
         }
         setConnections()  // a new lens or format rebuilds them; already done if set inside the configuration
         analyzer.setWhiteKey(whiteKey(for: d))
@@ -324,8 +329,10 @@ actor CaptureSession {
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
         rotationCoordinator = coordinator
         emit.yield(.session(.previewRotation(angle: coordinator.videoRotationAngleForHorizonLevelPreview)))
+        analyzer.setSubjectAngle(Int(coordinator.videoRotationAngleForHorizonLevelCapture.rounded()))
         rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.new]) {
-            [emit] c, _ in
+            [emit, analyzer] c, _ in
+            analyzer.setSubjectAngle(Int(c.videoRotationAngleForHorizonLevelCapture.rounded()))
             emit.yield(.session(.previewRotation(angle: c.videoRotationAngleForHorizonLevelPreview)))
         }
     }

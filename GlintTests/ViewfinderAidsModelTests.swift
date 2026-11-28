@@ -134,3 +134,87 @@ struct ViewfinderAidsModelTests {
         #expect(aids.isPeakingEnabled && aids.isZebraEnabled)
     }
 }
+
+/// Subject autofocus's switch, its pauses and what it's told about.
+@MainActor
+@Suite("Subject autofocus aid")
+struct SubjectFocusAidTests {
+    private func aids() -> ViewfinderAidsModel { ViewfinderAidsModel(isGPUAvailable: true) }
+
+    @Test func itIsOnByDefaultAndWantedInContinuousAutofocus() {
+        let a = aids()
+        #expect(a.isSubjectFocusEnabled)
+        #expect(a.subjectFocusWanted(isAutofocus: true))
+        #expect(a.subjects.isActive)
+    }
+
+    @Test func itIsNotWantedWhileFocusingByHand() {
+        let a = aids()
+        #expect(a.subjectFocusWanted(isAutofocus: true))
+        #expect(!a.subjectFocusWanted(isAutofocus: false))
+        #expect(!a.subjects.isActive)
+    }
+
+    @Test func itPausesWhilePhotosAreDeveloped() {
+        let a = aids()
+        var changes = 0
+        a.analysisChanged = { changes += 1 }
+        a.setAnalysisPaused(true)
+        #expect(!a.subjectFocusWanted(isAutofocus: true))
+        a.setAnalysisPaused(false)
+        #expect(a.subjectFocusWanted(isAutofocus: true))
+        #expect(changes == 2)
+    }
+
+    @Test func offInSETMeansNeverWanted() {
+        let a = aids()
+        a.setSubjectFocusEnabled(false)
+        #expect(!a.subjectFocusWanted(isAutofocus: true))
+    }
+
+    @Test func lowPowerModePausesItAndBringsItBackWithoutAMessage() {
+        let a = aids()
+        a.setHistogramEnabled(false)
+        a.setPeakingEnabled(false)
+        #expect(a.lowPowerModeChanged(true) == nil)  // nothing the user sees was switched off
+        #expect(!a.subjectFocusWanted(isAutofocus: true))
+        #expect(a.lowPowerModeChanged(false) == nil)
+        #expect(a.subjectFocusWanted(isAutofocus: true))
+    }
+
+    @Test func lowPowerModeStillTellsAboutTheAidsThatShow() {
+        let a = aids()
+        a.setHistogramEnabled(true)
+        #expect(a.lowPowerModeChanged(true) != nil)
+        #expect(!a.isSubjectFocusEnabled)
+    }
+
+    @Test func heatPausesItAndCoolingBringsItBack() {
+        let a = aids()
+        a.setPeakingEnabled(false)
+        #expect(a.pressureChanged(from: .nominal, to: .serious, lowPowerModeIsOn: false) == nil)
+        #expect(!a.subjectFocusWanted(isAutofocus: true))
+        #expect(a.pressureChanged(from: .serious, to: .nominal, lowPowerModeIsOn: false) == nil)
+        #expect(a.subjectFocusWanted(isAutofocus: true))
+    }
+
+    @Test func aChoiceMadeInSETSurvivesLowPowerMode() {
+        let a = aids()
+        _ = a.lowPowerModeChanged(true)
+        a.setSubjectFocusEnabled(true)  // switched back on by hand
+        _ = a.lowPowerModeChanged(false)
+        #expect(a.isSubjectFocusEnabled)
+        a.setSubjectFocusEnabled(false)
+        _ = a.lowPowerModeChanged(true)
+        _ = a.lowPowerModeChanged(false)
+        #expect(!a.isSubjectFocusEnabled)
+    }
+
+    @Test func itIsSavedAndRestored() {
+        let a = aids()
+        a.restore(SavedSettings(isSubjectFocusEnabled: false))
+        #expect(!a.isSubjectFocusEnabled)
+        a.restore(SavedSettings())
+        #expect(!a.isSubjectFocusEnabled)
+    }
+}

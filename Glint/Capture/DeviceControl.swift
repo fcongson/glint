@@ -148,18 +148,37 @@ enum DeviceControl {
         return lockExposureLater
     }
 
-    /// The scene changed after a tap: back to continuous autofocus and auto exposure from the centre. Manual focus
-    /// and custom exposure are left as they are.
-    static func resumeContinuous(_ d: some CameraDevice, manualFocus: Bool) {
-        let center = CGPoint(x: 0.5, y: 0.5)
+    static let center = CGPoint(x: 0.5, y: 0.5)
+
+    /// Continuous autofocus on the subject (`point`), and in AUTO and program auto exposure too. Only while that
+    /// focus or exposure is continuous: a tap's single pass, a long press's lock and a lens held by hand are
+    /// left alone, and so is exposure that isn't the camera's to choose. Only writes what changed.
+    static func followSubject(_ d: some CameraDevice, at point: CGPoint, focus: Bool, exposure: Bool) {
+        if focus, d.focusMode == .continuousAutoFocus, d.isFocusPointOfInterestSupported,
+            d.focusPointOfInterest != point
+        {
+            d.focusPointOfInterest = point
+        }
+        if exposure, d.exposureMode == .continuousAutoExposure, d.isExposurePointOfInterestSupported,
+            d.exposurePointOfInterest != point
+        {
+            d.exposurePointOfInterest = point
+        }
+    }
+
+    /// The scene changed after a tap: back to continuous autofocus, and auto exposure, at `point`: the subject
+    /// if there is one, otherwise the centre. Manual focus and custom exposure are left as they are.
+    static func resumeContinuous(
+        _ d: some CameraDevice, manualFocus: Bool, at point: CGPoint = center, exposure: Bool = true
+    ) {
         if !manualFocus, d.isFocusPointOfInterestSupported, d.isFocusModeSupported(.continuousAutoFocus) {
-            d.focusPointOfInterest = center
+            d.focusPointOfInterest = point
             d.focusMode = .continuousAutoFocus
         }
-        if d.exposureMode != .custom, d.isExposurePointOfInterestSupported,
+        if exposure, d.exposureMode != .custom, d.isExposurePointOfInterestSupported,
             d.isExposureModeSupported(.continuousAutoExposure)
         {
-            d.exposurePointOfInterest = center
+            d.exposurePointOfInterest = point
             d.exposureMode = .continuousAutoExposure
         }
         d.isSubjectAreaChangeMonitoringEnabled = false

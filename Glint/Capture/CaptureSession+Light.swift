@@ -25,6 +25,13 @@ extension CaptureSession {
     /// Face detection for VoiceOver's description of the picture. Its output is attached only while wanted: the
     /// camera does the detecting, but there's no reason to have it running for anyone else.
     func setFaceDetection(_ on: Bool) {
+        wantsFaces.voiceOver = on
+        updateFaceDetection()
+    }
+
+    /// The face output is on while VoiceOver or subject autofocus wants faces.
+    func updateFaceDetection() {
+        let on = wantsFaces.voiceOver || wantsFaces.subjects
         let output = faceDetector.output
         guard device != nil, session.outputs.contains(output) != on else { return }
         session.beginConfiguration()

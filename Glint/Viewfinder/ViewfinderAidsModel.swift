@@ -21,6 +21,11 @@ final class ViewfinderAidsModel {
     private(set) var isFocusAreasEnabled = false
     private(set) var isZebraEnabled = false
     private(set) var zebraLevel = ZebraLevel.hundred
+    /// Subject autofocus (SUBJECT AF in SET): continuous autofocus follows a person in the frame. It looks at the
+    /// preview a few times a second, so it pauses with the other aids, and while a photo is developed.
+    private(set) var isSubjectFocusEnabled = true
+    let subjects = SubjectFocusModel()
+    @ObservationIgnored private var isAnalysisPaused = false
 
     // Focus magnifier (see Magnifier.swift). The point is where the viewfinder punches in: in manual focus a tap
     // moves it, in autofocus it follows the tapped focus point.
@@ -73,6 +78,7 @@ final class ViewfinderAidsModel {
         isZebraEnabled = isGPUAvailable && (saved.isZebraEnabled ?? isZebraEnabled)
         zebraLevel = saved.zebraLevel ?? zebraLevel
         isMagnifierEnabled = saved.isMagnifierEnabled ?? isMagnifierEnabled
+        isSubjectFocusEnabled = saved.isSubjectFocusEnabled ?? isSubjectFocusEnabled
     }
 
     // MARK: Histogram
@@ -154,6 +160,30 @@ final class ViewfinderAidsModel {
         analysisChanged()
     }
 
+    // MARK: Subject autofocus
+
+    func setSubjectFocusEnabled(_ on: Bool) {
+        guard on != isSubjectFocusEnabled else { return }
+        isSubjectFocusEnabled = on
+        pauses.userChose(.subjects)
+        analysisChanged()
+    }
+
+    /// Photos being developed pause the preview analysis (`AnalysisPause`), and subject autofocus with it.
+    func setAnalysisPaused(_ paused: Bool) {
+        guard paused != isAnalysisPaused else { return }
+        isAnalysisPaused = paused
+        analysisChanged()
+    }
+
+    /// Whether subject detection should run: on, in continuous autofocus (a lens focused by hand has no subject to
+    /// follow) and not paused. Also tells the subject model, which clears itself when this turns off.
+    func subjectFocusWanted(isAutofocus: Bool) -> Bool {
+        let wanted = isSubjectFocusEnabled && isAutofocus && !isAnalysisPaused
+        subjects.setActive(wanted)
+        return wanted
+    }
+
     // MARK: Magnifier
 
     /// The focus rail was touched or let go. Touching it punches in; letting go zooms back out a second later,
@@ -202,9 +232,8 @@ final class ViewfinderAidsModel {
     func lowPowerModeChanged(_ isOn: Bool) -> String? {
         if isOn {
             let paused = pauses.lowPowerBegan(enabled: enabled)
-            guard paused.any else { return nil }
             switchAids(paused, on: false)
-            return "Low Power Mode: histogram, peaking and zebras off"
+            return paused.anyShown ? "Low Power Mode: histogram, peaking and zebras off" : nil
         }
         let back = pauses.lowPowerEnded()
         if back.any { switchAids(back, on: true) }
@@ -217,15 +246,13 @@ final class ViewfinderAidsModel {
     func pressureChanged(from old: SystemPressure, to level: SystemPressure, lowPowerModeIsOn: Bool) -> String? {
         if level.pausesViewfinderAids, !old.pausesViewfinderAids {
             let paused = pauses.pressureBegan(enabled: enabled)
-            guard paused.any else { return nil }
             switchAids(paused, on: false)
-            return "iPhone is hot: peaking and zebras off for now"
+            return paused.anyShown ? "iPhone is hot: peaking and zebras off for now" : nil
         }
         if !level.pausesViewfinderAids, old.pausesViewfinderAids {
             let back = pauses.pressureEased(lowPowerModeIsOn: lowPowerModeIsOn)
-            guard back.any else { return nil }
             switchAids(back, on: true)
-            return "Cooler again: peaking and zebras back on"
+            return back.anyShown ? "Cooler again: peaking and zebras back on" : nil
         }
         return nil
     }
@@ -233,7 +260,7 @@ final class ViewfinderAidsModel {
     private var enabled: ViewfinderAids {
         ViewfinderAids(
             histogram: isHistogramEnabled, peaking: isPeakingEnabled, focusAreas: isFocusAreasEnabled,
-            zebras: isZebraEnabled)
+            zebras: isZebraEnabled, subjects: isSubjectFocusEnabled)
     }
 
     /// Switches these aids on or off on Glint's own account (the user's switches are the `set…Enabled` methods).
@@ -245,6 +272,8 @@ final class ViewfinderAidsModel {
         if aids.peaking { isPeakingEnabled = on }
         if aids.focusAreas { isFocusAreasEnabled = on }
         if aids.zebras { isZebraEnabled = on }
+        if aids.subjects { isSubjectFocusEnabled = on }
+        guard aids.any else { return }
         analysisChanged()
     }
 }

@@ -198,6 +198,11 @@ struct SetMenu: View {
             SettingRow(
                 tile: tile, options: Self.offOn, selection: cam.aids.isFocusAreasEnabled,
                 onSelect: { cam.aids.setFocusAreasEnabled($0) }, isAvailable: { !$0 || cam.aids.isGPUAvailable })
+        case .subjectFocus:
+            // Autofocus follows a person in the frame, instead of the centre.
+            SettingRow(
+                tile: tile, options: Self.offOn, selection: cam.aids.isSubjectFocusEnabled,
+                onSelect: { cam.aids.setSubjectFocusEnabled($0) })
         case .grid:
             SettingRow(
                 tile: tile, options: [(title: "Off", value: false), (title: "Thirds", value: true)],

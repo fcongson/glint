@@ -32,6 +32,7 @@ extension CaptureSession {
                 emit.yield(.exposure(.whiteBalanceSeeded(kelvin: seeded.kelvin)))
             }
             applyFocus(d, lockedAt: manualFocus)
+            applySubjectPoint(d)
         }
     }
 
