@@ -219,7 +219,7 @@ final class ViewfinderRenderer: @unchecked Sendable {
     /// the frames between reuse the last ones.
     private func outlines(for settings: ViewfinderSettings) -> Outlines {
         let (paused, interval) = lock.withLock {
-            if !settings.focusAreas { focusAreas.reset() }  // so old squares don't flash up when they're next on
+            focusAreas.isOn = settings.focusAreas
             return (analysisPaused, analysisInterval)
         }
         let shown = settings.outlines && !paused, areas = settings.focusAreas && !paused

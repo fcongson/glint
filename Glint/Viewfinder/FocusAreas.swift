@@ -43,12 +43,16 @@ struct FocusAreas: Equatable, Sendable {
     static let tileSize = 16
     private(set) var grid: Grid?
 
-    mutating func reset() { grid = nil }
+    /// Whether the squares are wanted. Switched off, the old ones are dropped so they can't flash up when they're next
+    /// on, and a frame counted before they went off can't bring them back.
+    var isOn = true {
+        didSet { if !isOn { grid = nil } }
+    }
 
     /// Takes each tile's count of crisp pixels, row by row, and returns the cells now in focus.
     @discardableResult
     mutating func update(counts: [Float], tilesAcross: Int, tilesDown: Int) -> Grid? {
-        guard tilesAcross > 0, tilesDown > 0, counts.count == tilesAcross * tilesDown else { return nil }
+        guard isOn, tilesAcross > 0, tilesDown > 0, counts.count == tilesAcross * tilesDown else { return nil }
         let perCell = (tilesAcross + Self.cellsAcross - 1) / Self.cellsAcross
         let across = (tilesAcross + perCell - 1) / perCell, down = (tilesDown + perCell - 1) / perCell
         var sums = [Float](repeating: 0, count: across * down)
