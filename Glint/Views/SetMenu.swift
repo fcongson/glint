@@ -204,7 +204,7 @@ struct SetMenu: View {
                 selection: cam.isGridEnabled, onSelect: { cam.setGridEnabled($0) })
         case .level:
             SettingRow(
-                tile: tile, options: Self.offOn, selection: cam.isLevelEnabled,
+                tile: tile, options: Self.offOn, selection: cam.levelModel.isEnabled,
                 onSelect: { cam.setLevelEnabled($0) })
         case .railSide:
             SettingRow(
