@@ -29,6 +29,18 @@ enum DeviceAngle {
     }
 }
 
+extension DeviceAngle {
+    /// The top corner of the picture on `side`, the way the phone is held, as the screen sees it: held sideways, the
+    /// top of the phone as you see it is one of the screen's side edges.
+    static func topCorner(on side: RailSide, quarterTurns: Int) -> Alignment {
+        let top: Alignment = [.top, .trailing, .bottom, .leading][quarterTurns]
+        let edges = [top, side.alignment(quarterTurns: quarterTurns)]
+        let horizontal = edges.first { $0 == .leading || $0 == .trailing } ?? .leading
+        let vertical = edges.first { $0 == .top || $0 == .bottom } ?? .top
+        return Alignment(horizontal: horizontal.horizontal, vertical: vertical.vertical)
+    }
+}
+
 extension View {
     /// Keeps `angle` at how the phone is held, animated, for as long as the view is on screen.
     func trackingDeviceAngle(_ angle: Binding<Angle>) -> some View {

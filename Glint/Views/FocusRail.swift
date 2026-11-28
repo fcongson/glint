@@ -9,7 +9,15 @@ import SwiftUI
 struct FocusRail: View {
     let position: Float  // 0 nearest … 1 farthest
     let isAutofocus: Bool
+    /// How close the current lens focuses, for the near label.
+    var nearestMillimetres: Int?
+    /// The length of the scale between the two end labels.
+    let trackHeight: CGFloat
     let onChange: (Float) -> Void
+    /// The side against the picture's edge, which the drawn rail hugs inside its wider touch area.
+    var edge: Alignment = .trailing
+    /// Slid away: out of VoiceOver's reach as well as the touch's.
+    var isHidden = false
     var onTouch: (Bool) -> Void = { _ in }  // touched (true) and let go (false), for the focus magnifier
 
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
@@ -17,10 +25,33 @@ struct FocusRail: View {
     @State private var awake = false
     @State private var sleepTask: Task<Void, Never>?
 
-    static let trackHeight: CGFloat = 240
-    private let width: CGFloat = 44
+    static let presetHeight: CGFloat = 30
+    /// The shortest track that's still worth dragging.
+    static let minimumTrackHeight: CGFloat = 120
+
+    /// The whole rail's height for a track of this length: the track and the two end labels.
+    static func height(track: CGFloat) -> CGFloat { track + presetHeight * 2 }
+
+    /// The track that fills `height` of room.
+    static func track(fitting height: CGFloat) -> CGFloat { max(height - presetHeight * 2, minimumTrackHeight) }
+    /// Drawn narrow, so it covers little of the picture, with a touch area wide enough for a thumb.
+    static let drawnWidth: CGFloat = 30
+    static let touchWidth: CGFloat = 44
+    /// The gap between the track's edge and the thumb, or the switch's knob.
+    static let thumbInset: CGFloat = 4
+    private var width: CGFloat { Self.touchWidth }
     private let inset: CGFloat = 16  // keeps the thumb inside the rounded ends
-    private var travel: CGFloat { Self.trackHeight - inset * 2 }
+    private var travel: CGFloat { trackHeight - inset * 2 }
+
+    /// The drawn track here and in the AF | MF switch: round on the side toward the picture, square against its edge.
+    /// With `inset`, the shape of the switch's knob inside it, concentric so the gap is even all round.
+    static func trackShape(edge: Alignment, inset: CGFloat = 0) -> UnevenRoundedRectangle {
+        let round = drawnWidth / 2 - inset
+        let atTrailing = edge == .trailing
+        return UnevenRoundedRectangle(
+            topLeadingRadius: atTrailing ? round : 0, bottomLeadingRadius: atTrailing ? round : 0,
+            bottomTrailingRadius: atTrailing ? 0 : round, topTrailingRadius: atTrailing ? 0 : round)
+    }
 
     private var isVisible: Bool { awake || voiceOver || dragStart != nil }
 
@@ -32,6 +63,12 @@ struct FocusRail: View {
             presetButton(.infinity, size: 17)
             track
             presetButton(.nearest, size: 10)
+        }
+        .background(alignment: edge) {
+            Self.trackShape(edge: edge).fill(Color.black.opacity(0.45))
+                .overlay(Self.trackShape(edge: edge).strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                .frame(width: Self.drawnWidth)
+                .opacity(fade)
         }
         .foregroundStyle(Color.white)
         .shadow(color: .black.opacity(0.6), radius: 2)
@@ -48,16 +85,18 @@ struct FocusRail: View {
             onChange(preset.position)
             onTouch(false)
         } label: {
-            Text(preset.title)
+            Text(preset.title(nearestMillimetres: nearestMillimetres))
                 .glintFont(size: size, weight: .semibold)
                 .fixedSize()
                 .opacity(fade)
-                .frame(width: width, height: 30)
+                .frame(width: Self.drawnWidth, height: Self.presetHeight)
+                .frame(width: width, alignment: edge)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(preset.name)
+        .accessibilityLabel(preset.name(nearestMillimetres: nearestMillimetres))
         .accessibilityHint("Turns autofocus off.")
+        .accessibilityHidden(isHidden)
     }
 
     private var track: some View {
@@ -66,7 +105,7 @@ struct FocusRail: View {
             // The hit area: never faded, and on top of the drawing.
             Color.clear.contentShape(Rectangle())
         }
-        .frame(width: width, height: Self.trackHeight)
+        .frame(width: width, height: trackHeight)
         // High priority so the rail wins over the viewfinder's tap-to-focus underneath it.
         .highPriorityGesture(
             DragGesture(minimumDistance: 0)
@@ -86,6 +125,7 @@ struct FocusRail: View {
         )
         .accessibilityElement()
         .accessibilityLabel("Focus")
+        .accessibilityIdentifier("focusRail")
         .accessibilityValue(
             isAutofocus
                 ? "Autofocus, \(SettingsText.focusPosition(position))"
@@ -101,28 +141,30 @@ struct FocusRail: View {
             }
             onTouch(false)
         }
+        .accessibilityHidden(isHidden)
+        .sensoryFeedback(trigger: FocusScale.stop(at: position)) { _, stop in
+            guard dragStart != nil else { return nil }
+            return .impact(flexibility: .rigid, intensity: FocusScale.isMajor(stop: stop) ? 1.0 : 0.6)
+        }
     }
 
     private var trackDrawing: some View {
         ZStack(alignment: .top) {
-            Capsule().fill(Color.black.opacity(0.45))
-            Rectangle()
-                .fill(Color.white.opacity(0.35))
-                .frame(width: 2)
-                .padding(.vertical, inset)
-            ForEach([Float(0.25), 0.5, 0.75], id: \.self) { t in
+            ForEach(0...FocusScale.stops, id: \.self) { stop in
+                let major = FocusScale.isMajor(stop: stop)
                 Rectangle()
-                    .fill(Color.white.opacity(0.45))
-                    .frame(width: 12, height: 1)
-                    .offset(y: y(for: t))
+                    .fill(Color.white.opacity(major ? 0.9 : 0.4))
+                    .frame(width: major ? 16 : 8, height: 1.5)
+                    .offset(y: y(for: Float(stop) / Float(FocusScale.stops)) - 0.75)
             }
             Capsule()
                 .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
-                .frame(width: 32, height: 20)
-                .offset(y: y(for: position) - 10)
+                .frame(width: Self.drawnWidth - Self.thumbInset * 2, height: 2.5)
+                .offset(y: y(for: position) - 1.25)
                 .animation(dragStart == nil ? .easeOut(duration: 0.2) : nil, value: position)
         }
-        .frame(width: width, height: Self.trackHeight)
+        .frame(width: Self.drawnWidth, height: trackHeight, alignment: .top)
+        .frame(width: width, alignment: edge)
     }
 
     /// Distance from the top of the track to a position's centre line.
@@ -154,6 +196,8 @@ enum RailSide: String, CaseIterable {
         case .right: "Right"
         }
     }
+
+    var opposite: RailSide { self == .right ? .left : .right }
 
     /// Which edge of the picture is on this side, the way the phone is held (`DeviceAngle.quarterTurns`). Landscape
     /// left puts the picture's bottom edge on your right; landscape right, its top edge.

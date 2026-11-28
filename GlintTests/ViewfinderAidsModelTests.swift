@@ -19,15 +19,71 @@ struct ViewfinderAidsModelTests {
 
     @Test func peakingIsOnByDefaultButOnlyShownWhileFocusingByHand() {
         let (aids, _) = model()
-        #expect(aids.isPeakingEnabled)
+        #expect(aids.peakingShow == .inMF)
         #expect(aids.viewfinderSettings(isAutofocus: true) == nil)
         #expect(aids.viewfinderSettings(isAutofocus: false)?.outlines == true)
+    }
+
+    @Test func eachShowOptionDecidesWhenPeakingIsShown() {
+        let (aids, changes) = model()
+        let expected: [PeakingShow: (inAutofocus: Bool, inManual: Bool)] = [
+            .off: (false, false), .inMF: (false, true), .always: (true, true),
+        ]
+        for show in PeakingShow.allCases {
+            let (inAutofocus, inManual) = expected[show] ?? (false, false)
+            aids.setPeakingShow(show)
+            #expect(aids.isPeakingShown(isAutofocus: true) == inAutofocus)
+            #expect(aids.isPeakingShown(isAutofocus: false) == inManual)
+            #expect((aids.viewfinderSettings(isAutofocus: true)?.outlines ?? false) == inAutofocus)
+            #expect((aids.viewfinderSettings(isAutofocus: false)?.outlines ?? false) == inManual)
+        }
+        #expect(changes.calls == 3)  // each step is a change: off, back to In MF, always
+    }
+
+    @Test func lowPowerModeBringsBackTheChosenPeakingOption() {
+        for show in [PeakingShow.inMF, .always] {
+            let (aids, _) = model()
+            aids.setPeakingShow(show)
+            #expect(aids.lowPowerModeChanged(true) != nil)
+            #expect(!aids.isPeakingShown(isAutofocus: false) && !aids.isPeakingShown(isAutofocus: true))
+            #expect(aids.peakingShow == show)
+            _ = aids.lowPowerModeChanged(false)
+            #expect(aids.peakingShow == show)
+            #expect(aids.isPeakingShown(isAutofocus: true) == (show == .always))
+            #expect(aids.isPeakingShown(isAutofocus: false))
+        }
+    }
+
+    @Test func heatBringsBackTheChosenPeakingOption() {
+        let (aids, _) = model()
+        aids.setPeakingShow(.always)
+        _ = aids.pressureChanged(from: .nominal, to: .serious, lowPowerModeIsOn: false)
+        #expect(!aids.isPeakingShown(isAutofocus: true))
+        _ = aids.pressureChanged(from: .serious, to: .nominal, lowPowerModeIsOn: false)
+        #expect(aids.peakingShow == .always && aids.isPeakingShown(isAutofocus: true))
+    }
+
+    @Test func chosenPeakingWhilePausedIsTheUsersAndStaysOnWhenThePauseEnds() {
+        let (aids, _) = model()
+        _ = aids.lowPowerModeChanged(true)
+        aids.setPeakingShow(.always)
+        #expect(aids.isPeakingShown(isAutofocus: true))
+        _ = aids.lowPowerModeChanged(false)
+        #expect(aids.peakingShow == .always && aids.isPeakingShown(isAutofocus: true))
+    }
+
+    @Test func offStaysOffThroughAPause() {
+        let (aids, _) = model()
+        aids.setPeakingShow(.off)
+        #expect(aids.lowPowerModeChanged(true) == nil)
+        _ = aids.lowPowerModeChanged(false)
+        #expect(aids.peakingShow == .off)
     }
 
     @Test func afSquaresAreOffByDefaultAndOnlyShownInAutofocus() {
         let (aids, changes) = model()
         #expect(!aids.isFocusAreasEnabled)
-        aids.setPeakingEnabled(false)
+        aids.setPeakingShow(.off)
         aids.setFocusAreasEnabled(true)
         #expect(changes.calls == 2)
         #expect(aids.viewfinderSettings(isAutofocus: true)?.focusAreas == true)
@@ -46,7 +102,7 @@ struct ViewfinderAidsModelTests {
 
     @Test func lowPowerModeSwitchesAFSquaresOffAndBackOn() {
         let (aids, _) = model()
-        aids.setPeakingEnabled(false)
+        aids.setPeakingShow(.off)
         aids.setFocusAreasEnabled(true)
         #expect(aids.lowPowerModeChanged(true) != nil)
         #expect(!aids.isFocusAreasEnabled)
@@ -68,19 +124,19 @@ struct ViewfinderAidsModelTests {
 
     @Test func withoutTheGPUPeakingZebrasAndTheMagnifierStayOff() {
         let (aids, changes) = model(gpu: false)
-        aids.setPeakingEnabled(true)
+        aids.setPeakingShow(.always)
         aids.setZebraEnabled(true)
         aids.setFocusAreasEnabled(true)
-        #expect(!aids.isPeakingEnabled && !aids.isZebraEnabled && !aids.isFocusAreasEnabled)
+        #expect(aids.peakingShow == .off && !aids.isZebraEnabled && !aids.isFocusAreasEnabled)
         #expect(!aids.isMagnifierAvailable)
         #expect(changes.calls == 0)
 
         var saved = SavedSettings()
-        saved.isPeakingEnabled = true
+        saved.peakingShow = .always
         saved.isZebraEnabled = true
         saved.isFocusAreasEnabled = true
         aids.restore(saved)
-        #expect(!aids.isPeakingEnabled && !aids.isZebraEnabled && !aids.isFocusAreasEnabled)
+        #expect(aids.peakingShow == .off && !aids.isZebraEnabled && !aids.isFocusAreasEnabled)
     }
 
     @Test func onlyARealChangeAsksForNewAnalysis() {
@@ -113,14 +169,14 @@ struct ViewfinderAidsModelTests {
         aids.setHistogramEnabled(true)
         aids.setZebraEnabled(true)
         #expect(aids.lowPowerModeChanged(true) != nil)
-        #expect(!aids.isHistogramEnabled && !aids.isPeakingEnabled && !aids.isZebraEnabled)
+        #expect(!aids.isHistogramEnabled && !aids.isPeakingOn && !aids.isZebraEnabled)
         #expect(aids.lowPowerModeChanged(false) == nil)
-        #expect(aids.isHistogramEnabled && aids.isPeakingEnabled && aids.isZebraEnabled)
+        #expect(aids.isHistogramEnabled && aids.isPeakingOn && aids.isZebraEnabled)
     }
 
     @Test func lowPowerModeSaysNothingWhenNothingWasOn() {
         let (aids, _) = model()
-        aids.setPeakingEnabled(false)
+        aids.setPeakingShow(.off)
         #expect(aids.lowPowerModeChanged(true) == nil)
     }
 
@@ -129,8 +185,8 @@ struct ViewfinderAidsModelTests {
         aids.setHistogramEnabled(true)
         aids.setZebraEnabled(true)
         #expect(aids.pressureChanged(from: .nominal, to: .serious, lowPowerModeIsOn: false) != nil)
-        #expect(aids.isHistogramEnabled && !aids.isPeakingEnabled && !aids.isZebraEnabled)
+        #expect(aids.isHistogramEnabled && !aids.isPeakingOn && !aids.isZebraEnabled)
         #expect(aids.pressureChanged(from: .serious, to: .nominal, lowPowerModeIsOn: false) != nil)
-        #expect(aids.isPeakingEnabled && aids.isZebraEnabled)
+        #expect(aids.isPeakingOn && aids.isZebraEnabled)
     }
 }

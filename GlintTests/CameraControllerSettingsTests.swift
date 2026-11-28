@@ -65,12 +65,22 @@ struct CameraControllerSettingsTests {
         #expect(cam.isGridEnabled)
     }
 
+    @Test func theToolRowLayoutIsSavedAndComesBack() throws {
+        let defaults = try emptyDefaults()
+        var layout = ToolRowLayout()
+        layout.place(.level, inSlot: 3, for: .photo)
+        SavedSettings(toolRow: layout).save(to: defaults)
+        let cam = CameraController(defaults: defaults)
+        #expect(cam.toolRow.slots(for: .photo) == layout.slots(for: .photo))
+        #expect(cam.savedSettings.toolRow == layout)
+    }
+
     @Test func withoutMetalSavedGPUAidsStayOff() throws {
         let defaults = try emptyDefaults()
-        SavedSettings(isHistogramEnabled: true, isPeakingEnabled: true, isZebraEnabled: true).save(to: defaults)
+        SavedSettings(isHistogramEnabled: true, peakingShow: .always, isZebraEnabled: true).save(to: defaults)
         let cam = CameraController(defaults: defaults, viewfinderRenderer: nil)
         #expect(cam.aids.isHistogramEnabled)
-        #expect(!cam.aids.isPeakingEnabled && !cam.aids.isZebraEnabled)
+        #expect(cam.aids.peakingShow == .off && !cam.aids.isZebraEnabled)
         #expect(!cam.isViewfinderDrawn)
     }
 

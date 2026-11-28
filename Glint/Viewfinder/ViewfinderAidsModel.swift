@@ -11,8 +11,10 @@ final class ViewfinderAidsModel {
     private(set) var isHistogramEnabled = false
     private(set) var histogramStyle = HistogramStyle.luma
     let histogramModel = HistogramModel()
-    /// Focus peaking is shown while focusing by hand (AF off), as on a camera in MF. On by default.
-    private(set) var isPeakingEnabled: Bool
+    /// When focus peaking is shown: never, while focusing by hand (the default, as on a camera in MF), or always.
+    private(set) var peakingShow: PeakingShow
+    /// Low Power Mode or heat has peaking off for now. `peakingShow` keeps the choice, so it comes back exactly.
+    private(set) var isPeakingPaused = false
     private(set) var peakingSensitivity = PeakingSensitivity.medium
     private(set) var peakingAppearance = PeakingAppearance()
     private(set) var peakingMode = PeakingMode.standard
@@ -39,14 +41,15 @@ final class ViewfinderAidsModel {
 
     init(isGPUAvailable: Bool) {
         self.isGPUAvailable = isGPUAvailable
-        isPeakingEnabled = isGPUAvailable
+        peakingShow = isGPUAvailable ? .inMF : .off
     }
 
     var isMagnifierAvailable: Bool { isGPUAvailable }
     var isMagnifying: Bool { isMagnifierAvailable && isMagnifierEnabled && isRailHeld }
     var isZebraShown: Bool { isZebraEnabled && isGPUAvailable }
 
-    func isPeakingShown(isAutofocus: Bool) -> Bool { isPeakingEnabled && !isAutofocus }
+    var isPeakingOn: Bool { peakingShow != .off && !isPeakingPaused }
+    func isPeakingShown(isAutofocus: Bool) -> Bool { isPeakingOn && peakingShow.isShown(isAutofocus: isAutofocus) }
     func areFocusAreasShown(isAutofocus: Bool) -> Bool { isFocusAreasEnabled && isAutofocus }
 
     /// What the GPU viewfinder draws, or nil when it draws nothing and the plain preview shows.
@@ -65,7 +68,7 @@ final class ViewfinderAidsModel {
     func restore(_ saved: SavedSettings) {
         isHistogramEnabled = saved.isHistogramEnabled ?? isHistogramEnabled
         histogramStyle = saved.histogramStyle ?? histogramStyle
-        isPeakingEnabled = isGPUAvailable && (saved.isPeakingEnabled ?? isPeakingEnabled)
+        peakingShow = isGPUAvailable ? (saved.chosenPeakingShow ?? peakingShow) : .off
         peakingSensitivity = saved.peakingSensitivity ?? peakingSensitivity
         peakingAppearance = saved.peakingAppearance ?? peakingAppearance
         peakingMode = saved.peakingMode ?? peakingMode
@@ -99,9 +102,11 @@ final class ViewfinderAidsModel {
 
     // MARK: Peaking
 
-    func setPeakingEnabled(_ on: Bool) {
-        guard on != isPeakingEnabled, !on || isGPUAvailable else { return }
-        isPeakingEnabled = on
+    /// SET's SHOW row. Choosing one while peaking is paused ends the pause, and the choice is the user's again.
+    func setPeakingShow(_ show: PeakingShow) {
+        guard show != peakingShow || isPeakingPaused, show == .off || isGPUAvailable else { return }
+        peakingShow = show
+        isPeakingPaused = false
         pauses.userChose(.peaking)
         analysisChanged()
     }
@@ -232,7 +237,7 @@ final class ViewfinderAidsModel {
 
     private var enabled: ViewfinderAids {
         ViewfinderAids(
-            histogram: isHistogramEnabled, peaking: isPeakingEnabled, focusAreas: isFocusAreasEnabled,
+            histogram: isHistogramEnabled, peaking: isPeakingOn, focusAreas: isFocusAreasEnabled,
             zebras: isZebraEnabled)
     }
 
@@ -242,7 +247,7 @@ final class ViewfinderAidsModel {
             isHistogramEnabled = on
             if !on { histogramModel.clear() }
         }
-        if aids.peaking { isPeakingEnabled = on }
+        if aids.peaking { isPeakingPaused = !on }
         if aids.focusAreas { isFocusAreasEnabled = on }
         if aids.zebras { isZebraEnabled = on }
         analysisChanged()

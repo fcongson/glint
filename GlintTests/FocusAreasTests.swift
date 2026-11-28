@@ -70,6 +70,17 @@ struct FocusAreasTests {
         #expect(areas.grid == nil)
     }
 
+    @Test func switchedOffTheSquaresGoAndALateFrameCannotBringThemBack() throws {
+        var areas = FocusAreas()
+        _ = try step(&areas, density(0))
+        areas.isOn = false
+        #expect(areas.grid == nil)
+        #expect(areas.update(counts: density(0), tilesAcross: 20, tilesDown: 15) == nil)
+        #expect(areas.grid == nil)
+        areas.isOn = true
+        #expect(try step(&areas, density(0)).across == 20)
+    }
+
     @Test func squareLinesAreAboutAPointWhateverTheCellSize() throws {
         var areas = FocusAreas()
         let u = try step(&areas, density(0))

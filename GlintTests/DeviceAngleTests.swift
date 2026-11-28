@@ -41,4 +41,24 @@ struct DeviceAngleTests {
         #expect(RailSide.left.alignment(quarterTurns: 2) == .trailing)
         #expect(RailSide.left.alignment(quarterTurns: 3) == .bottom)
     }
+
+    @Test func theHistogramIsOnATopCornerAsTheyHoldThePhone() {
+        // Upright, then with the phone's top to the left (landscape left), upside down, and to the right.
+        #expect(DeviceAngle.topCorner(on: .left, quarterTurns: 0) == .topLeading)
+        #expect(DeviceAngle.topCorner(on: .right, quarterTurns: 0) == .topTrailing)
+        #expect(DeviceAngle.topCorner(on: .left, quarterTurns: 1) == .topTrailing)
+        #expect(DeviceAngle.topCorner(on: .right, quarterTurns: 1) == .bottomTrailing)
+        #expect(DeviceAngle.topCorner(on: .left, quarterTurns: 2) == .bottomTrailing)
+        #expect(DeviceAngle.topCorner(on: .right, quarterTurns: 2) == .bottomLeading)
+        #expect(DeviceAngle.topCorner(on: .left, quarterTurns: 3) == .bottomLeading)
+        #expect(DeviceAngle.topCorner(on: .right, quarterTurns: 3) == .topLeading)
+    }
+
+    @Test(arguments: [0, 1, 2, 3])
+    func theHistogramIsNeverOnTheRailsSide(turns: Int) {
+        let rail = RailSide.right.alignment(quarterTurns: turns)
+        let histogram = DeviceAngle.topCorner(on: RailSide.right.opposite, quarterTurns: turns)
+        #expect(histogram.horizontal != rail.horizontal || rail.horizontal == .center)
+        #expect(histogram.vertical != rail.vertical || rail.vertical == .center)
+    }
 }

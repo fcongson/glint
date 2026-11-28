@@ -26,4 +26,10 @@ struct LensTests {
             #expect(Lens.shippingZooms.contains(lens.zoom), "fov \(fov)")
         }
     }
+
+    @Test(arguments: [(120, 120), (-1, nil), (0, nil)])
+    func nearestDistanceIsKnownOnlyWhenTheDeviceReportsOne(reported: Int, nearest: Int?) {
+        let lens = Lens(id: "lens", fieldOfView: 69.4, mainFieldOfView: mainFOV, minimumFocusDistance: reported)
+        #expect(lens.nearestMillimetres == nearest)
+    }
 }

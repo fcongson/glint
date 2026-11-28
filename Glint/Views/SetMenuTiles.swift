@@ -1,22 +1,70 @@
 import Foundation
 
-/// SET's rows and sections: what each is called, shown and spoken as, and where it goes. The view that draws them
-/// is `SetMenu`.
+/// SET's pages and rows: what each is called, shown and spoken as, and which page it's on. The view that draws
+/// them is `SetMenu`.
+///
+/// A row belongs on the page that answers its question: does it change what's recorded (PHOTO or VIDEO), does it
+/// help you focus (FOCUS), is it drawn on the picture but not recorded (DISPLAY), is it about where controls are
+/// (LAYOUT), or is it for developing Glint (DEV).
+enum SetPage: String, CaseIterable {
+    case capture, focus, display, layout, developer  // the format first: the top bar's readout opens it
+
+    static let key = "setPage"  // the last page, in `SharedDefaults.store`
+
+    /// The capture page is named for the mode: PHOTO or VIDEO.
+    func title(for mode: CaptureMode) -> String {
+        switch self {
+        case .capture: mode == .photo ? "PHOTO" : "VIDEO"
+        case .focus: "FOCUS"
+        case .display: "DISPLAY"
+        case .layout: "LAYOUT"
+        case .developer: "DEV"
+        }
+    }
+
+    /// Spoken name, for VoiceOver.
+    func name(for mode: CaptureMode) -> String {
+        switch self {
+        case .capture: mode == .photo ? "Photo settings" : "Video settings"
+        case .focus: "Focus settings"
+        case .display: "Display settings"
+        case .layout: "Layout settings"
+        case .developer: "Developer settings"
+        }
+    }
+
+    /// The pages to show: DEV only where debug info is available.
+    static func shown(isDebugInfoAvailable: Bool) -> [SetPage] {
+        allCases.filter { $0 != .developer || isDebugInfoAvailable }
+    }
+
+    /// Makes the next time SET opens land on this page.
+    func remember(in defaults: UserDefaults = SharedDefaults.store) { defaults.set(rawValue, forKey: Self.key) }
+}
+
 extension SetMenu {
     enum Tile: CaseIterable {
-        case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
-        case peakingMode, sensitivity, colour, lines, histogram, zebras, focusAreas, grid, level, railSide, debugInfo
+        case fileType, aspect, flash
+        case resolution, frameRate, codec, encoding, recordingExposure, light
+        case magnifier, focusAreas, peakingShow, peakingMode, sensitivity, colour, lines
+        case histogram, zebras, grid, level
+        case toolRowPhoto, toolRowVideo, railSide
+        case debugInfo
 
-        /// The row's label, under its section's heading.
+        /// The row's label, in the 84 pt column.
         var title: String {
             switch self {
+            case .peakingShow: "SHOW"
+            case .magnifier: "MAG ON RAIL"
             case .peakingMode: "MODE"
             case .sensitivity: "SENSITIVITY"
             case .colour: "COLOUR"
             case .lines: "LINES"
             case .zebras: "ZEBRAS"
             case .focusAreas: "AF SQUARES"
-            case .railSide: "FOCUS RAIL"
+            case .railSide: "SIDE"
+            case .toolRowPhoto: "PHOTO"
+            case .toolRowVideo: "VIDEO"
             case .fileType: "FILE"
             case .aspect: "ASPECT"
             case .resolution: "RESOLUTION"
@@ -33,19 +81,32 @@ extension SetMenu {
             }
         }
 
-        var section: Section {
+        var page: SetPage {
             switch self {
-            case .peakingMode, .sensitivity, .colour, .lines: .peaking
-            case .histogram, .zebras, .focusAreas, .grid, .level, .railSide: .viewfinder
-            case .fileType, .aspect, .flash: .photo
-            case .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light: .video
+            case .fileType, .aspect, .flash, .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light:
+                .capture
+            case .magnifier, .focusAreas, .peakingShow, .peakingMode, .sensitivity, .colour, .lines: .focus
+            case .histogram, .zebras, .grid, .level: .display
+            case .toolRowPhoto, .toolRowVideo, .railSide: .layout
             case .debugInfo: .developer
+            }
+        }
+
+        /// A heading over a run of rows, on a page that has more than one group.
+        var heading: String? {
+            switch self {
+            case .peakingShow, .peakingMode, .sensitivity, .colour, .lines: "PEAKING"
+            case .toolRowPhoto, .toolRowVideo: "TOOL ROW"
+            case .railSide: "FOCUS RAIL"
+            default: nil
             }
         }
 
         /// Spoken name, for VoiceOver.
         var name: String {
             switch self {
+            case .peakingShow: "When peaking is shown"
+            case .magnifier: "Magnifier on the focus rail"
             case .peakingMode: "Peaking mode"
             case .sensitivity: "Peaking sensitivity"
             case .colour: "Peaking colour"
@@ -53,6 +114,8 @@ extension SetMenu {
             case .zebras: "Zebra level"
             case .focusAreas: "Squares on what's in focus in autofocus"
             case .railSide: "Focus rail side"
+            case .toolRowPhoto: "Photo tool row"
+            case .toolRowVideo: "Video tool row"
             case .fileType: "File type"
             case .aspect: "Aspect ratio"
             case .resolution: "Video resolution"
@@ -69,28 +132,15 @@ extension SetMenu {
             }
         }
 
-        /// Shown only in its capture mode: the photo format in PHOTO, the video format in VIDEO.
-        func isShown(in mode: CaptureMode) -> Bool {
-            switch section {
-            case .photo: mode == .photo
-            case .video: mode == .video
-            default: true
-            }
-        }
-    }
-
-    /// Settings grouped under a heading, so it's clear which feature each belongs to.
-    enum Section: CaseIterable {
-        case photo, video, peaking, viewfinder, developer  // the format first: the top bar's readout opens SET
-
-        var title: String {
+        /// The capture mode a row is only for: the photo format in PHOTO, the video format in VIDEO.
+        private var mode: CaptureMode? {
             switch self {
-            case .peaking: "FOCUS PEAKING"
-            case .viewfinder: "VIEWFINDER"
-            case .photo: "PHOTO"
-            case .video: "VIDEO"
-            case .developer: "DEVELOPER"
+            case .fileType, .aspect, .flash: .photo
+            case .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light: .video
+            default: nil
             }
         }
+
+        func isShown(in mode: CaptureMode) -> Bool { self.mode == nil || self.mode == mode }
     }
 }

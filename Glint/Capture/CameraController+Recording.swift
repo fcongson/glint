@@ -1,6 +1,11 @@
 import Foundation
 
 extension CameraController {
+    /// While recording with "exposure while recording: locked", the exposure controls don't respond.
+    var isExposureLocked: Bool {
+        isRecording && captureMode == .video && videoFormat.locksExposureWhileRecording
+    }
+
     /// Saves the recording if its file is good, and says why it stopped if it wasn't the user who stopped it. The
     /// reason stays in front of the save's own message ("Video saved"), which would otherwise replace it at once.
     func recordingFinished(_ url: URL, _ outcome: RecordingOutcome) {

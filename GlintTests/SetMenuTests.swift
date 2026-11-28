@@ -1,42 +1,64 @@
+import Foundation
 import Testing
 
 @testable import Glint
 
 @Suite("SET menu")
 struct SetMenuTests {
-    private func rows(in mode: CaptureMode) -> [SetMenu.Tile] {
-        SetMenu.Tile.allCases.filter { $0.isShown(in: mode) }
+    private func rows(on page: SetPage, in mode: CaptureMode) -> [SetMenu.Tile] {
+        SetMenu.Tile.allCases.filter { $0.page == page && $0.isShown(in: mode) }
     }
 
-    @Test func photoShowsThePhotoFormatAndNotTheVideoFormat() {
-        let shown = rows(in: .photo)
-        #expect(shown.filter { $0.section == .photo } == [.fileType, .aspect, .flash])
-        #expect(!shown.contains { $0.section == .video })
+    @Test func everyRowIsOnAPageAndShownInAtLeastOneMode() {
+        for tile in SetMenu.Tile.allCases {
+            #expect(SetPage.allCases.contains(tile.page))
+            #expect(tile.isShown(in: .photo) || tile.isShown(in: .video))
+        }
     }
 
-    @Test func videoShowsTheVideoFormatAndNotThePhotoFormat() {
-        let shown = rows(in: .video)
+    @Test func thePhotoPageHasTheStillsFormat() {
+        #expect(rows(on: .capture, in: .photo) == [.fileType, .aspect, .flash])
+    }
+
+    @Test func theVideoPageHasTheVideoFormatAndTheLight() {
         #expect(
-            shown.filter { $0.section == .video }
+            rows(on: .capture, in: .video)
                 == [.resolution, .frameRate, .codec, .encoding, .recordingExposure, .light])
-        #expect(!shown.contains { $0.section == .photo })
     }
 
-    @Test func theOtherSectionsShowInBothModes() {
+    @Test func theFocusPageHasTheMagnifierAndAFSquaresThenPeaking() {
         for mode in [CaptureMode.photo, .video] {
-            let shown = rows(in: mode)
-            #expect(shown.contains(.peakingMode) && shown.contains(.zebras) && shown.contains(.railSide))
             #expect(
-                shown.filter { $0.section == .viewfinder } == [
-                    .histogram, .zebras, .focusAreas, .grid, .level, .railSide,
+                rows(on: .focus, in: mode) == [
+                    .magnifier, .focusAreas, .peakingShow, .peakingMode, .sensitivity, .colour, .lines,
                 ])
         }
+        #expect(SetMenu.Tile.peakingShow.heading == "PEAKING" && SetMenu.Tile.magnifier.heading == nil)
+    }
+
+    @Test func theDisplayPageHasWhatIsDrawnOnThePictureButNotRecorded() {
+        for mode in [CaptureMode.photo, .video] {
+            #expect(rows(on: .display, in: mode) == [.histogram, .zebras, .grid, .level])
+        }
+    }
+
+    @Test func theLayoutPageHasTheToolRowsAndTheRailSide() {
+        for mode in [CaptureMode.photo, .video] {
+            #expect(rows(on: .layout, in: mode) == [.toolRowPhoto, .toolRowVideo, .railSide])
+        }
+        #expect(SetMenu.Tile.toolRowPhoto.heading == "TOOL ROW" && SetMenu.Tile.railSide.heading == "FOCUS RAIL")
+    }
+
+    @Test func theDeveloperPageHasDebugInfoAndShowsOnlyWhereItIsAvailable() {
+        #expect(rows(on: .developer, in: .photo) == [.debugInfo])
+        #expect(SetPage.shown(isDebugInfoAvailable: true) == SetPage.allCases)
+        #expect(SetPage.shown(isDebugInfoAvailable: false) == [.capture, .focus, .display, .layout])
     }
 
     /// Stills get the flash and video the steady light: the same LED, so never both rows.
     @Test func flashInPhotoAndLightInVideo() {
-        #expect(rows(in: .photo).contains(.flash) && !rows(in: .photo).contains(.light))
-        #expect(rows(in: .video).contains(.light) && !rows(in: .video).contains(.flash))
+        #expect(SetMenu.Tile.flash.isShown(in: .photo) && !SetMenu.Tile.flash.isShown(in: .video))
+        #expect(SetMenu.Tile.light.isShown(in: .video) && !SetMenu.Tile.light.isShown(in: .photo))
     }
 
     @Test func everyRowHasATitleThatFitsAndASpokenName() {
@@ -46,8 +68,17 @@ struct SetMenuTests {
         }
     }
 
-    /// The top bar's format readout opens SET, so the format's section leads.
-    @Test func theCaptureFormatComesFirst() {
-        #expect(Array(SetMenu.Section.allCases.prefix(2)) == [.photo, .video])
+    /// The top bar's format readout opens SET, so the format's page leads.
+    @Test func theCaptureFormatComesFirstAndIsNamedForTheMode() {
+        #expect(SetPage.allCases.first == .capture)
+        #expect(SetPage.capture.title(for: .photo) == "PHOTO" && SetPage.capture.title(for: .video) == "VIDEO")
+    }
+
+    @Test func theLastPageIsRememberedInTheSharedSettings() throws {
+        let defaults = try #require(UserDefaults(suiteName: "SetMenuTests.lastPage"))
+        defaults.removePersistentDomain(forName: "SetMenuTests.lastPage")
+        SetPage.layout.remember(in: defaults)
+        #expect(defaults.string(forKey: SetPage.key) == "layout")
+        #expect(SetPage(rawValue: try #require(defaults.string(forKey: SetPage.key))) == .layout)
     }
 }

@@ -20,7 +20,8 @@ struct SavedSettings: Codable, Equatable {
     var exposureBias: Float?
     var videoFormat: VideoFormat?
     var isHistogramEnabled: Bool?
-    var isPeakingEnabled: Bool?
+    var isPeakingEnabled: Bool?  // read from older saves only; `peakingShow` replaced it
+    var peakingShow: PeakingShow?
     var peakingSensitivity: PeakingSensitivity?
     var peakingAppearance: PeakingAppearance?
     var peakingMode: PeakingMode?
@@ -32,6 +33,10 @@ struct SavedSettings: Codable, Equatable {
     var histogramStyle: HistogramStyle?
     var isGridEnabled: Bool?
     var isLevelEnabled: Bool?
+    var toolRow: ToolRowLayout?
+
+    /// When peaking is shown: the saved choice, or what an older save's on or off meant (on was In MF).
+    var chosenPeakingShow: PeakingShow? { peakingShow ?? isPeakingEnabled.map { $0 ? .inMF : .off } }
 
     static let key = "settings"
 

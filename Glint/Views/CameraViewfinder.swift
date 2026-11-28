@@ -87,31 +87,25 @@ struct CameraViewfinder: View {
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: lockCount)
-        .overlay(alignment: .topLeading) {
+        .overlay(alignment: histogramAlignment) {
             if cam.aids.isHistogramEnabled {
-                // Reserve the rotated footprint so it stays inside the corner.
+                // On a top corner as you hold the phone, on the side away from the focus rail, and turned with
+                // the phone. Its rotated footprint is reserved so it stays inside the corner.
                 let size = HistogramView.size
+                let sideways = deviceAngle.isQuarterTurn
                 HistogramContainer(model: cam.aids.histogramModel)
                     .frame(width: size.width, height: size.height)
+                    .rotationEffect(deviceAngle)
+                    .frame(width: sideways ? size.height : size.width, height: sideways ? size.width : size.height)
                     .padding(8)
+                    .animation(.easeInOut(duration: 0.3), value: histogramAlignment)
                     .allowsHitTesting(false)
             }
         }
-        .overlay(alignment: railAlignment) {
-            // The focus rail stays on the viewfinder's edge, where the thumb reaches it while you look at the
-            // subject. It's there in AUTO too: exposure and focus are separate, as on a camera. Everything else
-            // is in the tool row below, off the picture. Held sideways, it moves to the edge that's now on your
-            // chosen side and turns with the phone, so ∞ is still up and the drag still runs up and down.
-            let sideways = deviceAngle.isQuarterTurn
-            focusControls
-                .frame(width: Self.railColumn.width, height: Self.railColumn.height)
-                .rotationEffect(deviceAngle)  // the running angle, so it turns the short way round
-                .frame(
-                    width: sideways ? Self.railColumn.height : Self.railColumn.width,
-                    height: sideways ? Self.railColumn.width : Self.railColumn.height
-                )
-                .animation(.easeInOut(duration: 0.3), value: railAlignment)
-                .shownWhenReady(cam.isCameraReady)
+        .overlay {
+            // Clipped to the picture, so the rail slides out from under the top bar or the tool row.
+            GeometryReader { geo in focusControls(in: geo.size) }
+                .clipped()
         }
         .overlay(alignment: .bottomLeading) {
             // Status and the dev-only timing readout (empty in release builds) sit over the preview, where
@@ -187,23 +181,43 @@ struct CameraViewfinder: View {
 
     // MARK: Focus rail
 
-    /// AF over the focus rail, laid out upright, before it's turned for landscape.
-    private static let railColumn = CGSize(width: 64, height: FocusRail.trackHeight + 116)
+    private static let railGap: CGFloat = 8
+    private static let railMargin: CGFloat = 8
+
+    private var histogramAlignment: Alignment {
+        DeviceAngle.topCorner(on: railSide.opposite, quarterTurns: DeviceAngle.quarterTurns(deviceAngle))
+    }
 
     /// Which edge of the picture is on the chosen side, the way the phone is held.
     private var railAlignment: Alignment {
         railSide.alignment(quarterTurns: DeviceAngle.quarterTurns(deviceAngle))
     }
 
-    /// AF on top of the focus rail. Turning AF off, or touching the rail, locks the lens where autofocus left it.
-    private var focusControls: some View {
-        VStack(spacing: 10) {
-            Chip(
-                "AF", label: "Autofocus", value: SettingsText.onOff(cam.isAutofocus),
-                isOn: cam.isAutofocus
-            ) { cam.setAutofocus(!cam.isAutofocus) }
-            LiveFocusRail(cam: cam)
+    /// The focus rail with the AF | MF switch at its foot, against the picture's edge and as long as the picture
+    /// allows. The rail stays on the edge where the thumb reaches it while you look at the subject. It's there in
+    /// AUTO too: exposure and focus are separate, as on a camera. Everything else is in the tool row below, off
+    /// the picture. Held sideways, it moves to the edge that's now on your chosen side and turns with the phone,
+    /// so ∞ is still up and the drag still runs up and down, along the picture's width instead of its height.
+    /// The rail is gone in autofocus but keeps its room, so the switch stays where the thumb found it.
+    private func focusControls(in picture: CGSize) -> some View {
+        let sideways = deviceAngle.isQuarterTurn
+        let length = (sideways ? picture.width : picture.height) - Self.railMargin * 2
+        let switchHeight = FocusModeSwitch.size(compact: sideways).height
+        let track = FocusRail.track(fitting: length - Self.railGap - switchHeight)
+        let column = CGSize(
+            width: FocusRail.touchWidth, height: FocusRail.height(track: track) + Self.railGap + switchHeight)
+        let edge: Alignment = railSide == .right ? .trailing : .leading
+        return VStack(alignment: railSide == .right ? .trailing : .leading, spacing: Self.railGap) {
+            LiveFocusRail(cam: cam, trackHeight: track, edge: edge)
+            FocusModeSwitch(
+                isAutofocus: cam.isAutofocus, onChange: { cam.setAutofocus($0) }, edge: edge, isCompact: sideways)
         }
-        .padding(.trailing, 8)
+        .accessibilityElement(children: .contain)
+        .frame(width: column.width, height: column.height)
+        .rotationEffect(deviceAngle)  // the running angle, so it turns the short way round
+        .frame(width: sideways ? column.height : column.width, height: sideways ? column.width : column.height)
+        .frame(width: picture.width, height: picture.height, alignment: railAlignment)
+        .animation(.easeInOut(duration: 0.3), value: railAlignment)
+        .shownWhenReady(cam.isCameraReady)
     }
 }
