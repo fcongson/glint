@@ -19,7 +19,7 @@ struct SavedSettingsTests {
             peakingSensitivity: .high, peakingAppearance: PeakingAppearance(color: .blue, lines: .fine),
             peakingMode: .sweep, isFocusAreasEnabled: true, isZebraEnabled: true, zebraLevel: .ninety,
             isMagnifierEnabled: false, flash: .auto, histogramStyle: .rgb,
-            isGridEnabled: true, isLevelEnabled: true)
+            isGridEnabled: true, isLevelEnabled: true, minShutter: .s250)
         settings.save(to: defaults)
         #expect(SavedSettings.load(from: defaults) == settings)
     }
@@ -33,7 +33,7 @@ struct SavedSettingsTests {
         #expect(loaded.manual == nil)
         #expect(
             loaded.flash == nil && loaded.histogramStyle == nil && loaded.isGridEnabled == nil
-                && loaded.isLevelEnabled == nil)
+                && loaded.isLevelEnabled == nil && loaded.minShutter == nil)
     }
 
     @Test func onlyExposureSettingsChangeTheExposure() {

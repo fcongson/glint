@@ -24,6 +24,7 @@ extension CaptureSession {
         focusHeld = false  // the modes set here replace a long press's hold
         exposureHeld = false
         exposureQueue.reset()  // superseded by what's set here
+        minShutter.isRelaxed = false
         let whiteBalance = ManualWhiteBalance(kelvin: kelvin, tint: wbTint, keep: keepWhiteBalance)
         withLockedDevice(d, failure: "Config") { d in
             if let seeded = DeviceControl.applyModes(d, manual: manual, exposure: exposure, whiteBalance: whiteBalance)
@@ -32,6 +33,7 @@ extension CaptureSession {
                 emit.yield(.exposure(.whiteBalanceSeeded(kelvin: seeded.kelvin)))
             }
             applyFocus(d, lockedAt: manualFocus)
+            applyMinimumShutter(d)
         }
     }
 
@@ -85,6 +87,7 @@ extension CaptureSession {
     /// Called with each meter reading. In shutter or ISO priority, nudges the setting on auto toward the
     /// (compensated) target; in any partly-auto manual mode, reports what the camera is using for the readouts.
     func followAuto(offset: Float) {
+        relaxMinimumShutterIfNeeded(offset: offset)
         guard isManual, autoSettings.usesCompensation, !exposureFrozen, !exposureHeld, let d = device else { return }
         let auto = autoSettings
         if auto.isPriority, d.exposureMode == .custom {
@@ -98,7 +101,7 @@ extension CaptureSession {
             } else if auto.shutter,
                 let next = PriorityExposure.nextDuration(
                     current: d.exposureDuration.seconds, offset: offset,
-                    min: format.minExposureDuration.seconds, max: format.maxExposureDuration.seconds)
+                    min: format.minExposureDuration.seconds, max: shutterCeiling(d))
             {
                 requestExposure(
                     duration: CMTime(seconds: next, preferredTimescale: 1_000_000),
@@ -107,6 +110,61 @@ extension CaptureSession {
         }
         let shutterSeconds = auto.shutter ? d.exposureDuration.seconds : nil
         emit.yield(.exposure(.autoValues(iso: auto.iso ? d.iso : nil, shutterSeconds: shutterSeconds)))
+    }
+
+    // MARK: Minimum shutter
+
+    private var shutterEnforcer: MinimumShutter.Enforcer {
+        MinimumShutter.enforcer(isVideo: isVideo, isManual: isManual, auto: autoSettings)
+    }
+
+    /// The longest exposure in seconds the minimum shutter allows on this lens and format.
+    func shutterCeiling(_ d: AVCaptureDevice) -> Double {
+        MinimumShutter.ceiling(
+            minShutter.setting, focalLength: MinimumShutter.focalLength(fieldOfView: d.activeFormat.videoFieldOfView),
+            formatMin: d.activeFormat.minExposureDuration.seconds,
+            formatMax: d.activeFormat.maxExposureDuration.seconds,
+            relaxed: minShutter.isRelaxed)
+    }
+
+    /// What `activeMaxExposureDuration` should be: the ceiling where the device's own auto exposure chooses the
+    /// shutter (AUTO and program); the default otherwise. ISO priority is Glint's own loop (`followAuto`).
+    private func deviceShutterCeiling(_ d: AVCaptureDevice) -> Double? {
+        shutterEnforcer == .device ? shutterCeiling(d) : nil
+    }
+
+    /// The device must already be locked. `afresh` forgets that ISO had run out: a new lens starts over.
+    func applyMinimumShutter(_ d: AVCaptureDevice, afresh: Bool = false) {
+        if afresh { minShutter.isRelaxed = false }
+        DeviceControl.applyShutterCeiling(d, seconds: deviceShutterCeiling(d))
+    }
+
+    /// After a reconfiguration, which may have reset it: locks the device only if it needs setting.
+    func reapplyMinimumShutter(_ d: AVCaptureDevice) {
+        guard DeviceControl.needsShutterCeiling(d, seconds: deviceShutterCeiling(d)) else { return }
+        withLockedDevice(d, failure: "Config") { applyMinimumShutter($0) }
+    }
+
+    func setMinimumShutter(_ setting: MinShutterSetting) {
+        minShutter = MinimumShutter.State(setting: setting)
+        guard let d = device else { return }
+        reapplyMinimumShutter(d)
+    }
+
+    /// The minimum gives way when ISO is at its maximum and the picture is still dark, and returns when it can.
+    private func relaxMinimumShutterIfNeeded(offset: Float) {
+        guard let d = device, shutterEnforcer != .nobody, !exposureHeld, !exposureFrozen else { return }
+        let limit = MinimumShutter.ceiling(
+            minShutter.setting, focalLength: MinimumShutter.focalLength(fieldOfView: d.activeFormat.videoFieldOfView),
+            formatMin: d.activeFormat.minExposureDuration.seconds,
+            formatMax: d.activeFormat.maxExposureDuration.seconds, relaxed: false)
+        let reading = MinimumShutter.Reading(
+            iso: d.iso, maxISO: d.activeFormat.maxISO, duration: d.exposureDuration.seconds, limit: limit,
+            offset: offset)
+        let relaxed = MinimumShutter.isRelaxed(wasRelaxed: minShutter.isRelaxed, reading)
+        guard relaxed != minShutter.isRelaxed else { return }
+        minShutter.isRelaxed = relaxed
+        reapplyMinimumShutter(d)
     }
 
     func reportAutoWhiteBalance(_ kelvin: Float) {

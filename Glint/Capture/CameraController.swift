@@ -42,9 +42,8 @@ final class CameraController {
     private(set) var aperture: Float = 0
     private(set) var whiteBalanceKelvin: Float = 5500
     private(set) var isGridEnabled = false  // rule-of-thirds lines over the picture
-    private(set) var isLevelEnabled = false  // the horizon level over the picture
-    let levelModel = LevelModel()
-    @ObservationIgnored private lazy var levelSensor = LevelSensor { [weak self] in self?.levelChanged($0) }
+    let minShutter = MinShutterModel()  // the slowest shutter the camera may choose for itself
+    let levelModel = LevelModel()  // the horizon level over the picture, and the gravity it reads
     private(set) var flash = FlashSetting.off  // stills
     private(set) var isVideoLightOn = false  // the same LED, steady, in VIDEO; not remembered between launches
     private(set) var hasFlash = false  // whether the current lens has them
@@ -112,6 +111,8 @@ final class CameraController {
         aids = ViewfinderAidsModel(isGPUAvailable: renderer != nil)
         if let saved = settingsSync.loadAtStart() { restore(saved) }
         aids.analysisChanged = { [weak self] in self?.sendAnalysis() }
+        minShutter.apply = { [capture] setting in capture.enqueue { $0.setMinimumShutter(setting) } }
+        levelModel.onLevel = { [narrator] in narrator.levelChanged($0) }
     }
 
     // MARK: Saved settings
@@ -127,7 +128,8 @@ final class CameraController {
             peakingAppearance: aids.peakingAppearance, peakingMode: aids.peakingMode,
             isFocusAreasEnabled: aids.isFocusAreasEnabled, isZebraEnabled: aids.isZebraEnabled,
             zebraLevel: aids.zebraLevel, isMagnifierEnabled: aids.isMagnifierEnabled, flash: flash,
-            histogramStyle: aids.histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: isLevelEnabled)
+            histogramStyle: aids.histogramStyle, isGridEnabled: isGridEnabled, isLevelEnabled: levelModel.isEnabled,
+            minShutter: minShutter.setting)
     }
 
     /// The other copy of Glint (the app, or the Lock Screen camera) may have changed settings while this one was
@@ -150,6 +152,7 @@ final class CameraController {
         values.videoFormat = nil
         restore(values)
         if exposureChanged { sendExposureMode(keepWhiteBalance: hasManualWhiteBalance) }
+        minShutter.send()
         sendAnalysis()
         updateLevelSensor()
 
@@ -180,13 +183,15 @@ final class CameraController {
         aids.restore(saved)
         flash = saved.flash ?? flash
         isGridEnabled = saved.isGridEnabled ?? isGridEnabled
-        isLevelEnabled = saved.isLevelEnabled ?? isLevelEnabled
+        levelModel.isEnabled = saved.isLevelEnabled ?? levelModel.isEnabled
+        minShutter.restore(saved)
     }
 
     /// Once the camera is running: the session starts in PHOTO with auto exposure and no analysis, so send what was
     /// restored. VIDEO goes through the usual switch, which asks for the microphone if it hasn't been yet.
     private func applySavedSettingsToCamera() {
         if manual { sendExposureMode(keepWhiteBalance: hasManualWhiteBalance) }
+        minShutter.send()
         sendAnalysis()
         updateLevelSensor()
         voiceOverChanged(UIAccessibility.isVoiceOverRunning)
@@ -531,21 +536,15 @@ final class CameraController {
     func setGridEnabled(_ on: Bool) { isGridEnabled = on }
 
     func setLevelEnabled(_ on: Bool) {
-        guard on != isLevelEnabled else { return }
-        isLevelEnabled = on
-        if !on { levelModel.show(nil) }
+        guard on != levelModel.isEnabled else { return }
+        levelModel.setEnabled(on)
         updateLevelSensor()
     }
 
     /// Gravity is read only while the level is on screen or VoiceOver is describing the picture, and never
     /// behind the review screen.
     private func updateLevelSensor() {
-        levelSensor.setRunning((isLevelEnabled || narrator.isOn) && isCameraReady && !isReviewing)
-    }
-
-    private func levelChanged(_ level: Level?) {
-        if isLevelEnabled { levelModel.show(level) }
-        if let level { narrator.levelChanged(level) }
+        levelModel.setSensing((levelModel.isEnabled || narrator.isOn) && isCameraReady && !isReviewing)
     }
 
     // MARK: Flash and light

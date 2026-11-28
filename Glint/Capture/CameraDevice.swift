@@ -19,6 +19,9 @@ protocol CameraDevice: AnyObject {
     var maxISO: Float { get }
     var minExposureDuration: CMTime { get }
     var maxExposureDuration: CMTime { get }
+    /// The longest exposure auto exposure may choose; `.invalid` is no limit. Reset by AVFoundation when the lens or
+    /// the format changes.
+    var activeMaxExposureDuration: CMTime { get set }
 
     var whiteBalanceMode: AVCaptureDevice.WhiteBalanceMode { get set }
     func isWhiteBalanceModeSupported(_ mode: AVCaptureDevice.WhiteBalanceMode) -> Bool

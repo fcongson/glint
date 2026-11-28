@@ -43,6 +43,23 @@ struct Level: Equatable, Sendable {
 @Observable
 final class LevelModel {
     private(set) var level: Level?
+    var isEnabled = false  // shown over the picture; set by SET
+    /// Hears every reading, shown or not, for VoiceOver's description of the picture.
+    @ObservationIgnored var onLevel: ((Level) -> Void)?
+    @ObservationIgnored private lazy var sensor = LevelSensor { [weak self] in self?.sensed($0) }
+
+    func setEnabled(_ on: Bool) {
+        isEnabled = on
+        if !on { show(nil) }
+    }
+
+    /// Gravity is read only while something wants it.
+    func setSensing(_ on: Bool) { sensor.setRunning(on) }
+
+    private func sensed(_ level: Level?) {
+        if isEnabled { show(level) }
+        if let level { onLevel?(level) }
+    }
 
     /// Changes too small to see are dropped, so a phone on a tripod redraws nothing.
     func show(_ new: Level?) {

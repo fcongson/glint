@@ -24,6 +24,7 @@ final class FakeCameraDevice: CameraDevice {
     var maxISO: Float = 3200
     var minExposureDuration = CMTime(value: 1, timescale: 8000)
     var maxExposureDuration = CMTime(value: 1, timescale: 2)
+    var activeMaxExposureDuration = CMTime.invalid
     /// The last custom exposure set, if any.
     var customExposure: (duration: CMTime, iso: Float)?
 

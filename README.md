@@ -15,6 +15,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **Manual focus:** a rail down the side of the viewfinder runs from NEAR to ∞, with an AF switch above it. Touching the rail takes over from where autofocus left the lens.
 - **AE/AF lock:** touch and hold the viewfinder to focus and meter once and hold both; a tap releases it.
 - **Lenses:** all rear lenses, labelled by zoom factor, with a read-only aperture readout.
+- **Minimum shutter:** MIN SHUTTER in SET (PHOTO) is the slowest shutter speed the camera may choose for itself, in AUTO, program and ISO priority. Auto (default) is 1/(2 × the lens's 35 mm focal length), on the nearest standard speed: about 1/50 on 1×, 1/125 on 2.5×, 1/160 on 3×. Faster is one stop quicker, or choose 1/30 to 1/500. The camera raises ISO first and only goes slower when ISO is already at its maximum and the picture is still dark. A shutter speed you set by hand, and VIDEO, are never limited.
 - **Flash and light:** FLASH in SET is Off (default), Auto or On for stills; LIGHT in VIDEO turns the same LED on as a steady light.
 - **Hardware buttons:** either volume button, and Camera Control where there is one, works as the capture button (iOS 17.2 and later).
 - **Lock Screen:** a Lock Screen, Control Centre or Action button control opens Glint's camera without unlocking (iOS 18 and later). Photos and video go to Photos at once; the Documents copies are moved in the next time the app opens. There are no location tags there, and permissions have to be granted in the app first.

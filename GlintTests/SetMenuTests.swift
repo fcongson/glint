@@ -10,7 +10,7 @@ struct SetMenuTests {
 
     @Test func photoShowsThePhotoFormatAndNotTheVideoFormat() {
         let shown = rows(in: .photo)
-        #expect(shown.filter { $0.section == .photo } == [.fileType, .aspect, .flash])
+        #expect(shown.filter { $0.section == .photo } == [.fileType, .aspect, .flash, .minShutter])
         #expect(!shown.contains { $0.section == .video })
     }
 

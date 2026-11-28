@@ -4,7 +4,7 @@ import Foundation
 /// is `SetMenu`.
 extension SetMenu {
     enum Tile: CaseIterable {
-        case fileType, aspect, flash, resolution, frameRate, codec, encoding, recordingExposure, light
+        case fileType, aspect, flash, minShutter, resolution, frameRate, codec, encoding, recordingExposure, light
         case peakingMode, sensitivity, colour, lines, histogram, zebras, focusAreas, grid, level, railSide, debugInfo
 
         /// The row's label, under its section's heading.
@@ -26,6 +26,7 @@ extension SetMenu {
             case .recordingExposure: "REC EXPOSURE"  // exposure while recording; the full name doesn't fit the column
             case .debugInfo: "DEBUG INFO"
             case .flash: "FLASH"
+            case .minShutter: "MIN SHUTTER"
             case .light: "LIGHT"
             case .histogram: "HISTOGRAM"
             case .grid: "GRID"
@@ -37,7 +38,7 @@ extension SetMenu {
             switch self {
             case .peakingMode, .sensitivity, .colour, .lines: .peaking
             case .histogram, .zebras, .focusAreas, .grid, .level, .railSide: .viewfinder
-            case .fileType, .aspect, .flash: .photo
+            case .fileType, .aspect, .flash, .minShutter: .photo
             case .resolution, .frameRate, .codec, .encoding, .recordingExposure, .light: .video
             case .debugInfo: .developer
             }
@@ -62,6 +63,7 @@ extension SetMenu {
             case .recordingExposure: "Exposure while recording"
             case .debugInfo: "Debug info"
             case .flash: "Flash"
+            case .minShutter: "Minimum shutter speed"
             case .light: "Video light"
             case .histogram: "Histogram"
             case .grid: "Grid"

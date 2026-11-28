@@ -35,12 +35,13 @@ actor CaptureSession {
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var rotationObservation: NSKeyValueObservation?
     private var subjectAreaObserver: (any NSObjectProtocol)?
-    private var deviceObservations: [NSKeyValueObservation] = []  // meter and lens position, for the active device
+    var deviceObservations: [NSKeyValueObservation] = []  // meter and lens position, for the active device
     var manualFocusPosition: Float?  // nil while autofocus is in charge
     var isManual = false  // the AUTO | MANUAL switch, as last applied
     var autoSettings = AutoSettings()  // which manual settings the camera chooses (as applied, see `effective`)
     var isVideo = false  // PHOTO · VIDEO: video uses a video device format
     var videoFormat = VideoFormat()
+    var minShutter = MinimumShutter.State()  // SET's MIN SHUTTER, and whether ISO has run out under it
     var exposureFrozen = false  // video's "exposure while recording: locked"
     var exposureQueue = ExposureQueue()  // custom exposure changes go one at a time; see `requestExposure`
     var audioMeterTask: Task<Void, Never>?
@@ -229,6 +230,7 @@ actor CaptureSession {
         // pointless and can be slow, since it sets up the app's audio session.
         if micInput != nil { try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true) }
         if let d = device { analyzer.setWhiteKey(whiteKey(for: d)) }  // the format may have changed
+        if let d = device { reapplyMinimumShutter(d) }  // and what the device forgot with it
         // The analysis output's connection and the tone mapping are set by whoever reconfigured: in the configuration
         // for the connection, and once in `applyDeviceSettings` for the device. Touching either right after a commit
         // waits for the new pipeline (measured 0.1–0.25 s each on a lens switch), so it's done once, not twice.
@@ -265,6 +267,7 @@ actor CaptureSession {
                 d.isGeometricDistortionCorrectionEnabled = false
             }
             applyToneMapping(d)
+            applyMinimumShutter(d, afresh: true)  // a new lens or format forgets it
         }
         setConnections()  // a new lens or format rebuilds them; already done if set inside the configuration
         analyzer.setWhiteKey(whiteKey(for: d))
@@ -278,32 +281,6 @@ actor CaptureSession {
         return DeviceInfo(
             lensID: d.uniqueID, minISO: d.activeFormat.minISO, maxISO: d.activeFormat.maxISO,
             aperture: d.lensAperture, hasFlash: d.hasFlash, hasTorch: d.hasTorch)
-    }
-
-    /// Reports the exposure offset (for the meter) and the lens position (for the focus rail) as they change,
-    /// throttled so a moving scene doesn't flood the main actor. Replaces the previous lens's observers.
-    private func observeMeterAndLens(_ d: AVCaptureDevice) {
-        // Each meter reading also drives shutter/ISO priority and refreshes the auto readouts.
-        let meter = Throttled(interval: 0.1, minChange: 0.05) { [emit, weak self] offset in
-            emit.yield(.exposure(.offset(offset)))
-            guard let self else { return }
-            Task { await self.followAuto(offset: offset) }
-        }
-        let lens = Throttled(interval: 0.1, minChange: 0.005) { [emit] in emit.yield(.focus(.lensPosition($0))) }
-        let temperature = Throttled(interval: 0.25, minChange: 50) { [weak self] kelvin in
-            guard let self else { return }
-            Task { await self.reportAutoWhiteBalance(kelvin) }
-        }
-        deviceObservations = [
-            d.observe(\.exposureTargetOffset, options: [.initial, .new]) { d, _ in meter.send(d.exposureTargetOffset) },
-            d.observe(\.lensPosition, options: [.initial, .new]) { d, _ in lens.send(d.lensPosition) },
-            d.observe(\.deviceWhiteBalanceGains, options: [.new]) { d, _ in
-                temperature.send(d.temperatureAndTintValues(for: d.deviceWhiteBalanceGains).temperature)
-            },
-            d.observe(\.systemPressureState, options: [.initial, .new]) { [emit] d, _ in
-                emit.yield(.session(.systemPressure(SystemPressure(d.systemPressureState.level))))
-            },
-        ]
     }
 
     // MARK: System pressure
