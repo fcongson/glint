@@ -12,7 +12,7 @@ A raw-first iPhone camera. It captures Bayer RAW (DNG) stills with no multi-fram
 - **RAW (DNG) stills:** Bayer RAW, not Apple ProRAW, with no multi-frame fusion. FILE in SET chooses RAW (the default), HEIC or RAW+HEIC; ASPECT chooses 4:3, 3:2, 1:1 or 16:9. A DNG always keeps the full sensor; the crop is applied to the HEIC.
 - **Neutral HEIC:** developed from the RAW with noise reduction, sharpening, contrast, detail, moire and boost off, so it matches the DNG. If developing fails the DNG is kept; if Bayer RAW isn't available the camera's own HEIC is saved (fusion off).
 - **AUTO | MANUAL:** in MANUAL, ISO, shutter and white balance are set on a camera-style ruler in 1/3-stop steps. The A at the end of the ruler hands one setting back to the camera, giving shutter priority, ISO priority or program; the ruler then sets exposure compensation.
-- **Manual focus:** a rail down the side of the viewfinder runs from NEAR to ∞, with an AF | MF switch below it. The rail only shows in MF (it slides away in autofocus), and touching it takes over from where autofocus left the lens.
+- **Manual focus:** a rail down the side of the viewfinder runs from the lens's closest focus (in cm, or MIN where the phone doesn't say) to ∞, with an AF | MF switch below it. The rail only shows in MF (it slides away in autofocus), and touching it takes over from where autofocus left the lens.
 - **AE/AF lock:** touch and hold the viewfinder to focus and meter once and hold both; a tap releases it.
 - **Lenses:** all rear lenses, labelled by zoom factor, with a read-only aperture readout.
 - **Flash and light:** FLASH in SET is Off (default), Auto or On for stills; LIGHT in VIDEO turns the same LED on as a steady light.

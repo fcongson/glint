@@ -78,9 +78,24 @@ struct FocusPresetTests {
         #expect(SettingsText.focusPosition(FocusPreset.nearest.position) == "Nearest")
     }
 
-    @Test func labelledAsOnTheRailAndNamedForVoiceOver() {
-        #expect(FocusPreset.allCases.map(\.title) == ["∞", "NEAR"])
-        #expect(FocusPreset.allCases.map(\.name) == ["Focus at infinity", "Focus at nearest"])
+    @Test(arguments: [(120, "12cm"), (95, "10cm"), (400, "40cm"), (1000, "1.0m"), (1500, "1.5m")])
+    func theNearEndShowsTheLensesClosestFocus(millimetres: Int, shown: String) {
+        #expect(FocusPreset.nearest.title(nearestMillimetres: millimetres) == shown)
+    }
+
+    @Test func anUnknownDistanceIsMIN() {
+        #expect(FocusPreset.nearest.title(nearestMillimetres: nil) == "MIN")
+    }
+
+    @Test func infinityIsTheSameWhateverTheLens() {
+        #expect(FocusPreset.infinity.title(nearestMillimetres: 120) == "∞")
+        #expect(FocusPreset.infinity.name(nearestMillimetres: nil) == "Focus at infinity")
+    }
+
+    @Test func voiceOverHearsTheDistanceInWords() {
+        #expect(FocusPreset.nearest.name(nearestMillimetres: 120) == "Focus at nearest, 12 centimetres")
+        #expect(FocusPreset.nearest.name(nearestMillimetres: 1500) == "Focus at nearest, 1.5 metres")
+        #expect(FocusPreset.nearest.name(nearestMillimetres: nil) == "Focus at nearest")
     }
 }
 

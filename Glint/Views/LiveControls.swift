@@ -30,7 +30,9 @@ struct LiveFocusRail: View {
         ZStack {
             if isPresent {
                 FocusRail(
-                    position: cam.lensPosition, isAutofocus: cam.isAutofocus, onChange: { cam.setLensPosition($0) },
+                    position: cam.lensPosition, isAutofocus: cam.isAutofocus,
+                    nearestMillimetres: cam.lenses.first { $0.id == cam.currentLensID }?.nearestMillimetres,
+                    onChange: { cam.setLensPosition($0) },
                     edge: edge, isHidden: isSlid, onTouch: { cam.aids.focusRailTouched($0) }
                 )
                 .opacity(isSlid ? 0 : 1)

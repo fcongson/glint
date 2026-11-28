@@ -51,19 +51,31 @@ enum FocusPreset: CaseIterable, Sendable {
         }
     }
 
-    /// On the rail.
-    var title: String {
+    /// On the rail. The near end shows the lens's closest focus, or MIN where the device doesn't say.
+    func title(nearestMillimetres: Int?) -> String {
         switch self {
         case .infinity: "∞"
-        case .nearest: "NEAR"
+        case .nearest: Self.distance(nearestMillimetres, short: true) ?? "MIN"
         }
     }
 
     /// For VoiceOver.
-    var name: String {
+    func name(nearestMillimetres: Int?) -> String {
         switch self {
         case .infinity: "Focus at infinity"
-        case .nearest: "Focus at nearest"
+        case .nearest:
+            Self.distance(nearestMillimetres, short: false).map { "Focus at nearest, \($0)" } ?? "Focus at nearest"
         }
+    }
+
+    /// "12cm" on the rail or "12 centimetres" spoken; metres from a metre out.
+    private static func distance(_ millimetres: Int?, short: Bool) -> String? {
+        guard let millimetres else { return nil }
+        if millimetres < 1000 {
+            let cm = Int((Double(millimetres) / 10).rounded())
+            return short ? "\(cm)cm" : "\(cm) centimetres"
+        }
+        let metres = String(format: "%.1f", Double(millimetres) / 1000)
+        return short ? "\(metres)m" : "\(metres) metres"
     }
 }

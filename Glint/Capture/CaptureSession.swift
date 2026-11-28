@@ -118,7 +118,7 @@ actor CaptureSession {
             .map {
                 Lens(
                     id: $0.uniqueID, fieldOfView: $0.activeFormat.videoFieldOfView,
-                    mainFieldOfView: wide.activeFormat.videoFieldOfView)
+                    mainFieldOfView: wide.activeFormat.videoFieldOfView, minimumFocusDistance: $0.minimumFocusDistance)
             }
             .sorted { $0.zoom < $1.zoom }
 

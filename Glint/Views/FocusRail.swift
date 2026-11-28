@@ -9,6 +9,8 @@ import SwiftUI
 struct FocusRail: View {
     let position: Float  // 0 nearest … 1 farthest
     let isAutofocus: Bool
+    /// How close the current lens focuses, for the near label.
+    var nearestMillimetres: Int?
     let onChange: (Float) -> Void
     /// The side against the picture's edge, which the drawn rail hugs inside its wider touch area.
     var edge: Alignment = .trailing
@@ -76,7 +78,7 @@ struct FocusRail: View {
             onChange(preset.position)
             onTouch(false)
         } label: {
-            Text(preset.title)
+            Text(preset.title(nearestMillimetres: nearestMillimetres))
                 .glintFont(size: size, weight: .semibold)
                 .fixedSize()
                 .opacity(fade)
@@ -85,7 +87,7 @@ struct FocusRail: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(preset.name)
+        .accessibilityLabel(preset.name(nearestMillimetres: nearestMillimetres))
         .accessibilityHint("Turns autofocus off.")
         .accessibilityHidden(isHidden)
     }
