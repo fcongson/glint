@@ -8,23 +8,14 @@ struct FocusModeSwitch: View {
     /// The side against the picture's edge, which stays square.
     var edge: Alignment = .trailing
 
-    static let size = CGSize(width: 30, height: 108)
-    private let knobInset: CGFloat = 4
-
-    /// The track, or with `inset` the knob inside it: concentric with the track, so the gap is even all round.
-    private func shape(inset: CGFloat = 0) -> UnevenRoundedRectangle {
-        let round = Self.size.width / 2 - inset
-        let atTrailing = edge == .trailing
-        return UnevenRoundedRectangle(
-            topLeadingRadius: atTrailing ? round : 0, bottomLeadingRadius: atTrailing ? round : 0,
-            bottomTrailingRadius: atTrailing ? 0 : round, topTrailingRadius: atTrailing ? 0 : round)
-    }
+    static let size = CGSize(width: FocusRail.drawnWidth, height: 108)
+    private let knobInset = FocusRail.thumbInset
 
     var body: some View {
         ZStack {
-            shape().fill(Color.black.opacity(0.45))
-            shape().strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
-            shape(inset: knobInset)
+            FocusRail.trackShape(edge: edge).fill(Color.black.opacity(0.45))
+            FocusRail.trackShape(edge: edge).strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+            FocusRail.trackShape(edge: edge, inset: knobInset)
                 .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
                 .frame(width: Self.size.width - knobInset * 2, height: Self.size.height / 2 - knobInset * 2)
                 .offset(y: (isAutofocus ? -1 : 1) * Self.size.height / 4)
@@ -34,7 +25,7 @@ struct FocusModeSwitch: View {
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .contentShape(shape())
+        .contentShape(FocusRail.trackShape(edge: edge))
         .gesture(
             DragGesture(minimumDistance: 0).onEnded { g in
                 if abs(g.translation.height) > 12 {

@@ -28,9 +28,21 @@ struct FocusRail: View {
     /// Drawn narrow, so it covers little of the picture, with a touch area wide enough for a thumb.
     static let drawnWidth: CGFloat = 30
     static let touchWidth: CGFloat = 44
+    /// The gap between the track's edge and the thumb, or the switch's knob.
+    static let thumbInset: CGFloat = 4
     private var width: CGFloat { Self.touchWidth }
     private let inset: CGFloat = 16  // keeps the thumb inside the rounded ends
     private var travel: CGFloat { Self.trackHeight - inset * 2 }
+
+    /// The drawn track here and in the AF | MF switch: round on the side toward the picture, square against its edge.
+    /// With `inset`, the shape of a thumb or knob inside it, concentric so the gap is even all round.
+    static func trackShape(edge: Alignment, inset: CGFloat = 0) -> UnevenRoundedRectangle {
+        let round = drawnWidth / 2 - inset
+        let atTrailing = edge == .trailing
+        return UnevenRoundedRectangle(
+            topLeadingRadius: atTrailing ? round : 0, bottomLeadingRadius: atTrailing ? round : 0,
+            bottomTrailingRadius: atTrailing ? 0 : round, topTrailingRadius: atTrailing ? 0 : round)
+    }
 
     private var isVisible: Bool { awake || voiceOver || dragStart != nil }
 
@@ -44,7 +56,10 @@ struct FocusRail: View {
             presetButton(.nearest, size: 10)
         }
         .background(alignment: edge) {
-            Capsule().fill(Color.black.opacity(0.45)).frame(width: Self.drawnWidth).opacity(fade)
+            Self.trackShape(edge: edge).fill(Color.black.opacity(0.45))
+                .overlay(Self.trackShape(edge: edge).strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                .frame(width: Self.drawnWidth)
+                .opacity(fade)
         }
         .foregroundStyle(Color.white)
         .shadow(color: .black.opacity(0.6), radius: 2)
@@ -132,9 +147,9 @@ struct FocusRail: View {
                     .frame(width: 12, height: 1)
                     .offset(y: y(for: t))
             }
-            Capsule()
+            Self.trackShape(edge: edge, inset: Self.thumbInset)
                 .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
-                .frame(width: 24, height: 20)
+                .frame(width: Self.drawnWidth - Self.thumbInset * 2, height: 20)
                 .offset(y: y(for: position) - 10)
                 .animation(dragStart == nil ? .easeOut(duration: 0.2) : nil, value: position)
         }
