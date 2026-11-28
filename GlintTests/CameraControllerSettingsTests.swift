@@ -65,6 +65,20 @@ struct CameraControllerSettingsTests {
         #expect(cam.isGridEnabled)
     }
 
+    @Test func theMinimumShutterStartsAtAutoAndIsRestoredAndSaved() async throws {
+        let defaults = try emptyDefaults()
+        #expect(CameraController(defaults: defaults).minShutter.setting == .auto)
+        SavedSettings(minShutter: .s125).save(to: defaults)
+        let cam = CameraController(defaults: defaults)
+        #expect(cam.minShutter.setting == .s125)
+
+        cam.settingsSync.saveDelay = .milliseconds(20)
+        cam.settingsSync.saveAsTheyChange()
+        cam.minShutter.set(.faster)
+        let saved = await eventually { SavedSettings.load(from: defaults)?.minShutter == .faster }
+        #expect(saved)
+    }
+
     @Test func withoutMetalSavedGPUAidsStayOff() throws {
         let defaults = try emptyDefaults()
         SavedSettings(isHistogramEnabled: true, isPeakingEnabled: true, isZebraEnabled: true).save(to: defaults)

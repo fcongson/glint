@@ -114,6 +114,11 @@ struct SetMenu: View {
                 selection: cam.flash.available(hasFlash: cam.hasFlash), onSelect: { cam.setFlash($0) },
                 spoken: { "Flash \($0.title.lowercased())" },
                 isAvailable: { $0 == .off || cam.hasFlash })
+        case .minShutter:
+            // How slow the camera may let the shutter go when it chooses it (AUTO, program, ISO priority).
+            SettingRow(
+                tile: tile, options: MinShutterSetting.allCases.map { (title: $0.title, value: $0) },
+                selection: cam.minShutter.setting, onSelect: { cam.minShutter.set($0) })
         default: EmptyView()
         }
     }
@@ -204,7 +209,7 @@ struct SetMenu: View {
                 selection: cam.isGridEnabled, onSelect: { cam.setGridEnabled($0) })
         case .level:
             SettingRow(
-                tile: tile, options: Self.offOn, selection: cam.isLevelEnabled,
+                tile: tile, options: Self.offOn, selection: cam.levelModel.isEnabled,
                 onSelect: { cam.setLevelEnabled($0) })
         case .railSide:
             SettingRow(

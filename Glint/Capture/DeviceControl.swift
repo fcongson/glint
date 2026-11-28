@@ -88,6 +88,28 @@ enum DeviceControl {
         if d.exposureTargetBias != clamped { d.setExposureTargetBias(clamped, completionHandler: nil) }
     }
 
+    /// The `activeMaxExposureDuration` for a ceiling in seconds, within the format's range (the device raises
+    /// otherwise); nil is no limit.
+    static func shutterCeilingTarget(_ d: some CameraDevice, seconds: Double?) -> CMTime {
+        guard let seconds else { return .invalid }
+        let want = CMTime(seconds: seconds, preferredTimescale: 1_000_000)
+        return CMTimeMaximum(d.minExposureDuration, CMTimeMinimum(d.maxExposureDuration, want))
+    }
+
+    /// Whether the device has something other than that ceiling, so it's worth locking it to set.
+    static func needsShutterCeiling(_ d: some CameraDevice, seconds: Double?) -> Bool {
+        let target = shutterCeilingTarget(d, seconds: seconds)
+        let current = d.activeMaxExposureDuration
+        return current.isValid != target.isValid || (target.isValid && CMTimeCompare(current, target) != 0)
+    }
+
+    /// Limits the longest exposure auto exposure may choose, or with nil puts back the default.
+    static func applyShutterCeiling(_ d: some CameraDevice, seconds: Double?) {
+        if needsShutterCeiling(d, seconds: seconds) {
+            d.activeMaxExposureDuration = shutterCeilingTarget(d, seconds: seconds)
+        }
+    }
+
     static func clampedDuration(_ d: some CameraDevice, _ denominator: Double) -> CMTime {
         let want = CMTime(seconds: 1.0 / denominator, preferredTimescale: 1_000_000)
         return CMTimeMaximum(d.minExposureDuration, CMTimeMinimum(d.maxExposureDuration, want))
