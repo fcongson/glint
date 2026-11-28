@@ -103,7 +103,9 @@ struct CameraViewfinder: View {
             }
         }
         .overlay {
+            // Clipped to the picture, so the rail slides out from under the top bar or the tool row.
             GeometryReader { geo in focusControls(in: geo.size) }
+                .clipped()
         }
         .overlay(alignment: .bottomLeading) {
             // Status and the dev-only timing readout (empty in release builds) sit over the preview, where

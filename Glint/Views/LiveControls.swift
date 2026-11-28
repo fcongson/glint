@@ -21,10 +21,10 @@ struct LiveFocusRail: View {
     var edge: Alignment = .trailing
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPresent = false  // in the view tree: from just before it slides in to just after it's gone
-    @State private var isSlid = true  // off its edge and faded
+    @State private var isSlid = true  // off its edge, or faded with Reduce Motion
 
-    /// Autofocus has no use for the rail, so it slides off its edge and fades; only the AF | MF switch changes
-    /// focus mode. Reduce Motion fades only. Once it has gone it's taken out of the view tree, so VoiceOver can't
+    /// Autofocus has no use for the rail, so it slides off its edge, under whatever is next to the picture;
+    /// only the AF | MF switch changes focus mode. Reduce Motion fades instead. Once it has gone it's taken out of the view tree, so VoiceOver can't
     /// land on it.
     var body: some View {
         let slide = (edge == .trailing ? 1.0 : -1.0) * FocusRail.touchWidth
@@ -37,7 +37,7 @@ struct LiveFocusRail: View {
                     onChange: { cam.setLensPosition($0) },
                     edge: edge, isHidden: isSlid, onTouch: { cam.aids.focusRailTouched($0) }
                 )
-                .opacity(isSlid ? 0 : 1)
+                .opacity(isSlid && reduceMotion ? 0 : 1)
                 .offset(x: isSlid && !reduceMotion ? slide : 0)
                 .allowsHitTesting(!isSlid)
                 .accessibilityHidden(isSlid)
