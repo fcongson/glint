@@ -11,8 +11,9 @@ struct FocusModeSwitch: View {
     static let size = CGSize(width: 30, height: 108)
     private let knobInset: CGFloat = 4
 
-    private var shape: UnevenRoundedRectangle {
-        let round = Self.size.width / 2
+    /// The track, or with `inset` the knob inside it: concentric with the track, so the gap is even all round.
+    private func shape(inset: CGFloat = 0) -> UnevenRoundedRectangle {
+        let round = Self.size.width / 2 - inset
         let atTrailing = edge == .trailing
         return UnevenRoundedRectangle(
             topLeadingRadius: atTrailing ? round : 0, bottomLeadingRadius: atTrailing ? round : 0,
@@ -21,15 +22,19 @@ struct FocusModeSwitch: View {
 
     var body: some View {
         ZStack {
-            shape.fill(Color.black.opacity(0.45))
-            shape.strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+            shape().fill(Color.black.opacity(0.45))
+            shape().strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+            shape(inset: knobInset)
+                .fill(isAutofocus ? Color.white.opacity(0.55) : Color.amber)
+                .frame(width: Self.size.width - knobInset * 2, height: Self.size.height / 2 - knobInset * 2)
+                .offset(y: (isAutofocus ? -1 : 1) * Self.size.height / 4)
             VStack(spacing: 0) {
                 label("AF", highlighted: isAutofocus)
                 label("MF", highlighted: !isAutofocus)
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .contentShape(shape)
+        .contentShape(shape())
         .gesture(
             DragGesture(minimumDistance: 0).onEnded { g in
                 if abs(g.translation.height) > 12 {
@@ -54,11 +59,6 @@ struct FocusModeSwitch: View {
         Text(text)
             .glintFont(size: 11, weight: .bold)
             .foregroundStyle(highlighted ? Color.black : Color.white.opacity(0.6))
-            .frame(width: Self.size.width - knobInset * 2, height: Self.size.height / 2 - knobInset)
-            .background(
-                highlighted ? (isAutofocus ? Color.white.opacity(0.55) : Color.amber) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 11)
-            )
             .frame(width: Self.size.width, height: Self.size.height / 2)
     }
 }
